@@ -190,3 +190,94 @@ def indir():
 
 
 
+# Arayüz oluşturma
+root = tk.Tk()
+root.title("Video Downloader")
+root.geometry("800x300")
+root.config(bg="#fbfbfb")
+
+frame = tk.Frame(root, bg="#fbfbfb")
+frame.pack(pady=30, padx=30)
+
+# İndirme seçenekleri
+secenek_var = tk.StringVar()
+secenekler = ["1080p", "720p", "Ses"]
+secenek_var.set(secenekler[0])
+
+# 'İndirme Seçeneği' yazısı
+indirme_secenegi_label = tk.Label(frame, text="İndirme Seçeneği:", font=("Arial", 12 , "bold"), bg="#fbfbfb", fg="#2e2e2e")
+indirme_secenegi_label.grid(row=0, column=0, padx=10, pady=5)
+
+# 'Video URL' yazısı
+video_url_label = tk.Label(frame, text="Video URL:", font=("Arial", 12 , "bold"), bg="#fbfbfb", fg="#2e2e2e")
+video_url_label.grid(row=0, column=2, padx=10, pady=5)
+
+# URL alanı
+url_entry = tk.Entry(frame, width=50)
+url_entry.grid(row=0, column=3, padx=10, pady=5)
+
+# Stil ayarı (Combobox için)
+style = ttk.Style()
+style.theme_use("default")
+
+# Combobox'u oluşturma
+secenek_menu = ttk.Combobox(frame, textvariable=secenek_var, values=secenekler, state="readonly", width=20)
+secenek_menu.grid(row=0, column=1, padx=10, pady=5)
+
+
+# İndir butonu
+indir_buton = tk.Button(root, text="⬇ İndir", command=indir, width=11, height=2,
+                        font=("Arial", 12, "bold"),
+                        fg="#fbfbfb", bg="#458bc6",
+                        relief="flat",
+                        activebackground="#3a688d",
+                        activeforeground="#fbfbfb",
+                        bd=0,
+                        highlightthickness=0)
+indir_buton.pack(pady=20)
+
+# ProgressBar
+progress_bar = ttk.Progressbar(root, mode="determinate", length=300)
+progress_label = tk.Label(root, text="İndirme Başlıyor...", bg="#fbfbfb", fg="#2e2e2e")
+
+
+# Koyu mod değişkeni
+dark_mode = False
+
+
+# Tema değiştirme fonksiyonu
+def toggle_theme():
+    global dark_mode
+    if dark_mode:
+        root.config(bg="#fbfbfb")
+        frame.config(bg="#fbfbfb")
+        theme_button.config(text="🌙", bg="#ddd", fg="black", activebackground="#bbb", activeforeground="black")
+
+        # Label renklerini açık moda uygun hale getir
+        indirme_secenegi_label.config(bg="#fbfbfb", fg="#2e2e2e")
+        video_url_label.config(bg="#fbfbfb", fg="#2e2e2e")
+        progress_label.config(bg="#fbfbfb", fg="#2e2e2e")
+
+    else:
+        root.config(bg="#2e2e2e")
+        frame.config(bg="#2e2e2e")
+        theme_button.config(text="☀", bg="#444", fg="white", activebackground="#666", activeforeground="white")
+
+        # Label renklerini koyu moda uygun hale getir (arkaplan siyah, yazı beyaz)
+        indirme_secenegi_label.config(bg="#2e2e2e", fg="white")
+        video_url_label.config(bg="#2e2e2e", fg="white")
+        progress_label.config(bg="#2e2e2e", fg="white")
+
+    dark_mode = not dark_mode
+
+# Koyu mod butonu
+theme_button = tk.Button(root, text="🌙", command=toggle_theme,
+                         font=("Arial", 12, "bold"),
+                         fg="black", bg="#ddd",
+                         relief="flat",
+                         activebackground="#bbb",
+                         activeforeground="black",
+                         bd=0, highlightthickness=0)
+theme_button.place(relx=1, rely=1, anchor="se", x=-10, y=-10)
+
+root.mainloop()
