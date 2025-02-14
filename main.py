@@ -78,13 +78,23 @@ def youtube_720p_video_indir(url, kayit_yeri):
     update_file_timestamp(os.path.join(kayit_yeri, output_filename))
 
 
-# 1080p video indirme
+#1080p video indirme
 def youtube_1080p_video_ses_indir(url, kayit_yeri):
+    # Kullanıcıya uyarı mesajı göster
+    response = messagebox.askyesno("Uyarı",
+                                   "1080p video ve ses dosyası ayrı olarak indirilip tek bir mp4(video) "
+                                   "dosya formatında birleştirilecektir.\n\nBu işlem yüksek düzeyde işlemci "
+                                   "kullanımına yol açabilir.\n\nEn hızlı deneyim için lütfen bu süreçte "
+                                   "bilgisayarınızda başka bir işlem gerçekleştirmemeye özen gösterin."
+                                   "\n\nDevam etmek istiyor musunuz?")
+
+    if not response:
+        return  # Kullanıcı iptal ettiyse fonksiyon çalışmasın
+
     with yt_dlp.YoutubeDL({"quiet": True}) as ydl:
         info = ydl.extract_info(url, download=False)
         video_title = info.get("title", "indirilen_video")
 
-    # Türkçe karakterleri temizle
     temiz_video_title = temizle_dosya_adi(video_title)
 
     video_filename = f"{temiz_video_title}_(Video).mp4"
@@ -102,36 +112,39 @@ def youtube_1080p_video_ses_indir(url, kayit_yeri):
         "progress_hooks": [progress_hook]
     }
 
+    # Video ve ses dosyaları indirilir
     with yt_dlp.YoutubeDL(ydl_opts_video) as ydl:
         ydl.download([url])
     with yt_dlp.YoutubeDL(ydl_opts_audio) as ydl:
         ydl.download([url])
 
-    update_file_timestamp(os.path.join(kayit_yeri, video_filename))
-    update_file_timestamp(os.path.join(kayit_yeri, audio_filename))
+        # İndirilen dosyaların zaman damgaları güncellenir.
+        update_file_timestamp(os.path.join(kayit_yeri, video_filename))
+        update_file_timestamp(os.path.join(kayit_yeri, audio_filename))
 
-    # Dosyanın indirildiğinden emin ol
-    while not os.path.exists(os.path.join(kayit_yeri, video_filename)):
-        time.sleep(1)
-    while not os.path.exists(os.path.join(kayit_yeri, audio_filename)):
-        time.sleep(1)
+        # Video ve ses dosyasının indirilmesi tamamlanana kadar beklenir.
+        while not os.path.exists(os.path.join(kayit_yeri, video_filename)):
+            time.sleep(1)
+        while not os.path.exists(os.path.join(kayit_yeri, audio_filename)):
+            time.sleep(1)
 
-    # Video ve ses dosyalarını birleştir
     try:
         video = VideoFileClip(os.path.join(kayit_yeri, video_filename))
         audio = AudioFileClip(os.path.join(kayit_yeri, audio_filename))
 
+        # Sesin süresini videoya göre ayarlama
         audio = audio.with_duration(video.duration)
+
+        # Video ve ses birleştirme
         video_with_audio = video.with_audio(audio)
 
         output_path = os.path.join(kayit_yeri, output_filename)
         video_with_audio.write_videofile(output_path, codec="libx264", audio_codec="aac")
 
-        # Eski video ve ses dosyalarını sil
+        # mp4 ve mp3 dosyalarını silme
         os.remove(os.path.join(kayit_yeri, video_filename))
         os.remove(os.path.join(kayit_yeri, audio_filename))
 
-        messagebox.showinfo("Başarılı", "Video ve ses başarıyla birleştirildi")
     except Exception as e:
         messagebox.showerror("Hata", f"Birleştirme hatası: {str(e)}")
 
