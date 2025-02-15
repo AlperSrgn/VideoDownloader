@@ -238,7 +238,7 @@ url_entry.grid(row=0, column=3, padx=10, pady=5)
 
 # Stil ayarı (Combobox için)
 style = ttk.Style()
-style.theme_use("default")
+style.configure("TCombobox", background="white", fieldbackground="white")
 
 # Combobox'u oluşturma
 secenek_menu = ttk.Combobox(frame, textvariable=secenek_var, values=secenekler, state="readonly", width=20)
