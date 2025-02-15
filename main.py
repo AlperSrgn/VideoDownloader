@@ -225,11 +225,11 @@ secenekler = ["1080p", "720p", "Ses"]
 secenek_var.set(secenekler[0])
 
 # 'İndirme Seçeneği' yazısı
-indirme_secenegi_label = tk.Label(frame, text="İndirme Seçeneği:", font=("Arial", 12 , "bold"), bg="#fbfbfb", fg="#2e2e2e")
+indirme_secenegi_label = tk.Label(frame, text="İndirme Seçeneği:", font=("Helvetica", 12 , ""), bg="#fbfbfb", fg="#2e2e2e")
 indirme_secenegi_label.grid(row=0, column=0, padx=10, pady=5)
 
 # 'Video URL' yazısı
-video_url_label = tk.Label(frame, text="Video URL:", font=("Arial", 12 , "bold"), bg="#fbfbfb", fg="#2e2e2e")
+video_url_label = tk.Label(frame, text="Video URL:", font=("Helvetica", 12 , ""), bg="#fbfbfb", fg="#2e2e2e")
 video_url_label.grid(row=0, column=2, padx=10, pady=5)
 
 # URL alanı
@@ -247,7 +247,7 @@ secenek_menu.grid(row=0, column=1, padx=10, pady=5)
 
 # İndir butonu
 indir_buton = tk.Button(root, text="⬇ İndir", command=indir, width=11, height=2,
-                        font=("Arial", 12, "bold"),
+                        font=("Helvetica", 12, "bold"),
                         fg="#fbfbfb", bg="#458bc6",
                         relief="flat",
                         activebackground="#3a688d",
@@ -272,7 +272,7 @@ def open_downloads_folder():
 
 # İndirilenler klasörünü açma butonu (Sol alt köşe)
 downloads_button = tk.Button(root, text="📁", command=open_downloads_folder,
-                             font=("Arial", 12, "bold"), fg="black", bg="#ddd",
+                             font=("Helvetica", 13, "bold"), fg="black", bg="#ddd",
                              relief="flat", activebackground="#bbb",
                              activeforeground="black", bd=0, highlightthickness=0)
 downloads_button.place(relx=0, rely=1, anchor="sw", x=10, y=-10)
@@ -288,6 +288,7 @@ def toggle_theme():
         root.config(bg="#fbfbfb")
         frame.config(bg="#fbfbfb")
         theme_button.config(text="🌙", bg="#ddd", fg="black", activebackground="#bbb", activeforeground="black")
+        downloads_button.config(bg="#ddd", fg="black", activebackground="#bbb", activeforeground="black")
 
         # Label renklerini açık moda uygun hale getir
         indirme_secenegi_label.config(bg="#fbfbfb", fg="#2e2e2e")
@@ -297,18 +298,19 @@ def toggle_theme():
     else:
         root.config(bg="#2e2e2e")
         frame.config(bg="#2e2e2e")
-        theme_button.config(text="☀", bg="#444", fg="white", activebackground="#666", activeforeground="white")
+        theme_button.config(text="☀", bg="#444", fg="white", activebackground="#666", activeforeground="#fbfbfb")
+        downloads_button.config(bg="#444", fg="white", activebackground="#666", activeforeground="#fbfbfb")
 
-        # Label renklerini koyu moda uygun hale getir (arkaplan siyah, yazı beyaz)
-        indirme_secenegi_label.config(bg="#2e2e2e", fg="white")
-        video_url_label.config(bg="#2e2e2e", fg="white")
-        progress_label.config(bg="#2e2e2e", fg="white")
+        # Label renklerini koyu moda uygun hale getir
+        indirme_secenegi_label.config(bg="#2e2e2e", fg="#fbfbfb")
+        video_url_label.config(bg="#2e2e2e", fg="#fbfbfb")
+        progress_label.config(bg="#2e2e2e", fg="#fbfbfb")
 
     dark_mode = not dark_mode
 
 # Koyu mod butonu
 theme_button = tk.Button(root, text="🌙", command=toggle_theme,
-                         font=("Arial", 12, "bold"),
+                         font=("Helvetica", 13, "bold"),
                          fg="black", bg="#ddd",
                          relief="flat",
                          activebackground="#bbb",
