@@ -41,7 +41,8 @@ def progress_hook(d):
             eta = d.get('_eta_str', '00:00:00')
             progress_bar['value'] = percent
             progress_label.config(
-                text=f"{percent:.1f}% of {total_size_mb:.2f}MiB in {eta} at {speed}/s"
+                text=f"{percent:.1f}% of {total_size_mb:.2f}MiB in {eta} at {speed}/s \n'Tamamlandı' mesajını "
+                     f"görene kadar lütfen bekleyin"
             )
             root.update_idletasks()
         except Exception as e:
