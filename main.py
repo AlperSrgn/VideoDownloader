@@ -1,4 +1,5 @@
 import re
+import webbrowser
 
 import unicodedata
 import yt_dlp
@@ -86,6 +87,7 @@ def youtube_1080p_video_ses_indir(url, kayit_yeri):
                                    "dosya formatında birleştirilecektir.\n\nBu işlem yüksek düzeyde işlemci "
                                    "kullanımına yol açabilir.\n\nEn hızlı deneyim için lütfen bu süreçte "
                                    "bilgisayarınızda başka bir işlem gerçekleştirmemeye özen gösterin."
+                                   "\n\n'Tamamlandı' mesajını görene kadar bu işlem devam edecektir."
                                    "\n\nDevam etmek istiyor musunuz?")
 
     if not response:
@@ -197,7 +199,7 @@ def indir():
                 youtube_ses_indir(url, kayit_yeri)
             elif secim == "1080p":
                 youtube_1080p_video_ses_indir(url, kayit_yeri)
-            messagebox.showinfo("Başarılı", "İndirme tamamlandı!")
+            messagebox.showinfo("Başarılı", "İşlem tamamlandı!")
         except Exception as e:
             messagebox.showerror("Hata", f"Bir hata oluştu:\n{str(e)}")
         finally:
@@ -259,9 +261,25 @@ progress_bar = ttk.Progressbar(root, mode="determinate", length=300)
 progress_label = tk.Label(root, text="İndirme Başlıyor...", bg="#fbfbfb", fg="#2e2e2e")
 
 
+# İndirilenler klasörünü açma fonksiyonu
+def open_downloads_folder():
+    downloads_path = os.path.expanduser("~/Downloads")
+    if os.name == "nt":  # Windows
+        os.startfile(downloads_path)
+    elif os.name == "posix":  # macOS & Linux
+        webbrowser.open(downloads_path)
+
+
+# İndirilenler klasörünü açma butonu (Sol alt köşe)
+downloads_button = tk.Button(root, text="📁", command=open_downloads_folder,
+                             font=("Arial", 12, "bold"), fg="black", bg="#ddd",
+                             relief="flat", activebackground="#bbb",
+                             activeforeground="black", bd=0, highlightthickness=0)
+downloads_button.place(relx=0, rely=1, anchor="sw", x=10, y=-10)
+
+
 # Koyu mod değişkeni
 dark_mode = False
-
 
 # Tema değiştirme fonksiyonu
 def toggle_theme():
