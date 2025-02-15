@@ -89,7 +89,7 @@ def youtube_1080p_video_ses_indir(url, kayit_yeri):
                                    "\n\nDevam etmek istiyor musunuz?")
 
     if not response:
-        return  # Kullanıcı iptal ettiyse fonksiyon çalışmasın
+        return  # Kullanıcı iptal ettiyse fonksiyon çalışmaz
 
     with yt_dlp.YoutubeDL({"quiet": True}) as ydl:
         info = ydl.extract_info(url, download=False)
@@ -140,6 +140,11 @@ def youtube_1080p_video_ses_indir(url, kayit_yeri):
 
         output_path = os.path.join(kayit_yeri, output_filename)
         video_with_audio.write_videofile(output_path, codec="libx264", audio_codec="aac")
+
+        # Video ve ses dosyalarının işlerini tamamladıktan sonra bellekten çıkartılması
+        video.close()
+        audio.close()
+        video_with_audio.close()
 
         # mp4 ve mp3 dosyalarını silme
         os.remove(os.path.join(kayit_yeri, video_filename))
