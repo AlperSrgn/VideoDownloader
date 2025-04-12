@@ -10,7 +10,15 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import threading
 import time
-from moviepy import VideoFileClip, AudioFileClip
+
+
+# ffmpeg path
+def get_ffmpeg_path():
+    # Proje dizinini al
+    project_dir = os.path.dirname(os.path.abspath(__file__))
+
+    # FFmpeg yolunu döndür
+    return os.path.join(project_dir, ".venv", "Lib", "site-packages", "imageio_ffmpeg", "binaries", "ffmpeg-win-x86_64-v7.1.exe")
 
 
 # Aynı isimde dosya inerse adını değiştirme
@@ -29,6 +37,7 @@ def update_file_timestamp(filepath):
     if os.path.exists(filepath):
         current_time = time.time()
         os.utime(filepath, (current_time, current_time))
+
 
 
 # ProgressBar indirme bilgileri
@@ -51,6 +60,7 @@ def progress_hook(d):
             print("Progress Hook Hatası:", str(e))
 
 
+
 # Türkçe karakterleri değiştirerek dosya adlarını temizleme
 def temizle_dosya_adi(dosya_adi):
     dosya_adi = dosya_adi.replace("ı", "i")  # 'ı' harflerini 'i' harfine çevir
@@ -62,6 +72,7 @@ def temizle_dosya_adi(dosya_adi):
 
 
 
+# 720p video ve ses indirme - birleştirme
 def youtube_720p_video_indir(url, kayit_yeri):
 
     with yt_dlp.YoutubeDL({"quiet": True}) as ydl:
@@ -107,13 +118,8 @@ def youtube_720p_video_indir(url, kayit_yeri):
         time.sleep(1)
 
     try:
-        # 🔧 Projedeki FFmpeg yolu
-        # Proje dizinini al
-        project_dir = os.path.dirname(os.path.abspath(__file__))
-
-        # ffmpeg yolunu ekle
-        ffmpeg_path = os.path.join(project_dir, ".venv", "Lib", "site-packages", "imageio_ffmpeg", "binaries",
-                                   "ffmpeg-win-x86_64-v7.1.exe")
+        # 🔧 FFmpeg yolu al
+        ffmpeg_path = get_ffmpeg_path()
 
         # FFmpeg komutu ile video ve ses birleştiriliyor
         ffmpeg_cmd = [
@@ -183,13 +189,8 @@ def youtube_1080p_video_indir(url, kayit_yeri):
         time.sleep(1)
 
     try:
-        # 🔧 Projedeki FFmpeg yolu
-        # Proje dizinini al
-        project_dir = os.path.dirname(os.path.abspath(__file__))
-
-        # ffmpeg yolunu ekle
-        ffmpeg_path = os.path.join(project_dir, ".venv", "Lib", "site-packages", "imageio_ffmpeg", "binaries",
-                                   "ffmpeg-win-x86_64-v7.1.exe")
+        # 🔧 FFmpeg yolu al
+        ffmpeg_path = get_ffmpeg_path()
 
         ffmpeg_cmd = [
             ffmpeg_path,
@@ -214,7 +215,7 @@ def youtube_1080p_video_indir(url, kayit_yeri):
 
 
 
-# 4K video indirme (video ve ses ayrı)
+# 4K video ve ses indirme - birleştirme
 def youtube_4k_video_indir(url, kayit_yeri):
 
     with yt_dlp.YoutubeDL({"quiet": True}) as ydl:
@@ -260,13 +261,8 @@ def youtube_4k_video_indir(url, kayit_yeri):
         time.sleep(1)
 
     try:
-        # 🔧 Projedeki FFmpeg yolu
-        # Proje dizinini al
-        project_dir = os.path.dirname(os.path.abspath(__file__))
-
-        # ffmpeg yolunu ekle
-        ffmpeg_path = os.path.join(project_dir, ".venv", "Lib", "site-packages", "imageio_ffmpeg", "binaries",
-                                   "ffmpeg-win-x86_64-v7.1.exe")
+        # 🔧 FFmpeg yolu al
+        ffmpeg_path = get_ffmpeg_path()
 
         # FFmpeg komutu ile video ve ses birleştiriliyor
         ffmpeg_cmd = [
