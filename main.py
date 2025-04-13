@@ -1,8 +1,8 @@
 import glob
 import re
 import subprocess
+import sys
 import webbrowser
-
 import unicodedata
 import yt_dlp
 import os
@@ -14,11 +14,15 @@ import time
 
 # ffmpeg path
 def get_ffmpeg_path():
-    # Proje dizinini al
-    project_dir = os.path.dirname(os.path.abspath(__file__))
+    # PyInstaller ile paketlenmişse ffmpeg dosyası geçici dizine çıkarılır
+    if getattr(sys, 'frozen', False):
+        # PyInstaller ile çalışıyorsa geçici dizine bak
+        return os.path.join(sys._MEIPASS, 'ffmpeg-win-x86_64-v7.1.exe')
+    else:
+        # Geliştirme ortamında çalışıyorsa proje dizinindeki ffmpeg'i al
+        project_dir = os.path.dirname(os.path.abspath(__file__))
+        return os.path.join(project_dir, ".venv", "Lib", "site-packages", "imageio_ffmpeg", "binaries", "ffmpeg-win-x86_64-v7.1.exe")
 
-    # FFmpeg yolunu döndür
-    return os.path.join(project_dir, ".venv", "Lib", "site-packages", "imageio_ffmpeg", "binaries", "ffmpeg-win-x86_64-v7.1.exe")
 
 
 # Aynı isimde dosya inerse adını değiştirme
@@ -30,6 +34,7 @@ def unique_filename(directory, filename):
         new_filename = f"{base} ({counter}){ext}"
         counter += 1
     return new_filename
+
 
 
 # Dosyanın indirilme tarihini güncelleme
@@ -102,10 +107,14 @@ def youtube_720p_video_indir(url, kayit_yeri):
     with yt_dlp.YoutubeDL(ydl_opts_audio) as ydl:
         ydl.download([url])
 
-    # İndirilen video ve ses dosyalarını bul
+    # Video ve ses dosyalarını bul
     video_path = glob.glob(f"{base_filename}_(Video).*")[0]
     audio_path = glob.glob(f"{base_filename}_(Ses).*")[0]
-    output_path = os.path.join(kayit_yeri, f"{temiz_video_title}.mp4")
+
+    # Final çıkış dosyası yolu
+    output_filename = f"{temiz_video_title}.mp4"
+    output_filename = unique_filename(kayit_yeri, output_filename)
+    output_path = os.path.join(kayit_yeri, output_filename)
 
     # Dosya zaman damgasını güncelle
     update_file_timestamp(video_path)
@@ -176,9 +185,14 @@ def youtube_1080p_video_indir(url, kayit_yeri):
     with yt_dlp.YoutubeDL(ydl_opts_audio) as ydl:
         ydl.download([url])
 
-    video_path = glob.glob(f"{base_filename}_(Video).*")[0]
-    audio_path = glob.glob(f"{base_filename}_(Ses).*")[0]
-    output_path = os.path.join(kayit_yeri, f"{temiz_video_title}.mp4")
+        # Video ve ses dosyalarını bul
+        video_path = glob.glob(f"{base_filename}_(Video).*")[0]
+        audio_path = glob.glob(f"{base_filename}_(Ses).*")[0]
+
+        # Final çıkış dosyası yolu
+        output_filename = f"{temiz_video_title}.mp4"
+        output_filename = unique_filename(kayit_yeri, output_filename)
+        output_path = os.path.join(kayit_yeri, output_filename)
 
     update_file_timestamp(video_path)
     update_file_timestamp(audio_path)
@@ -245,10 +259,14 @@ def youtube_4k_video_indir(url, kayit_yeri):
     with yt_dlp.YoutubeDL(ydl_opts_audio) as ydl:
         ydl.download([url])
 
-    # İndirilen video ve ses dosyalarını bul
-    video_path = glob.glob(f"{base_filename}_(Video).*")[0]
-    audio_path = glob.glob(f"{base_filename}_(Ses).*")[0]
-    output_path = os.path.join(kayit_yeri, f"{temiz_video_title}.mp4")
+        # Video ve ses dosyalarını bul
+        video_path = glob.glob(f"{base_filename}_(Video).*")[0]
+        audio_path = glob.glob(f"{base_filename}_(Ses).*")[0]
+
+        # Final çıkış dosyası yolu
+        output_filename = f"{temiz_video_title}.mp4"
+        output_filename = unique_filename(kayit_yeri, output_filename)
+        output_path = os.path.join(kayit_yeri, output_filename)
 
     # Dosya zaman damgasını güncelle
     update_file_timestamp(video_path)
@@ -336,7 +354,7 @@ def indir():
                 youtube_ses_indir(url, kayit_yeri)
             elif secim == "1080p":
                 youtube_1080p_video_indir(url, kayit_yeri)
-            elif secim == "4K":
+            elif secim == "2160p (4K)":
                 youtube_4k_video_indir(url, kayit_yeri)
             messagebox.showinfo("Başarılı", "İşlem tamamlandı!")
         except Exception as e:
@@ -360,14 +378,14 @@ frame.pack(pady=30, padx=30)
 
 # İndirme seçenekleri
 secenek_var = tk.StringVar()
-secenekler = ["4K","1080p", "720p", "Ses"]
+secenekler = ["2160p (4K)","1080p", "720p", "Ses"]
 secenek_var.set(secenekler[0])
 
-# 'İndirme Seçeneği' yazısı
-indirme_secenegi_label = tk.Label(frame, text="İndirme Seçeneği:", font=("Helvetica", 12 , ""), bg="#fbfbfb", fg="#2e2e2e")
+# 'Kalite' text
+indirme_secenegi_label = tk.Label(frame, text="Kalite:", font=("Helvetica", 12 , ""), bg="#fbfbfb", fg="#2e2e2e")
 indirme_secenegi_label.grid(row=0, column=0, padx=10, pady=5)
 
-# 'Video URL' yazısı
+# 'Video URL' text
 video_url_label = tk.Label(frame, text="Video URL:", font=("Helvetica", 12 , ""), bg="#fbfbfb", fg="#2e2e2e")
 video_url_label.grid(row=0, column=2, padx=10, pady=5)
 
@@ -458,3 +476,5 @@ theme_button = tk.Button(root, text="🌙", command=toggle_theme,
 theme_button.place(relx=1, rely=1, anchor="se", x=-10, y=-10)
 
 root.mainloop()
+
+
