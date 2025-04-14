@@ -87,7 +87,7 @@ def youtube_video_indir_birlestir(url, kayit_yeri, hedef_cozunurluk):
         "4K": 2160
     }
 
-    # Geçerli çözünürlük kontrolü
+    # Geçerli çözünürlük mü kontrolü
     if hedef_cozunurluk not in cozunurluk_haritasi:
         messagebox.showerror("Hata", f"Geçersiz çözünürlük: {hedef_cozunurluk}")
         return
@@ -256,9 +256,32 @@ indirme_secenegi_label.grid(row=0, column=0, padx=10, pady=5)
 video_url_label = tk.Label(frame, text="Video URL:", font=("Helvetica", 12 , ""), bg="#fbfbfb", fg="#2e2e2e")
 video_url_label.grid(row=0, column=2, padx=10, pady=5)
 
+# URL sağ tık menü
+def entry_sag_tik_menusu(entry):
+    menu = tk.Menu(entry, tearoff=0, bg="#f0f0f0", fg="#000", activebackground="#0078D7", activeforeground="white",
+                   bd=0, relief="flat")
+
+    def sag_tik(event):
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+    menu.add_command(label="Kes", command=lambda: entry.event_generate("<<Cut>>"))
+    menu.add_command(label="Kopyala", command=lambda: entry.event_generate("<<Copy>>"))
+    menu.add_command(label="Yapıştır", command=lambda: entry.event_generate("<<Paste>>"))
+    menu.add_separator()
+    menu.add_command(label="Tümünü Seç", command=lambda: entry.event_generate("<<SelectAll>>"))
+
+    entry.bind("<Button-3>", sag_tik)
+
 # URL alanı
 url_entry = tk.Entry(frame, width=50)
 url_entry.grid(row=0, column=3, padx=10, pady=5)
+
+# Sağ tık menüsü ekle
+entry_sag_tik_menusu(url_entry)
+
 
 # Stil ayarı (Combobox için)
 style = ttk.Style()
