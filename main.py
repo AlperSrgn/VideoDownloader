@@ -77,201 +77,61 @@ def temizle_dosya_adi(dosya_adi):
 
 
 
-# 720p video ve ses indirme - birleştirme
-def youtube_720p_video_indir(url, kayit_yeri):
+# Video indirme ve birleştirme
+def youtube_video_indir_birlestir(url, kayit_yeri, hedef_cozunurluk):
+    # Çözünürlük için yükseklik eşlemesi
+    cozunurluk_haritasi = {
+        "720p": 720,
+        "1080p": 1080,
+        "2K": 1440,
+        "4K": 2160
+    }
 
+    # Geçerli çözünürlük kontrolü
+    if hedef_cozunurluk not in cozunurluk_haritasi:
+        messagebox.showerror("Hata", f"Geçersiz çözünürlük: {hedef_cozunurluk}")
+        return
+
+    yukseklik = cozunurluk_haritasi[hedef_cozunurluk]
+
+    # Video bilgilerini al
     with yt_dlp.YoutubeDL({"quiet": True}) as ydl:
         info = ydl.extract_info(url, download=False)
         video_title = info.get("title", "indirilen_video")
 
-    # Türkçe karakterleri temizle
     temiz_video_title = temizle_dosya_adi(video_title)
     base_filename = os.path.join(kayit_yeri, temiz_video_title)
 
-    # Video ve ses dosyalarının indirilmesi için ayarlar
+    # İndirme ayarları
     ydl_opts_video = {
-        "format": "bestvideo[height<=720]/bestvideo",  # 720p video
+        "format": f"bestvideo[height={yukseklik}]/bestvideo",
         "outtmpl": f"{base_filename}_(Video).%(ext)s",
         "progress_hooks": [progress_hook]
     }
-
     ydl_opts_audio = {
         "format": "bestaudio",
         "outtmpl": f"{base_filename}_(Ses).%(ext)s",
         "progress_hooks": [progress_hook]
     }
 
-    # Video ve ses dosyalarını indir
+    # İndir
     with yt_dlp.YoutubeDL(ydl_opts_video) as ydl:
         ydl.download([url])
     with yt_dlp.YoutubeDL(ydl_opts_audio) as ydl:
         ydl.download([url])
 
-    # Video ve ses dosyalarını bul
+    # Dosya yolları
     video_path = glob.glob(f"{base_filename}_(Video).*")[0]
     audio_path = glob.glob(f"{base_filename}_(Ses).*")[0]
 
-    # Final çıkış dosyası yolu
-    output_filename = f"{temiz_video_title}.mp4"
-    output_filename = unique_filename(kayit_yeri, output_filename)
-    output_path = os.path.join(kayit_yeri, output_filename)
-
-    # Dosya zaman damgasını güncelle
-    update_file_timestamp(video_path)
-    update_file_timestamp(audio_path)
-
-    # Video ve ses dosyaları mevcut mu kontrol et
-    while not os.path.exists(video_path):
-        time.sleep(1)
-    while not os.path.exists(audio_path):
-        time.sleep(1)
-
-    try:
-        # 🔧 FFmpeg yolu al
-        ffmpeg_path = get_ffmpeg_path()
-
-        # FFmpeg komutu ile video ve ses birleştiriliyor
-        ffmpeg_cmd = [
-            ffmpeg_path,
-            "-y",  # Üzerine yazmaya zorla
-            "-i", video_path,  # Video dosyası
-            "-i", audio_path,  # Ses dosyası
-            "-c:v", "copy",  # Video codec
-            "-c:a", "aac",   # Ses codec
-            "-strict", "experimental",  # AAC ses codec kullanımı
-            output_path
-        ]
-
-        # FFmpeg komutunu çalıştır
-        subprocess.run(ffmpeg_cmd, check=True)
-
-        # Geçici video ve ses dosyalarını sil
-        os.remove(video_path)
-        os.remove(audio_path)
-
-        # Bilgilendirme mesajı göster
-        messagebox.showinfo("Tamamlandı", "İşlem tamamlandı!")
-
-    except Exception as e:
-        # Hata mesajı göster
-        messagebox.showerror("Hata", f"Birleştirme hatası: {str(e)}")
-
-
-
-# 1080p video ve ses indirme - birleştirme
-def youtube_1080p_video_indir(url, kayit_yeri):
-
-    with yt_dlp.YoutubeDL({"quiet": True}) as ydl:
-        info = ydl.extract_info(url, download=False)
-        video_title = info.get("title", "indirilen_video")
-
-    temiz_video_title = temizle_dosya_adi(video_title)
-    base_filename = os.path.join(kayit_yeri, temiz_video_title)
-
-    ydl_opts_video = {
-        "format": "bestvideo[height=1080]/bestvideo",
-        "outtmpl": f"{base_filename}_(Video).%(ext)s",
-        "progress_hooks": [progress_hook]
-    }
-
-    ydl_opts_audio = {
-        "format": "bestaudio",
-        "outtmpl": f"{base_filename}_(Ses).%(ext)s",
-        "progress_hooks": [progress_hook]
-    }
-
-    with yt_dlp.YoutubeDL(ydl_opts_video) as ydl:
-        ydl.download([url])
-    with yt_dlp.YoutubeDL(ydl_opts_audio) as ydl:
-        ydl.download([url])
-
-        # Video ve ses dosyalarını bul
-        video_path = glob.glob(f"{base_filename}_(Video).*")[0]
-        audio_path = glob.glob(f"{base_filename}_(Ses).*")[0]
-
-        # Final çıkış dosyası yolu
-        output_filename = f"{temiz_video_title}.mp4"
-        output_filename = unique_filename(kayit_yeri, output_filename)
-        output_path = os.path.join(kayit_yeri, output_filename)
-
-    update_file_timestamp(video_path)
-    update_file_timestamp(audio_path)
-
-    while not os.path.exists(video_path):
-        time.sleep(1)
-    while not os.path.exists(audio_path):
-        time.sleep(1)
-
-    try:
-        # 🔧 FFmpeg yolu al
-        ffmpeg_path = get_ffmpeg_path()
-
-        ffmpeg_cmd = [
-            ffmpeg_path,
-            "-y",
-            "-i", video_path,
-            "-i", audio_path,
-            "-c:v", "copy",
-            "-c:a", "aac",
-            "-strict", "experimental",
-            output_path
-        ]
-
-        subprocess.run(ffmpeg_cmd, check=True)
-
-        os.remove(video_path)
-        os.remove(audio_path)
-
-        # Bilgilendirme mesajı göster
-        messagebox.showinfo("Tamamlandı", "İşlem tamamlandı!")
-
-    except Exception as e:
-        messagebox.showerror("Hata", f"Birleştirme hatası: {str(e)}")
-
-
-
-# 2K video ve ses indirme - birleştirme
-def youtube_2k_video_indir(url, kayit_yeri):
-    with yt_dlp.YoutubeDL({"quiet": True}) as ydl:
-        info = ydl.extract_info(url, download=False)
-        video_title = info.get("title", "indirilen_video")
-
-    temiz_video_title = temizle_dosya_adi(video_title)
-    base_filename = os.path.join(kayit_yeri, temiz_video_title)
-
-
-    ydl_opts_video = {
-        "format": "bestvideo[height=1440]/bestvideo",
-        "outtmpl": f"{base_filename}_(Video).%(ext)s",
-        "progress_hooks": [progress_hook]
-    }
-
-    ydl_opts_audio = {
-        "format": "bestaudio",
-        "outtmpl": f"{base_filename}_(Ses).%(ext)s",
-        "progress_hooks": [progress_hook]
-    }
-
-    with yt_dlp.YoutubeDL(ydl_opts_video) as ydl:
-        ydl.download([url])
-    with yt_dlp.YoutubeDL(ydl_opts_audio) as ydl:
-        ydl.download([url])
-
-    # Video ve ses dosyalarını bul
-    video_path = glob.glob(f"{base_filename}_(Video).*")[0]
-    audio_path = glob.glob(f"{base_filename}_(Ses).*")[0]
-
-    # Final çıkış dosyası
-    output_filename = f"{temiz_video_title}.mp4"
-    output_filename = unique_filename(kayit_yeri, output_filename)
+    # Çıkış dosyası
+    output_filename = unique_filename(kayit_yeri, f"{temiz_video_title}.mp4")
     output_path = os.path.join(kayit_yeri, output_filename)
 
     update_file_timestamp(video_path)
     update_file_timestamp(audio_path)
 
-    while not os.path.exists(video_path):
-        time.sleep(1)
-    while not os.path.exists(audio_path):
+    while not os.path.exists(video_path) or not os.path.exists(audio_path):
         time.sleep(1)
 
     try:
@@ -286,97 +146,14 @@ def youtube_2k_video_indir(url, kayit_yeri):
             "-strict", "experimental",
             output_path
         ]
-
         subprocess.run(ffmpeg_cmd, check=True)
 
         os.remove(video_path)
         os.remove(audio_path)
 
-        # Bilgilendirme mesajı göster
         messagebox.showinfo("Tamamlandı", "İşlem tamamlandı!")
 
     except Exception as e:
-        messagebox.showerror("Hata", f"Birleştirme hatası: {str(e)}")
-
-
-
-# 4K video ve ses indirme - birleştirme
-def youtube_4k_video_indir(url, kayit_yeri):
-
-    with yt_dlp.YoutubeDL({"quiet": True}) as ydl:
-        info = ydl.extract_info(url, download=False)
-        video_title = info.get("title", "indirilen_video")
-
-    # Türkçe karakterleri temizle
-    temiz_video_title = temizle_dosya_adi(video_title)
-    base_filename = os.path.join(kayit_yeri, temiz_video_title)
-
-    # Video ve ses dosyalarının indirilmesi için ayarlar
-    ydl_opts_video = {
-        "format": "bestvideo[height=2160]/bestvideo",  # 4K video (2160p)
-        "outtmpl": f"{base_filename}_(Video).%(ext)s",
-        "progress_hooks": [progress_hook]
-    }
-
-    ydl_opts_audio = {
-        "format": "bestaudio",
-        "outtmpl": f"{base_filename}_(Ses).%(ext)s",
-        "progress_hooks": [progress_hook]
-    }
-
-    # Video ve ses dosyalarını indir
-    with yt_dlp.YoutubeDL(ydl_opts_video) as ydl:
-        ydl.download([url])
-    with yt_dlp.YoutubeDL(ydl_opts_audio) as ydl:
-        ydl.download([url])
-
-        # Video ve ses dosyalarını bul
-        video_path = glob.glob(f"{base_filename}_(Video).*")[0]
-        audio_path = glob.glob(f"{base_filename}_(Ses).*")[0]
-
-        # Final çıkış dosyası yolu
-        output_filename = f"{temiz_video_title}.mp4"
-        output_filename = unique_filename(kayit_yeri, output_filename)
-        output_path = os.path.join(kayit_yeri, output_filename)
-
-    # Dosya zaman damgasını güncelle
-    update_file_timestamp(video_path)
-    update_file_timestamp(audio_path)
-
-    # Video ve ses dosyaları mevcut mu kontrol et
-    while not os.path.exists(video_path):
-        time.sleep(1)
-    while not os.path.exists(audio_path):
-        time.sleep(1)
-
-    try:
-        # 🔧 FFmpeg yolu al
-        ffmpeg_path = get_ffmpeg_path()
-
-        # FFmpeg komutu ile video ve ses birleştiriliyor
-        ffmpeg_cmd = [
-            ffmpeg_path,
-            "-y",  # Üzerine yazmaya zorla
-            "-i", video_path,  # Video dosyası
-            "-i", audio_path,  # Ses dosyası
-            "-c:v", "copy",  # Video codec
-            "-c:a", "aac",   # Ses codec
-            "-strict", "experimental",  # AAC ses codec kullanımı
-            output_path
-        ]
-
-        # FFmpeg komutunu çalıştır
-        subprocess.run(ffmpeg_cmd, check=True)
-
-        # Geçici video ve ses dosyalarını sil
-        os.remove(video_path)
-        os.remove(audio_path)
-
-        #Bilgilendirme mesajı göster
-        messagebox.showinfo("Tamamlandı", "İşlem tamamlandı!")
-
-    except Exception as e:
-        # Hata mesajı göster
         messagebox.showerror("Hata", f"Birleştirme hatası: {str(e)}")
 
 
@@ -422,32 +199,38 @@ def indir():
         messagebox.showwarning("Uyarı", "Lütfen bir video linki girin!")
         return
 
-    indir_buton["state"] = "disabled"  # Butonu devre dışı bırak
+    indir_buton["state"] = "disabled"
     progress_bar.pack(pady=10)
     progress_bar["value"] = 0
     progress_label.pack()
 
     def indirme_islemi():
         try:
-            if secim == "720p":
-                youtube_720p_video_indir(url, kayit_yeri)
-            elif secim == "Ses":
+            if secim == "Ses":
                 youtube_ses_indir(url, kayit_yeri)
-            elif secim == "1080p":
-                youtube_1080p_video_indir(url, kayit_yeri)
-            elif secim == "1440p (2K)":
-                youtube_2k_video_indir(url, kayit_yeri)
-            elif secim == "2160p (4K)":
-                youtube_4k_video_indir(url, kayit_yeri)
+            else:
+                # Görsel seçim etiketinden çözünürlük etiketini ayıkla
+                cozunurluk_haritasi = {
+                    "720p": "720p",
+                    "1080p": "1080p",
+                    "1440p (2K)": "2K",
+                    "2160p (4K)": "4K"
+                }
+
+                hedef_cozunurluk = cozunurluk_haritasi.get(secim)
+                if hedef_cozunurluk:
+                    youtube_video_indir_birlestir(url, kayit_yeri, hedef_cozunurluk)
+                else:
+                    messagebox.showerror("Hata", f"Bilinmeyen çözünürlük: {secim}")
+
         except Exception as e:
             messagebox.showerror("Hata", f"Bir hata oluştu:\n{str(e)}")
         finally:
             progress_bar.pack_forget()
             progress_label.pack_forget()
-            indir_buton["state"] = "normal"  # Butonu yeniden aktif hale getir
+            indir_buton["state"] = "normal"
 
     threading.Thread(target=indirme_islemi, daemon=True).start()
-
 
 
 
