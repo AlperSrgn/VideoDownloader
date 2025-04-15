@@ -138,6 +138,7 @@ def youtube_video_indir_birlestir(url, kayit_yeri, hedef_cozunurluk):
         ffmpeg_path = get_ffmpeg_path()
         ffmpeg_cmd = [
             ffmpeg_path,
+            "-loglevel", "quiet",
             "-y",
             "-i", video_path,
             "-i", audio_path,
@@ -146,7 +147,23 @@ def youtube_video_indir_birlestir(url, kayit_yeri, hedef_cozunurluk):
             "-strict", "experimental",
             output_path
         ]
-        subprocess.run(ffmpeg_cmd, check=True)
+
+        # ffmpeg için konsol ekranı açar
+        # subprocess.run(ffmpeg_cmd, check=True)
+
+        # ffmpeg için konsol ekranı olmadan çalıştırma
+        creationflags = 0
+        if sys.platform == "win32":
+            creationflags = subprocess.CREATE_NO_WINDOW
+
+        with open(os.devnull, 'w') as devnull:
+            subprocess.run(
+                ffmpeg_cmd,
+                stdout=devnull,
+                stderr=devnull,
+                check=True,
+                creationflags=creationflags
+            )
 
         os.remove(video_path)
         os.remove(audio_path)
