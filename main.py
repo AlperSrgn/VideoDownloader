@@ -1,5 +1,6 @@
 import glob
 import re
+import shutil
 import subprocess
 import sys
 import webbrowser
@@ -10,6 +11,45 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import threading
 import time
+import json
+from plyer import notification
+
+
+
+
+
+# EXE ve script için doğru klasörü bul
+def get_appData_path(app_name="VideoDownloader"):
+    local_appdata = os.getenv('LOCALAPPDATA')  # C:\Users\KullaniciAdi\AppData\Local
+    app_folder = os.path.join(local_appdata, app_name)
+    os.makedirs(app_folder, exist_ok=True)  # klasör yoksa oluştur
+    return app_folder
+
+
+
+# iconları EXE nin bulunduğu dizine kopyala
+def copy_icon():
+    if getattr(sys, 'frozen', False):  # Sadece exe olarak çalışıyorsa
+        exe_dizin = get_appData_path()
+        hedef_notificationIcon_yolu = os.path.join(exe_dizin, "notificationIcon.ico")
+        hedef_previewIcon_yolu = os.path.join(exe_dizin, "previewIcon.ico")
+        hedef_appIcon_yolu = os.path.join(exe_dizin, "appIcon.ico")
+        # Kaynak dosya (.ico dosyası .py dosyasıyla aynı klasörde olmalı)
+        kaynak_notificationIcon_yolu = os.path.join(os.path.dirname(os.path.abspath(__file__)), "notificationIcon.ico")
+        kaynak_previewIcon_yolu = os.path.join(os.path.dirname(os.path.abspath(__file__)), "previewIcon.ico")
+        kaynak_appIcon_yolu = os.path.join(os.path.dirname(os.path.abspath(__file__)), "appIcon.ico")
+        # Eğer dosya yoksa kopyala
+        if not os.path.exists(hedef_notificationIcon_yolu):
+            try:
+                shutil.copy2(kaynak_notificationIcon_yolu, hedef_notificationIcon_yolu)
+                shutil.copy2(kaynak_previewIcon_yolu, hedef_previewIcon_yolu)
+                shutil.copy2(kaynak_appIcon_yolu, hedef_appIcon_yolu)
+            except Exception as e:
+                print(f"Icon kopyalama hatası: {e}")
+copy_icon()
+notificationIcon_path = os.path.join(get_appData_path(), "notificationIcon.ico")
+previewIcon_path = os.path.join(get_appData_path(), "previewIcon.ico")
+appIcon_path = os.path.join(get_appData_path(), "appIcon.ico")
 
 
 # ffmpeg path
@@ -87,7 +127,7 @@ def youtube_video_indir_birlestir(url, kayit_yeri, hedef_cozunurluk):
         "4K": 2160
     }
 
-    # Geçerli çözünürlük mü kontrolü
+    # Geçerli çözünürlük kontrolü
     if hedef_cozunurluk not in cozunurluk_haritasi:
         messagebox.showerror("Hata", f"Geçersiz çözünürlük: {hedef_cozunurluk}")
         return
@@ -168,10 +208,18 @@ def youtube_video_indir_birlestir(url, kayit_yeri, hedef_cozunurluk):
         os.remove(video_path)
         os.remove(audio_path)
 
-        messagebox.showinfo("Tamamlandı", "İşlem tamamlandı!")
+        if sistem_bildirim_var.get():
+            notification.notify(
+                title="İndirme Tamamlandı",
+                message="Video başarıyla indirildi",
+                timeout=3,
+                app_icon = notificationIcon_path
+            )
+        else:
+            messagebox.showinfo("Başarılı", f"İşlem tamamlandı!")
 
     except Exception as e:
-        messagebox.showerror("Hata", f"Birleştirme hatası: {str(e)}")
+        messagebox.showerror("Hata", f"Birleştirme hatası\n{str(e)}")
 
 
 
@@ -182,7 +230,6 @@ def youtube_ses_indir(url, kayit_yeri):
             info = ydl.extract_info(url, download=False)
             audio_title = info.get("title", "indirilen_ses")
 
-        # Türkçe karakterleri temizle
         temiz_video_title = temizle_dosya_adi(audio_title)
         output_filename = unique_filename(kayit_yeri, f"{temiz_video_title}.mp3")
 
@@ -197,11 +244,17 @@ def youtube_ses_indir(url, kayit_yeri):
 
         update_file_timestamp(os.path.join(kayit_yeri, output_filename))
 
-        # Bilgilendirme mesajı göster
-        messagebox.showinfo("Başarılı", f"İşlem tamamlandı!")
+        if sistem_bildirim_var.get():
+            notification.notify(
+                title="İndirme Tamamlandı",
+                message="Ses dosyası başarıyla indirildi.",
+                timeout=3,
+                app_icon=notificationIcon_path
+            )
+        else:
+            messagebox.showinfo("Başarılı", f"İşlem tamamlandı!")
 
     except Exception as e:
-        # Hata mesajı göster
         messagebox.showerror("Hata", f"Ses indirilemedi:\n{str(e)}")
 
 
@@ -249,6 +302,9 @@ def indir():
 
     threading.Thread(target=indirme_islemi, daemon=True).start()
 
+
+#######################################################################################################################
+#######################################################################################################################
 
 
 # Arayüz oluşturma
@@ -310,6 +366,12 @@ secenek_menu.grid(row=0, column=1, padx=10, pady=5)
 
 
 # İndir butonu
+def on_enter(e):
+    indir_buton.config(bg="#1f567a")  # Hover rengi (daha açık)
+
+def on_leave(e):
+    indir_buton.config(bg="#458bc6")  # Normal rengi
+
 indir_buton = tk.Button(root, text="⬇ İndir", command=indir, width=11, height=2,
                         font=("Helvetica", 12, "bold"),
                         fg="#fbfbfb", bg="#458bc6",
@@ -317,8 +379,11 @@ indir_buton = tk.Button(root, text="⬇ İndir", command=indir, width=11, height
                         activebackground="#3a688d",
                         activeforeground="#fbfbfb",
                         bd=0,
-                        highlightthickness=0)
+                        highlightthickness=0
+                        )
 indir_buton.pack(pady=20)
+indir_buton.bind("<Enter>", on_enter)  # Mouse içine girince
+indir_buton.bind("<Leave>", on_leave)  # Mouse çıkınca
 
 
 # ProgressBar
@@ -334,19 +399,22 @@ def open_downloads_folder():
     elif os.name == "posix":  # macOS & Linux
         webbrowser.open(downloads_path)
 
-
 # İndirilenler klasörünü açma butonu (Sol alt köşe)
 downloads_button = tk.Button(root, text="📁", command=open_downloads_folder,
-                             font=("Helvetica", 13, "bold"), fg="black", bg="#ddd",
-                             relief="flat", activebackground="#bbb",
-                             activeforeground="black", bd=0, highlightthickness=0)
+                        font=("Helvetica", 19, "bold"),
+                        fg="black",
+                        bg="#ddd",
+                        relief="flat",
+                        activebackground="#bbb",
+                        activeforeground="black",
+                        bd=0, highlightthickness=0
+                        )
 downloads_button.place(relx=0, rely=1, anchor="sw", x=10, y=-10)
 
 
-# Koyu mod değişkeni
-dark_mode = False
 
 # Tema değiştirme fonksiyonu
+dark_mode = False
 def toggle_theme():
     global dark_mode
     if dark_mode:
@@ -355,10 +423,14 @@ def toggle_theme():
         theme_button.config(text="🌙", bg="#ddd", fg="black", activebackground="#bbb", activeforeground="black")
         downloads_button.config(bg="#ddd", fg="black", activebackground="#bbb", activeforeground="black")
 
-        # Label renklerini açık moda uygun hale getir
+        # Labels
         indirme_secenegi_label.config(bg="#fbfbfb", fg="#2e2e2e")
         video_url_label.config(bg="#fbfbfb", fg="#2e2e2e")
         progress_label.config(bg="#fbfbfb", fg="#2e2e2e")
+
+        # Menü butonu açık mod rengi (sadece sidebar kapalıysa gösterilir)
+        if not sidebar_acik:
+            menu_button.config(bg="#fbfbfb", fg="#2e2e2e", activebackground="#d0d0d0", activeforeground="#000")
 
     else:
         root.config(bg="#2e2e2e")
@@ -366,23 +438,229 @@ def toggle_theme():
         theme_button.config(text="☀", bg="#444", fg="white", activebackground="#666", activeforeground="#fbfbfb")
         downloads_button.config(bg="#444", fg="white", activebackground="#666", activeforeground="#fbfbfb")
 
-        # Label renklerini koyu moda uygun hale getir
+        # Labels
         indirme_secenegi_label.config(bg="#2e2e2e", fg="#fbfbfb")
         video_url_label.config(bg="#2e2e2e", fg="#fbfbfb")
         progress_label.config(bg="#2e2e2e", fg="#fbfbfb")
+
+        # Menü butonu koyu mod rengi (sidebar kapalıysa gösterilir)
+        if not sidebar_acik:
+            menu_button.config(bg="#2e2e2e", fg="white", activebackground="#444", activeforeground="white")
 
     dark_mode = not dark_mode
 
 # Koyu mod butonu
 theme_button = tk.Button(root, text="🌙", command=toggle_theme,
-                         font=("Helvetica", 13, "bold"),
+                         font=("Helvetica", 19, "bold"),
                          fg="black", bg="#ddd",
                          relief="flat",
                          activebackground="#bbb",
                          activeforeground="black",
-                         bd=0, highlightthickness=0)
+                         bd=0, highlightthickness=0
+                         )
 theme_button.place(relx=1, rely=1, anchor="se", x=-10, y=-10)
 
+
+
+# Sidebar toggle sistemi
+sidebar_acik = False
+sidebar_x = -250  # Başlangıç konumu
+sidebar_genislik = 250
+
+# Sidebar frame sadece bir kez tanımlanmalı
+sidebar_frame = tk.Frame(root, width=sidebar_genislik, height=300, bg="#95aec9")
+sidebar_frame.place(x=sidebar_x, y=0, relheight=1)
+
+
+# BUTONA TIKLAYINCA BİLDİRİM GÖNDERME
+# Bildirim Önizleme
+def bildirim_onizleme():
+    if sistem_bildirim_var.get():
+        notification.notify(
+            title="Önizleme",
+            message="Sistem bildirimi bu şekilde görünür.",
+            timeout=3,
+            app_icon=previewIcon_path
+        )
+    else:
+        messagebox.showinfo("Önizleme", "Uygulama bildirimi bu şekilde görünür.")
+bildirim_buton = tk.Button(
+    sidebar_frame,
+                text="bildirimi önizle",
+                command=bildirim_onizleme,
+                bg="#95aec9",
+                fg="#000",
+                activebackground="#95aec9",
+                activeforeground="#000",
+                bd=1,  # kenarlık kalınlığı
+                relief="solid",
+)
+
+bildirim_buton.place(x=10, y=-10, rely=1.0, anchor="sw")
+# BUTONA TIKLAYINCA BİLDİRİM GÖNDERME
+
+
+# Sidebar kapatma butonu (✕)
+sidebar_kapatma_butonu = tk.Button(sidebar_frame,
+                            text="✕",  # Çarpı işareti
+                            font=("Helvetica", 14, ""),
+                            bg="#95aec9",
+                            fg="#000",
+                            relief="flat",
+                            command=lambda: sidebar_kapat_if_gerekirse(None),
+                            activebackground="#7d98b3",
+                            )
+sidebar_kapatma_butonu.place(relx=1.0, x=-10, y=10, anchor="ne")
+
+def animate_sidebar(target_x, step):
+    global sidebar_x
+    if sidebar_x != target_x:
+        # Bir adım yaklaştır
+        sidebar_x += step
+        sidebar_frame.place(x=sidebar_x, y=0)
+        # Hedefe ulaşmadıysa tekrar çağır
+        root.after(5, lambda: animate_sidebar(target_x, step))
+    else:
+        sidebar_frame.place(x=target_x, y=0)
+
+def toggle_sidebar():
+    global sidebar_acik, sidebar_x
+    if sidebar_acik:
+        animate_sidebar(-sidebar_genislik, -10)               # Kapat
+        menu_button.place(x=10, y=10, width=45, height=45)    # Geri getir
+        menu_button.config(bg="#fbfbfb", activebackground="#d0d0d0")
+    else:
+        animate_sidebar(0, 10)                   # Aç
+        menu_button.place_forget()               # Butonu gizle
+    sidebar_acik = not sidebar_acik
+
+def sidebar_kapat_if_gerekirse(event=None):
+    global sidebar_acik
+
+    if not sidebar_acik:
+        return
+
+    if event is not None:
+        x, y = event.x_root, event.y_root
+        sidebar_abs_x = sidebar_frame.winfo_rootx()
+        sidebar_abs_y = sidebar_frame.winfo_rooty()
+        sidebar_width = sidebar_frame.winfo_width()
+        sidebar_height = sidebar_frame.winfo_height()
+
+        # Tıklama sidebar dışındaysa kapat
+        if (sidebar_abs_x <= x <= sidebar_abs_x + sidebar_width and
+            sidebar_abs_y <= y <= sidebar_abs_y + sidebar_height):
+            return
+
+    # Sidebar'ı kapat
+    animate_sidebar(-sidebar_genislik, -10)
+    menu_button.place(x=10, y=10, width=45, height=45)
+
+    # Tema durumuna göre renk ayarla
+    if dark_mode:
+        menu_button.config(bg="#2e2e2e", fg="white", activebackground="#444", activeforeground="white")
+    else:
+        menu_button.config(bg="#fbfbfb", fg="#2e2e2e", activebackground="#d0d0d0", activeforeground="#000")
+
+    sidebar_acik = False
+root.bind("<Button-1>", sidebar_kapat_if_gerekirse)
+
+
+# Toggle butonu
+menu_button = tk.Button(root,
+                        text="≡",
+                        font=("Helvetica", 25, "bold"),
+                        bg="#fbfbfb",
+                        fg="#2e2e2e",
+                        relief="flat",
+                        command=toggle_sidebar,
+                        activebackground="#d0d0d0",
+                        activeforeground="#000")
+menu_button.place(x=10, y=10, width=45, height=45)      # Yerleştir ve en üste getir
+menu_button.lift()
+
+
+# Sidebar içeriği için çerçeve (liste gibi dizmek için)
+sidebar_icerik = tk.Frame(sidebar_frame, bg="#95aec9")
+sidebar_icerik.pack(padx=10, pady=50, anchor="nw")
+
+
+# config.json dosya islemleri
+config_path = os.path.join(get_appData_path(), "config.json")
+
+def ayar_yukle(anahtar, varsayilan=False):
+    try:
+        if os.path.exists(config_path) and os.path.getsize(config_path) > 0:
+            with open(config_path, "r", encoding="utf-8") as dosya:
+                ayarlar = json.load(dosya)
+                return ayarlar.get(anahtar, varsayilan)
+    except Exception as e:
+        print("Ayar yükleme hatası:", e)
+    return varsayilan
+
+def ayar_kaydet(anahtar, deger):
+    try:
+        ayarlar = {}
+        if os.path.exists(config_path) and os.path.getsize(config_path) > 0:
+            with open(config_path, "r", encoding="utf-8") as dosya:
+                ayarlar = json.load(dosya)
+
+        ayarlar[anahtar] = deger
+
+        with open(config_path, "w", encoding="utf-8") as dosya:
+            json.dump(ayarlar, dosya, indent=4)
+    except Exception as e:
+        print("Ayar kaydetme hatası:", e)
+
+def sistem_bildirim_degisti():
+    ayar_kaydet("sistem_bildirimi", sistem_bildirim_var.get())
+
+# 1. Seçenek
+sistem_bildirim_var = tk.BooleanVar()
+sistem_bildirim_var.set(ayar_yukle("sistem_bildirimi", False))
+sistem_bildirim_var.trace_add("write", lambda *args: ayar_kaydet("sistem_bildirimi", sistem_bildirim_var.get()))
+
+sistem_bildirim_checkbox = tk.Checkbutton(
+                        sidebar_icerik,
+                        text="İşlem tamamlandığında\nsistem bildirimi al",
+                        variable=sistem_bildirim_var,
+                        command=sistem_bildirim_degisti,  # Değişince kaydet
+                        font=("Helvetica", 11),
+                        bg="#95aec9", fg="#000",
+                        activebackground="#95aec9",
+                        activeforeground="#000",
+                        justify="left",
+                        anchor="w",
+)
+sistem_bildirim_checkbox.pack(anchor="w", pady=5, fill="x")
+
+
+# 2. Seçenek
+koyu_mod_var = tk.BooleanVar()
+koyu_mod_var.set(ayar_yukle("koyu_modda_baslat", False))
+koyu_mod_var.trace_add("write", lambda *args: ayar_kaydet("koyu_modda_baslat", koyu_mod_var.get()))
+
+koyu_modda_baslat_checkbox = tk.Checkbutton(
+                        sidebar_icerik,
+                        text="Koyu modda başlat",
+                        variable=koyu_mod_var,
+                        font=("Helvetica", 11),
+                        bg="#95aec9", fg="#000",
+                        activebackground="#95aec9",
+                        activeforeground="#000",
+                        justify="left",
+                        anchor="w"
+)
+koyu_modda_baslat_checkbox.pack(anchor="w", pady=5, fill="x")
+
+# Eğer koyu mod aktifse başlarken uygula
+if ayar_yukle("koyu_modda_baslat", False):
+    toggle_theme()
+
+
+
 root.mainloop()
+
+
 
 
