@@ -13,7 +13,11 @@ import json
 import yt_dlp
 from plyer import notification
 import customtkinter as ctk
+from languages import LANGUAGES
 
+
+# exe
+# pyinstaller --onefile --noconsole --add-binary "C:\Users\alper\PycharmProjects\VideoDownloader\.venv\Lib\site-packages\imageio_ffmpeg\binaries\ffmpeg-win-x86_64-v7.1.exe;." --add-data "notificationIcon.ico;." --add-data "previewIcon.ico;." --add-data "appIcon.ico;." --add-data "languages.py;." --hidden-import=plyer.platforms.win.notification main.py
 
 
 
@@ -44,7 +48,7 @@ def copy_icon():
                 shutil.copy2(kaynak_previewIcon_yolu, hedef_previewIcon_yolu)
                 shutil.copy2(kaynak_appIcon_yolu, hedef_appIcon_yolu)
             except Exception as e:
-                print(f"Icon kopyalama hatası: {e}")
+                print(f"Icon copy error: {e}")
 copy_icon()
 notificationIcon_path = os.path.join(get_appData_path(), "notificationIcon.ico")
 previewIcon_path = os.path.join(get_appData_path(), "previewIcon.ico")
@@ -89,7 +93,7 @@ def progress_hook(d):
 
     global cancel_download
     if cancel_download:
-        raise Exception("İndirme iptal edildi.")
+        raise Exception(aktif_dil["indirme_iptal_edildi"])
 
     if d['status'] == 'downloading':
         try:
@@ -105,14 +109,13 @@ def progress_hook(d):
             # Bilgi label'ı güncelle
             progress_label.configure(
                 text=f"{percent:.1f}% | {downloaded:.2f} / {total_size_mb:.2f}MB | {eta}\n"
-                     f"'Tamamlandı' mesajını görene kadar lütfen bekleyin..."
+                     f"{aktif_dil['tamamlandi_mesaji_bekleyin']}"
             )
 
             root.update_idletasks()
 
         except Exception as e:
-            print("Progress Hook Hatası:", e)
-
+            print("Progress Hook Error:", e)
 
 
 
@@ -137,7 +140,7 @@ def youtube_video_indir_birlestir(url, kayit_yeri, hedef_cozunurluk):
     }
 
     if hedef_cozunurluk not in cozunurluk_haritasi:
-        messagebox.showerror("Hata", f"Geçersiz çözünürlük: {hedef_cozunurluk}")
+        messagebox.showerror("Error", f"Invalid resolution: {hedef_cozunurluk}")
         return
 
     yukseklik = cozunurluk_haritasi[hedef_cozunurluk]
@@ -229,16 +232,19 @@ def youtube_video_indir_birlestir(url, kayit_yeri, hedef_cozunurluk):
 
         if sistem_bildirim_var.get():
             notification.notify(
-                title="İndirme Tamamlandı",
-                message="Video başarıyla indirildi.",
+                title=aktif_dil["operation_completed"],
+                message=aktif_dil["download_complete_message"],
                 timeout=3,
                 app_icon=notificationIcon_path
             )
         else:
-            messagebox.showinfo("Başarılı", f"İşlem tamamlandı!")
+            messagebox.showinfo(
+                aktif_dil["info_title"],
+                aktif_dil["download_complete_message"]
+            )
 
     except Exception as e:
-        messagebox.showerror("Hata", f"Birleştirme hatası:\n{str(e)}")
+        messagebox.showerror("Error", f"Merge error:\n{str(e)}")
 
     finally:
         progress_bar.pack_forget()
@@ -270,17 +276,19 @@ def youtube_ses_indir(url, kayit_yeri):
 
         if sistem_bildirim_var.get():
             notification.notify(
-                title="İndirme Tamamlandı",
-                message="Ses dosyası başarıyla indirildi.",
+                title=aktif_dil["operation_completed"],
+                message=aktif_dil["audio_download_complete_message"],
                 timeout=3,
                 app_icon=notificationIcon_path
             )
         else:
-            messagebox.showinfo("Başarılı", f"İşlem tamamlandı!")
+            messagebox.showinfo(
+                aktif_dil["info_title"],
+                aktif_dil["audio_download_complete_message"]
+            )
 
     except Exception as e:
-        messagebox.showerror("Hata", f"Ses indirilemedi:\n{str(e)}")
-
+        messagebox.showerror("Error", f"Failed to download audio:\n{str(e)}")
 
 
 
@@ -293,7 +301,10 @@ def indir():
     kayit_yeri = os.path.join(os.path.expanduser("~"), "Downloads")
 
     if not url:
-        messagebox.showwarning("Uyarı", "Lütfen bir video linki girin!")
+        messagebox.showwarning(
+            aktif_dil["warning_title"],
+            aktif_dil["empty_url_warning"]
+        )
         return
 
     indir_buton.configure(state="disabled")
@@ -302,7 +313,7 @@ def indir():
     # Progress bar ve label'ı göster
     progress_bar.set(0)
     progress_bar.pack(pady=10)
-    progress_label.configure(text="İndirme başlatılıyor...")
+    progress_label.configure(text=aktif_dil["indirme_baslatiliyor"])
     progress_label.pack()
 
     def indirme_islemi():
@@ -320,9 +331,12 @@ def indir():
                 if hedef_cozunurluk:
                     youtube_video_indir_birlestir(url, kayit_yeri, hedef_cozunurluk)
                 else:
-                    messagebox.showerror("Hata", f"Bilinmeyen çözünürlük: {secim}")
+                    messagebox.showerror(
+                        aktif_dil["error_title"],
+                        aktif_dil["quality_error_message"]
+                    )
         except Exception as e:
-            messagebox.showerror("Hata", f"Bir hata oluştu:\n{str(e)}")
+            messagebox.showerror("Error", f"An error occurred:\n{str(e)}")
         finally:
             indir_buton.configure(state="normal")
             iptal_buton.pack_forget()  # Gizle
@@ -332,11 +346,12 @@ def indir():
     threading.Thread(target=indirme_islemi, daemon=True).start()
 
 
+
 # İptal fonksiyonu
 def indirmeyi_iptal_et():
     global cancel_download
     cancel_download = True
-    progress_label.configure(text="İndirme iptal ediliyor...")
+    progress_label.configure(text=aktif_dil["indirme_iptal_ediliyor"])
 
 
 #######################################################################################################################
@@ -353,7 +368,7 @@ frame = ctk.CTkFrame(root, fg_color="#ebebeb")  # Arka plan şeffaf (ya da isted
 frame.pack(pady=30, padx=30)
 
 # İndirme seçenekleri
-secenek_var = ctk.StringVar(value="2160p (4K)")
+secenek_var = ctk.StringVar(value="1080p")
 secenekler = ["2160p (4K)", "1440p (2K)", "1080p", "720p", "Ses"]
 
 # 'Kalite' etiketi
@@ -377,7 +392,7 @@ video_url_label = ctk.CTkLabel(frame, text="Video URL:", font=ctk.CTkFont(size=1
 video_url_label.grid(row=0, column=2, padx=10, pady=5)
 
 # URL giriş alanı
-url_entry = ctk.CTkEntry(frame, width=300, placeholder_text="Paste Video Link Here")  # beyaz arka plan
+url_entry = ctk.CTkEntry(frame, width=300, placeholder_text="Video Bağlantısını Buraya Yapıştırın")  # beyaz arka plan
 url_entry.grid(row=0, column=3, padx=10, pady=5)
 
 
@@ -524,7 +539,7 @@ sidebar_frame = ctk.CTkFrame(
     master=root,
     width=sidebar_genislik,
     fg_color="#95aec9",  # Sidebar'ın arka plan rengi
-    corner_radius=5  # Kenar yuvarlamasını sıfırladık
+    corner_radius=0
 )
 sidebar_frame.place(x=sidebar_x, y=0, relheight=1)
 
@@ -572,6 +587,42 @@ def toggle_sidebar():
         sidebar_frame.configure(fg_color="#95aec9")  # Sidebar arka plan rengini değiştir
         menu_button.place_forget()  # Menü butonunu gizle
     sidebar_acik = not sidebar_acik  # Durum değiştirme
+
+
+# Dil değiştirme
+def dili_degistir(secili_dil):
+    global aktif_dil
+    aktif_dil = LANGUAGES.get(secili_dil, LANGUAGES["Tr"])  # fallback
+    indir_buton.configure(text=aktif_dil["indir"])
+    iptal_buton.configure(text=aktif_dil["iptal"])
+    url_entry.configure(placeholder_text=aktif_dil["link_placeholder"])
+    indirme_secenegi_label.configure(text=aktif_dil["kalite"])
+    sistem_bildirim_checkbox.configure(text=aktif_dil["sistem_bildirim_checkbox"])
+    koyu_modda_baslat_checkbox.configure(text=aktif_dil["koyu_modda_baslat_checkbox"])
+    bildirim_button.configure(text=aktif_dil["bildirim_button"])
+    ayar_kaydet("dil", secili_dil)
+
+
+# Dil seçenekleri
+dil_secenekleri = ["Tr", "En"]
+dil_var = ctk.StringVar(value=dil_secenekleri[0])  # Varsayılan dil Türkçe
+dil_menu = ctk.CTkOptionMenu(
+    sidebar_icerik,
+    variable=dil_var,
+    values=dil_secenekleri,
+    command=dili_degistir,  # <==
+    width=70,  # Buton genişliği
+    height=30,  # Buton yüksekliği
+    font=("Helvetica", 12),  # Font
+    fg_color="#4c6a8c",  # Arka plan rengi
+    button_color="#004566",  # Menü butonunun rengi
+    text_color="#ebebeb"  # Yazı rengi
+)
+
+# Sidebar içindeki dil menüsünü sağ alt köşeye yerleştir
+dil_menu.place(relx=1.0, rely=1.0, anchor="se", x=-10, y=-10)
+
+
 
 # Toggle butonu (≡) - Sidebar'ı kontrol etmek için
 menu_button = ctk.CTkButton(
@@ -625,13 +676,16 @@ def sistem_bildirim_degisti():
 def bildirim_onizleme():
     if sistem_bildirim_var.get():
         notification.notify(
-            title="Önizleme",
-            message="Sistem bildirimi bu şekilde görünür.",
+            title=aktif_dil["preview_info_title"],
+            message=aktif_dil["system_notification_message"],
             timeout=3,
             app_icon=previewIcon_path
         )
     else:
-        messagebox.showinfo("Önizleme", "Uygulama bildirimi bu şekilde görünür.")
+        messagebox.showinfo(
+            aktif_dil["preview_info_title"],
+            aktif_dil["preview_info_message"]
+        )
 
 # "Bildirimi Önizle" butonunu sidebar'ın altına ekleyelim
 bildirim_button = ctk.CTkButton(
@@ -642,8 +696,8 @@ bildirim_button = ctk.CTkButton(
     fg_color="#4c6a8c",  # Butonun arka plan rengi
     hover_color="#3b556f",  # Hover (fare üzerine gelince) rengi
     text_color="#fbfbfb",  # Buton metin rengi
-    width=100,  # Buton genişliği (daha uygun bir değer)
-    height=30  # Buton yüksekliği (daha uygun bir değer)
+    width=100,  # Buton genişliği
+    height=30  # Buton yüksekliği
 )
 
 # Butonu sol alt köşeye yerleştir
@@ -702,6 +756,12 @@ koyu_mod_var.trace_add("write", lambda *args: ayar_kaydet("koyu_modda_baslat", k
 # Eğer koyu mod aktifse başlarken uygula
 if koyu_mod_var.get():  # Eğer ayarlarda koyu modda başlatma işareti varsa
     toggle_theme()
+
+
+aktif_dil = ayar_yukle("dil", "Tr")
+dil_var.set(aktif_dil)
+dili_degistir(aktif_dil)  # GUI'yi seçilen dile göre başlat
+
 
 
 root.mainloop()
