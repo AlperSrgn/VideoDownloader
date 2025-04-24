@@ -12,13 +12,23 @@ Based on [yt-dlp](https://github.com/yt-dlp/yt-dlp).
 
 
 # INSTALLATION
-If you want to install into the IDE with the `git clone` command from Github, you need to install [imageio-ffmpeg](https://github.com/imageio/imageio-ffmpeg) from the terminal.  
-Install using:  
+## VideoDownloaderSetup.exe
+### [![İNDİR](https://github.com/user-attachments/assets/8d8adf06-7013-4017-8434-51984f624e3b)](https://github.com/AlperSrgn/X-Youtube-Video-Downloader/releases/tag/v1.0.0) 
+<br>
+
+**Note:** Video Downloader comes bundled with FFmpeg which is used for processing videos. When you download it as a setup file, you do not need to take any action. 
+You can complete the installation process by running the setup file.  
+
+---
+## Install in IDE
+If you want to install into the IDE with the `git clone` command from Github, you need to install [imageio-ffmpeg](https://github.com/imageio/imageio-ffmpeg) from the terminal after installation.  
+
+**Install using:**  
 
 `$ pip install imageio-ffmpeg`  
 
 After running this command, the *imageio-ffmpeg* installation will be completed.  
-
+<br><br>
 
 **Note:** If you have a problem with the directory where *imageio-ffmpeg* is installed, Edit the code below, which belongs to the `get_ffmpeg_path()` function in the **main.py**, according to your own *imageio-ffmpeg* file path.
 
@@ -26,19 +36,17 @@ After running this command, the *imageio-ffmpeg* installation will be completed.
 
 
 ---
-After downloading to the IDE, you can use this command to convert it to **exe file** with [**pyinstaller**](https://github.com/pyinstaller/pyinstaller):  
+## Convert to Exe
+After installing in the IDE, you can use this command to convert it to **exe file** with [**pyinstaller**](https://github.com/pyinstaller/pyinstaller):  
 
 `$ pyinstaller --onefile --noconsole --add-binary "C:\Users\alper\PycharmProjects\VideoDownloader\.venv\Lib\site-packages\imageio_ffmpeg\binaries\ffmpeg-win-x86_64-v7.1.exe;." --add-data "notificationIcon.ico;." --add-data "previewIcon.ico;." --add-data "appIcon.ico;." --add-data "languages.py;." --hidden-import=plyer.platforms.win.notification main.py`
 
 
+<br><br>
 **Note:** Don't forget to replace the *imageio-ffmpeg* file path in this pyinstaller command with your own *imageio-ffmpeg* file path!
 
 
 ---
-## [**CLICK HERE**](https://github.com/AlperSrgn/X-Youtube-Video-Downloader/releases/tag/v1.0.0) to see versions available for download. (VideoDownloaderSetup.exe)
-
-**Note:** Video Downloader comes bundled with FFmpeg which is used for processing videos. When you download it as a setup file, you do not need to take any action. 
-You can complete the installation process by running the setup file.  
 
 
 # SCREENSHOTS
