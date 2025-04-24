@@ -22,7 +22,12 @@ LANGUAGES = {
         "audio_download_complete_message": "Ses dosyası başarıyla indirildi.",
         "indirme_baslatiliyor": "İndirme başlatılıyor...",
         "tamamlandi_mesaji_bekleyin": "'Tamamlandı' mesajını görene kadar lütfen bekleyin...",
-        "indirme_iptal_ediliyor": "İndirme iptal ediliyor..."
+        "indirme_iptal_ediliyor": "İndirme iptal ediliyor...",
+        "2160p": "2160p (4K)",
+        "1440p": "1440p (2K)",
+        "1080p": "1080p",
+        "720p": "720p",
+        "audio": "Ses",
 
     },
     "En": {
@@ -48,7 +53,12 @@ LANGUAGES = {
         "audio_download_complete_message": "Audio file downloaded successfully.",
         "indirme_baslatiliyor": "Downloading...",
         "tamamlandi_mesaji_bekleyin": "Please wait until you see the 'Completed' message...",
-        "indirme_iptal_ediliyor": "Download is canceled.."
+        "indirme_iptal_ediliyor": "Download is canceled..",
+        "2160p": "2160p (4K)",
+        "1440p": "1440p (2K)",
+        "1080p": "1080p",
+        "720p": "720p",
+        "audio": "Audio",
 
     }
 }

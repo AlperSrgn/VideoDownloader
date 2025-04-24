@@ -318,7 +318,7 @@ def indir():
 
     def indirme_islemi():
         try:
-            if secim == "Ses":
+            if secim == aktif_dil["audio"]:
                 youtube_ses_indir(url, kayit_yeri)
             else:
                 cozunurluk_haritasi = {
@@ -600,6 +600,15 @@ def dili_degistir(secili_dil):
     sistem_bildirim_checkbox.configure(text=aktif_dil["sistem_bildirim_checkbox"])
     koyu_modda_baslat_checkbox.configure(text=aktif_dil["koyu_modda_baslat_checkbox"])
     bildirim_button.configure(text=aktif_dil["bildirim_button"])
+    # Seçenekleri yeniden oluştur ve dropdown'a yükle
+    secenekler = [
+        aktif_dil["2160p"],
+        aktif_dil["1440p"],
+        aktif_dil["1080p"],
+        aktif_dil["720p"],
+        aktif_dil["audio"]
+    ]
+    secenek_menu.configure(values=secenekler)
     ayar_kaydet("dil", secili_dil)
 
 
