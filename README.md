@@ -13,7 +13,7 @@ Based on [yt-dlp](https://github.com/yt-dlp/yt-dlp).
 
 # INSTALLATION
 ## VideoDownloaderSetup.exe
-### [![İNDİR](https://github.com/user-attachments/assets/8d8adf06-7013-4017-8434-51984f624e3b)](https://drive.google.com/file/d/1RLeOTfiSBfJXaz2nLnep1ujI_TvWygie/view?usp=drive_link) 
+### [![İNDİR](https://github.com/user-attachments/assets/8d8adf06-7013-4017-8434-51984f624e3b)](https://github.com/AlperSrgn/X-Youtube-Video-Downloader/releases/download/v1.0.0/VideoDownloaderSetup.exe) 
 <br>
 
 **Note:** Video Downloader comes bundled with FFmpeg which is used for processing videos. When you download it as a setup file, you do not need to take any action. 
