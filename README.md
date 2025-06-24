@@ -12,7 +12,7 @@ Based on [yt-dlp](https://github.com/yt-dlp/yt-dlp).
 
 
 # INSTALLATION
-## VideoDownloaderSetup.exe
+## Download VideoDownloaderSetup.exe
 ### [![İNDİR](https://github.com/user-attachments/assets/8d8adf06-7013-4017-8434-51984f624e3b)](https://github.com/AlperSrgn/X-Youtube-Video-Downloader/releases/download/v1.0.0/VideoDownloaderSetup.exe) 
 <br>
 
