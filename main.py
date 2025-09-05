@@ -14,10 +14,12 @@ import yt_dlp
 from plyer import notification
 import customtkinter as ctk
 from languages import LANGUAGES
+from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+
 
 
 # exe
-# pyinstaller --onefile --noconsole --add-binary "C:\Users\alper\PycharmProjects\VideoDownloader\.venv\Lib\site-packages\imageio_ffmpeg\binaries\ffmpeg-win-x86_64-v7.1.exe;." --add-data "notificationIcon.ico;." --add-data "previewIcon.ico;." --add-data "appIcon.ico;." --add-data "languages.py;." --hidden-import=plyer.platforms.win.notification main.py
+# pyinstaller --onefile --noconsole --add-binary "C:\Users\alper\PycharmProjects\X-Youtube-Video-Downloader\.venv\Lib\site-packages\imageio_ffmpeg\binaries\ffmpeg-win-x86_64-v7.1.exe;." --add-data "notificationIcon.ico;." --add-data "previewIcon.ico;." --add-data "appIcon.ico;." --add-data "languages.py;." --hidden-import=plyer.platforms.win.notification main.py
 
 
 
@@ -30,29 +32,35 @@ def get_appData_path(app_name="VideoDownloader"):
 
 
 
-# iconları EXE nin bulunduğu dizine kopyala
+# iconları AppData klasörüne kopyala
 def copy_icon():
-    if getattr(sys, 'frozen', False):  # Sadece exe olarak çalışıyorsa
-        exe_dizin = get_appData_path()
-        hedef_notificationIcon_yolu = os.path.join(exe_dizin, "notificationIcon.ico")
-        hedef_previewIcon_yolu = os.path.join(exe_dizin, "previewIcon.ico")
-        hedef_appIcon_yolu = os.path.join(exe_dizin, "appIcon.ico")
-        # Kaynak dosya (.ico dosyası .py dosyasıyla aynı klasörde olmalı)
-        kaynak_notificationIcon_yolu = os.path.join(os.path.dirname(os.path.abspath(__file__)), "notificationIcon.ico")
-        kaynak_previewIcon_yolu = os.path.join(os.path.dirname(os.path.abspath(__file__)), "previewIcon.ico")
-        kaynak_appIcon_yolu = os.path.join(os.path.dirname(os.path.abspath(__file__)), "appIcon.ico")
-        # Eğer dosya yoksa kopyala
+    exe_dizin = get_appData_path()
+    kaynak_dizin = os.path.dirname(os.path.abspath(__file__))
+
+    hedef_notificationIcon_yolu = os.path.join(exe_dizin, "notificationIcon.ico")
+    hedef_previewIcon_yolu = os.path.join(exe_dizin, "previewIcon.ico")
+    hedef_appIcon_yolu = os.path.join(exe_dizin, "appIcon.ico")
+
+    kaynak_notificationIcon_yolu = os.path.join(kaynak_dizin, "notificationIcon.ico")
+    kaynak_previewIcon_yolu = os.path.join(kaynak_dizin, "previewIcon.ico")
+    kaynak_appIcon_yolu = os.path.join(kaynak_dizin, "appIcon.ico")
+
+    try:
+        os.makedirs(exe_dizin, exist_ok=True)
         if not os.path.exists(hedef_notificationIcon_yolu):
-            try:
-                shutil.copy2(kaynak_notificationIcon_yolu, hedef_notificationIcon_yolu)
-                shutil.copy2(kaynak_previewIcon_yolu, hedef_previewIcon_yolu)
-                shutil.copy2(kaynak_appIcon_yolu, hedef_appIcon_yolu)
-            except Exception as e:
-                print(f"Icon copy error: {e}")
+            shutil.copy2(kaynak_notificationIcon_yolu, hedef_notificationIcon_yolu)
+        if not os.path.exists(hedef_previewIcon_yolu):
+            shutil.copy2(kaynak_previewIcon_yolu, hedef_previewIcon_yolu)
+        if not os.path.exists(hedef_appIcon_yolu):
+            shutil.copy2(kaynak_appIcon_yolu, hedef_appIcon_yolu)
+    except Exception as e:
+        print(f"Icon copy error: {e}")
+
 copy_icon()
 notificationIcon_path = os.path.join(get_appData_path(), "notificationIcon.ico")
 previewIcon_path = os.path.join(get_appData_path(), "previewIcon.ico")
 appIcon_path = os.path.join(get_appData_path(), "appIcon.ico")
+
 
 
 # ffmpeg path
@@ -292,11 +300,36 @@ def youtube_ses_indir(url, kayit_yeri):
 
 
 
+#URL'den list parametresini temizle
+def clear_playlist_parameter(url):
+    parsed_url = urlparse(url)
+    query_params = parse_qs(parsed_url.query)
+
+    # 'list' parametresini kaldır
+    query_params.pop('list', None)
+
+    # Query parametrelerini tekrar birleştir
+    new_query = urlencode(query_params, doseq=True)
+
+    # Yeni URL'yi oluştur
+    temiz_url = urlunparse((
+        parsed_url.scheme,
+        parsed_url.netloc,
+        parsed_url.path,
+        parsed_url.params,
+        new_query,
+        parsed_url.fragment
+    ))
+
+    return temiz_url
+
+
+
 # İndir butonuna ait fonksiyon
 def indir():
     global cancel_download
     cancel_download = False  # Her yeni işlemde sıfırla
-    url = url_entry.get()
+    url = clear_playlist_parameter(url_entry.get())
     secim = secenek_var.get()
     kayit_yeri = os.path.join(os.path.expanduser("~"), "Downloads")
 
@@ -372,7 +405,7 @@ secenek_var = ctk.StringVar(value="1080p")
 secenekler = ["2160p (4K)", "1440p (2K)", "1080p", "720p", "Ses"]
 
 # 'Kalite' etiketi
-indirme_secenegi_label = ctk.CTkLabel(frame, text="Kalite:", font=ctk.CTkFont(size=16))
+indirme_secenegi_label = ctk.CTkLabel(frame, font=ctk.CTkFont(size=16))
 indirme_secenegi_label.grid(row=0, column=0, padx=10, pady=5)
 
 # Seçim menüsü (Combobox eşdeğeri)
@@ -392,7 +425,7 @@ video_url_label = ctk.CTkLabel(frame, text="Video URL:", font=ctk.CTkFont(size=1
 video_url_label.grid(row=0, column=2, padx=10, pady=5)
 
 # URL giriş alanı
-url_entry = ctk.CTkEntry(frame, width=300, placeholder_text="Video Bağlantısını Buraya Yapıştırın")  # beyaz arka plan
+url_entry = ctk.CTkEntry(frame, width=300)  # beyaz arka plan
 url_entry.grid(row=0, column=3, padx=10, pady=5)
 
 
@@ -400,7 +433,6 @@ url_entry.grid(row=0, column=3, padx=10, pady=5)
 # İndir butonu (customtkinter versiyonu)
 indir_buton = ctk.CTkButton(
     root,
-    text="⬇ İndir",
     command=indir,
     width=120,
     height=45,
@@ -416,7 +448,6 @@ indir_buton.pack(pady=20)
 # İptal butonu
 iptal_buton = ctk.CTkButton(
     root,
-    text="✖ İptal Et",
     command=lambda: indirmeyi_iptal_et(),
     width=120,
     height=45,
@@ -561,7 +592,7 @@ def animate_sidebar(target_x, step):
 # Sidebar Kapatma butonu
 close_button = ctk.CTkButton(
     master=sidebar_frame,
-    text="✕",  # Çarpı işareti
+    text="✕",
     font=("Helvetica", 20),
     fg_color="#95aec9",  # Buton rengi
     text_color="black",
@@ -696,10 +727,9 @@ def bildirim_onizleme():
             aktif_dil["preview_info_message"]
         )
 
-# "Bildirimi Önizle" butonunu sidebar'ın altına ekleyelim
+# "Bildirimi Önizle" butonu
 bildirim_button = ctk.CTkButton(
     master=sidebar_icerik,
-    text="Bildirimi Önizle",
     font=("Helvetica", 12),
     command=bildirim_onizleme,
     fg_color="#4c6a8c",  # Butonun arka plan rengi
@@ -721,7 +751,7 @@ sistem_bildirim_var.trace_add("write", lambda *args: ayar_kaydet("sistem_bildiri
 # 1. Seçenek: Sistem bildirimi
 sistem_bildirim_checkbox = ctk.CTkCheckBox(
     master=sidebar_icerik,
-    text="İşlem tamamlandığında\nsistem bildirimi al",
+
     variable=sistem_bildirim_var,
     onvalue=True,
     offvalue=False,
@@ -743,7 +773,6 @@ koyu_mod_var.set(ayar_yukle("koyu_modda_baslat", False))  # Başlangıçta False
 
 koyu_modda_baslat_checkbox = ctk.CTkCheckBox(
     master=sidebar_icerik,
-    text="Koyu modda başlat",
     variable=koyu_mod_var,
     command=lambda: ayar_kaydet("koyu_modda_baslat", koyu_mod_var.get()),  # Checkbox durumunu kaydediyoruz
     onvalue=True,
