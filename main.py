@@ -116,8 +116,8 @@ def progress_hook(d):
 
             # Bilgi label'ı güncelle
             progress_label.configure(
-                text=f"{percent:.1f}% | {downloaded:.2f} / {total_size_mb:.2f}MB | {eta}\n"
-                     f"{aktif_dil['tamamlandi_mesaji_bekleyin']}"
+                text=f"{percent:.1f}%   |   {downloaded:.2f} / {total_size_mb:.2f}MB    |   {eta}\n"
+                     f"{aktif_dil['islem_devam_ediyor']}"
             )
 
             root.update_idletasks()
@@ -305,13 +305,17 @@ def clear_playlist_parameter(url):
     parsed_url = urlparse(url)
     query_params = parse_qs(parsed_url.query)
 
-    # 'list' parametresini kaldır
-    query_params.pop('list', None)
+    # Kaldırılacak parametreler listesi
+    remove_keys = ['list', 'start_radio', 'rv']
 
-    # Query parametrelerini tekrar birleştir
+    # Bu parametreleri temizle
+    for key in remove_keys:
+        query_params.pop(key, None)
+
+    # Yeni query string oluştur
     new_query = urlencode(query_params, doseq=True)
 
-    # Yeni URL'yi oluştur
+    # Temiz URL
     temiz_url = urlunparse((
         parsed_url.scheme,
         parsed_url.netloc,
