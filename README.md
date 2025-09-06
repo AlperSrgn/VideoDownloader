@@ -13,7 +13,7 @@ Based on [yt-dlp](https://github.com/yt-dlp/yt-dlp).
 
 # INSTALLATION
 ## Download VideoDownloaderSetup.exe
-### [![İNDİR](https://github.com/user-attachments/assets/8d8adf06-7013-4017-8434-51984f624e3b)](https://github.com/AlperSrgn/X-Youtube-Video-Downloader/releases/download/v1.0.0/VideoDownloaderSetup.exe) 
+### [![İNDİR](https://github.com/user-attachments/assets/8d8adf06-7013-4017-8434-51984f624e3b)](https://github.com/AlperSrgn/VideoDownloader/releases/download/v1.0.0/VideoDownloaderSetup.exe) 
 <br>
 
 **Note:** Video Downloader comes bundled with FFmpeg which is used for processing videos. When you download it as a setup file, you do not need to take any action. 
@@ -39,7 +39,7 @@ After running this command, the *imageio-ffmpeg* installation will be completed.
 ## Convert to Exe
 After installing in the IDE, you can use this command to convert it to **exe file** with [**pyinstaller**](https://github.com/pyinstaller/pyinstaller):  
 
-`$ pyinstaller --onefile --noconsole --add-binary "C:\Users\alper\PycharmProjects\X-Youtube-Video-Downloader\.venv\Lib\site-packages\imageio_ffmpeg\binaries\ffmpeg-win-x86_64-v7.1.exe;." --add-data "notificationIcon.ico;." --add-data "previewIcon.ico;." --add-data "appIcon.ico;." --add-data "languages.py;." --hidden-import=plyer.platforms.win.notification main.py`
+`$ pyinstaller --onefile --noconsole --add-binary "C:\Users\alper\PycharmProjects\VideoDownloader\.venv\Lib\site-packages\imageio_ffmpeg\binaries\ffmpeg-win-x86_64-v7.1.exe;." --add-data "notificationIcon.ico;." --add-data "previewIcon.ico;." --add-data "appIcon.ico;." --add-data "languages.py;." --hidden-import=plyer.platforms.win.notification main.py`
 
 
 <br><br>
