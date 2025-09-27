@@ -345,6 +345,10 @@ def indir():
         return
 
     indir_buton.configure(state="disabled")
+    url_entry.configure(state="disabled")
+    kalite_secenek_menu.configure(state="disabled")
+    playlist_checkbox.configure(state="disabled")
+
     iptal_buton.pack(pady=5)
 
     # Progress bar ve label'ı göster
@@ -360,9 +364,9 @@ def indir():
             else:
                 cozunurluk_haritasi = {
                     "720p": "720p",
-                    "1080p": "1080p",
-                    "1440p (2K)": "2K",
-                    "2160p (4K)": "4K"
+                    "1080p ᴴᴰ": "1080p",
+                    "1440p ²ᴷ": "2K",
+                    "2160p ⁴ᴷ": "4K"
                 }
                 hedef_cozunurluk = cozunurluk_haritasi.get(secim)
                 if hedef_cozunurluk:
@@ -375,7 +379,13 @@ def indir():
         except Exception as e:
             messagebox.showerror("Error", f"An error occurred:\n{str(e)}")
         finally:
+            bildirim_button.configure(state="normal")
+            dil_menu_button.configure(state="normal")
             indir_buton.configure(state="normal")
+            url_entry.configure(state="normal")
+            kalite_secenek_menu.configure(state="normal")
+            playlist_checkbox.configure(state="normal")
+
             iptal_buton.pack_forget()  # Gizle
             progress_bar.pack_forget()
             progress_label.pack_forget()
@@ -391,6 +401,15 @@ def indirmeyi_iptal_et():
     progress_label.configure(text=aktif_dil["indirme_iptal_ediliyor"])
 
 
+# Url list parametre kontrolüne göre checkbox gizleme
+def url_changed(*args):
+    url = url_var.get()
+    if "list=" in url:
+        playlist_checkbox.grid()  # Checkbox'ı göster
+    else:
+        playlist_checkbox.grid_remove()  # Checkbox'ı gizle
+
+
 #######################################################################################################################
 #######################################################################################################################
 
@@ -398,40 +417,60 @@ def indirmeyi_iptal_et():
 # Arayüz oluşturma
 root = ctk.CTk()
 root.title("Video Downloader")
-root.geometry("800x320")
+root.geometry("800x370")
 
 # Ana çerçeve
-frame = ctk.CTkFrame(root, fg_color="#ebebeb")  # Arka plan şeffaf (ya da istediğin renk)
+frame = ctk.CTkFrame(root, fg_color="#ebebeb")
 frame.pack(pady=30, padx=30)
 
 # İndirme seçenekleri
-secenek_var = ctk.StringVar(value="1080p")
-secenekler = ["2160p (4K)", "1440p (2K)", "1080p", "720p", "Ses"]
+secenek_var = ctk.StringVar(value="1080p ᴴᴰ")
+#secenekler = ["720p", "1080p ᴴᴰ", "1440p ²ᴷ", "2160p ⁴ᴷ", "Ses"]
 
 # 'Kalite' etiketi
 indirme_secenegi_label = ctk.CTkLabel(frame, font=ctk.CTkFont(size=16))
 indirme_secenegi_label.grid(row=0, column=0, padx=10, pady=5)
 
 # Seçim menüsü (Combobox eşdeğeri)
-secenek_menu = ctk.CTkOptionMenu(
+kalite_secenek_menu = ctk.CTkOptionMenu(
     frame,
     variable=secenek_var,
-    values=secenekler,
+    # values=secenekler,
     fg_color="#e0e0e0",         # Menü butonunun arka plan rengi
     text_color="#333333",       # Yazı rengi
     button_color="#d0d0d0",     # Açılır ok butonunun rengi
     button_hover_color="#c0c0c0"  # Hover sırasında ok butonu rengi
 )
-secenek_menu.grid(row=0, column=1, padx=10, pady=5)
+kalite_secenek_menu.grid(row=0, column=1, padx=10, pady=5)
+
 
 # 'Video URL' etiketi
 video_url_label = ctk.CTkLabel(frame, text="Video URL:", font=ctk.CTkFont(size=16))
 video_url_label.grid(row=0, column=2, padx=10, pady=5)
 
-# URL giriş alanı
-url_entry = ctk.CTkEntry(frame, width=300)  # beyaz arka plan
+
+# URL giriş alanı için StringVar ve Entry
+url_var = ctk.StringVar()
+url_var.trace_add("write", url_changed)  # Her değişiklikte tetiklenir
+url_entry = ctk.CTkEntry(frame, width=300, textvariable=url_var)
 url_entry.grid(row=0, column=3, padx=10, pady=5)
 
+# Checkbox (başta gizli)
+frame.grid_rowconfigure(1, minsize=50)
+playlist_checkbox_var = ctk.BooleanVar()
+playlist_checkbox = ctk.CTkCheckBox(
+    frame,
+    variable=playlist_checkbox_var,
+    font=ctk.CTkFont(size=15),
+    checkbox_height=20,
+    checkbox_width=20,
+    border_width=2,
+    fg_color="#333333",
+    hover_color="#cccccc",
+    corner_radius=4
+)
+playlist_checkbox.grid(row=1, column=3, sticky="w", padx=10, pady=5)
+playlist_checkbox.grid_remove()  # Başlangıçta gizle
 
 
 # İndir butonu (customtkinter versiyonu)
@@ -514,17 +553,13 @@ def toggle_theme():
         video_url_label.configure(text_color="#333333")  # Etiket rengini açığa döndür
         indirme_secenegi_label.configure(text_color="#333333")  # Etiket rengini açığa döndür
         downloads_button.configure(fg_color="#dddddd")
-        theme_button.configure(text="🌙",fg_color="#dddddd")  # Buton sembolünü değiştir
+        theme_button.configure(text="🌙",fg_color="#dddddd")
         menu_button.configure(fg_color="#ebebeb", text_color="#333333", hover_color="#d0d0d0")
         progress_label.configure(text_color="#333333", bg_color="#ebebeb")
         url_entry.configure(fg_color="#ffffff", text_color="#333333")
-        iptal_buton.configure(fg_color="#ebebeb", hover_color="#dddddd",)
-        secenek_menu.configure(
-            fg_color="#e0e0e0",  # Menü butonunun arka plan rengi
-            text_color="#333333",  # Yazı rengi
-            button_color="#d0d0d0",  # Açılır ok butonunun rengi
-            button_hover_color="#c0c0c0"  # Hover sırasında ok butonu rengi
-        )
+        iptal_buton.configure(fg_color="#ebebeb", hover_color="#dddddd")
+        playlist_checkbox.configure(text_color="#333333", bg_color="#ebebeb", border_color="#333333", fg_color="#333333", checkmark_color="#ebebeb")
+        kalite_secenek_menu.configure(fg_color="#e0e0e0",  text_color="#333333",  button_color="#d0d0d0",  button_hover_color="#c0c0c0")
         koyu_mod = False
     else:
         # Koyu moda geç
@@ -533,18 +568,13 @@ def toggle_theme():
         video_url_label.configure(text_color="#ebebeb")  # Etiket rengini beyaza çevir
         indirme_secenegi_label.configure(text_color="#ebebeb")  # Etiket rengini beyaza çevir
         downloads_button.configure(fg_color="#565656")
-        theme_button.configure(text="🌞", fg_color="#565656")  # Buton sembolünü değiştir
+        theme_button.configure(text="🌞", fg_color="#565656")
         menu_button.configure(fg_color="#333333",text_color="#d0d0d0", hover_color="#565656")
         progress_label.configure(text_color="#ebebeb", bg_color="#333333")
         iptal_buton.configure(fg_color="#333333", hover_color="#565656",)
         url_entry.configure(fg_color="#565656", text_color="#ebebeb")            #URL alanı
-        secenek_menu.configure(
-            fg_color="#565656",  # Koyu gri arka plan
-            text_color="#ebebeb",  # Beyaz yazı
-            button_color="#444444",  # Koyu gri ok butonu
-            button_hover_color="#666666"  # Hover sırasında daha açık gri
-        )
-
+        playlist_checkbox.configure(text_color="#ebebeb", bg_color="#333333", border_color="#ebebeb", fg_color="#ebebeb", checkmark_color="#333333")
+        kalite_secenek_menu.configure(fg_color="#565656", text_color="#ebebeb", button_color="#444444", button_hover_color="#666666")
         koyu_mod = True
 
 # 🌙 Koyu mod geçiş butonu
@@ -589,7 +619,7 @@ def animate_sidebar(target_x, step):
     if sidebar_x != target_x:
         sidebar_x += step
         sidebar_frame.place(x=sidebar_x, y=0)  # Sidebar'ı yer değiştir
-        root.after(5, lambda: animate_sidebar(target_x, step))  # Bir adım daha ilerle
+        root.after(5, lambda: animate_sidebar(target_x, step))
     else:
         sidebar_frame.place(x=target_x, y=0)  # Hedef konumda dur
 
@@ -602,10 +632,9 @@ close_button = ctk.CTkButton(
     text_color="black",
     width=35,
     height=35,
-    command=lambda: toggle_sidebar(),  # Sidebar'ı kapatma işlevi
+    command=lambda: toggle_sidebar(),  # Sidebar'ı kapatma
     hover_color="#6c8a9e"
 )
-# Kapatma butonu
 close_button.place(relx=1.0, rely=0.0, anchor="ne", x=-10, y=10)  # Sağ üst köşeye yerleştir
 
 # Sidebar'ı açma veya kapama fonksiyonu
@@ -635,6 +664,7 @@ def dili_degistir(secili_dil):
     sistem_bildirim_checkbox.configure(text=aktif_dil["sistem_bildirim_checkbox"])
     koyu_modda_baslat_checkbox.configure(text=aktif_dil["koyu_modda_baslat_checkbox"])
     bildirim_button.configure(text=aktif_dil["bildirim_button"])
+    playlist_checkbox.configure(text=aktif_dil["oynatma_listesi_checkbox_text"])
     # Seçenekleri yeniden oluştur ve dropdown'a yükle
     secenekler = [
         aktif_dil["2160p"],
@@ -643,29 +673,27 @@ def dili_degistir(secili_dil):
         aktif_dil["720p"],
         aktif_dil["audio"]
     ]
-    secenek_menu.configure(values=secenekler)
+    kalite_secenek_menu.configure(values=secenekler)
     ayar_kaydet("dil", secili_dil)
 
 
 # Dil seçenekleri
 dil_secenekleri = ["Tr", "En"]
 dil_var = ctk.StringVar(value=dil_secenekleri[0])  # Varsayılan dil Türkçe
-dil_menu = ctk.CTkOptionMenu(
+dil_menu_button = ctk.CTkOptionMenu(
     sidebar_icerik,
     variable=dil_var,
     values=dil_secenekleri,
     command=dili_degistir,  # <==
-    width=70,  # Buton genişliği
-    height=30,  # Buton yüksekliği
-    font=("Helvetica", 12),  # Font
-    fg_color="#4c6a8c",  # Arka plan rengi
-    button_color="#004566",  # Menü butonunun rengi
-    text_color="#ebebeb"  # Yazı rengi
+    width=70,
+    height=30,
+    font=("Helvetica", 12),
+    fg_color="#4c6a8c",
+    button_color="#004566",
+    text_color="#ebebeb"
 )
-
 # Sidebar içindeki dil menüsünü sağ alt köşeye yerleştir
-dil_menu.place(relx=1.0, rely=1.0, anchor="se", x=-10, y=-10)
-
+dil_menu_button.place(relx=1.0, rely=1.0, anchor="se", x=-10, y=-10)
 
 
 # Toggle butonu (≡) - Sidebar'ı kontrol etmek için
@@ -681,7 +709,6 @@ menu_button = ctk.CTkButton(
     hover_color="#d0d0d0"
 )
 menu_button.place(x=10, y=10)
-
 
 
 # config.json dosya islemleri
@@ -736,74 +763,67 @@ bildirim_button = ctk.CTkButton(
     master=sidebar_icerik,
     font=("Helvetica", 12),
     command=bildirim_onizleme,
-    fg_color="#4c6a8c",  # Butonun arka plan rengi
-    hover_color="#3b556f",  # Hover (fare üzerine gelince) rengi
-    text_color="#fbfbfb",  # Buton metin rengi
-    width=100,  # Buton genişliği
-    height=30  # Buton yüksekliği
+    fg_color="#4c6a8c",
+    hover_color="#3b556f",
+    text_color="#fbfbfb",
+    width=100,
+    height=30
 )
-
 # Butonu sol alt köşeye yerleştir
 bildirim_button.place(x=10, y=-10, relx=0, rely=1, anchor="sw")
 
 
-# 1. Seçenek
+# Sidebar 1. checkbox
 sistem_bildirim_var = ctk.BooleanVar()
-sistem_bildirim_var.set(ayar_yukle("sistem_bildirimi", False))
+sistem_bildirim_var.set(ayar_yukle("sistem_bildirimi", True))
 sistem_bildirim_var.trace_add("write", lambda *args: ayar_kaydet("sistem_bildirimi", sistem_bildirim_var.get()))
 
-# 1. Seçenek: Sistem bildirimi
 sistem_bildirim_checkbox = ctk.CTkCheckBox(
     master=sidebar_icerik,
-
     variable=sistem_bildirim_var,
     onvalue=True,
     offvalue=False,
     command=sistem_bildirim_degisti,
     font=("Helvetica", 15),
-    text_color="black",  # Metin rengi
-    fg_color="#95aec9",  # Arka plan rengi
-    hover_color="#6c8a9e",  # Hover efekti rengi
-    border_color="black",  # Border rengi
-    border_width=1,  # Kenar kalınlığı
-    checkmark_color="black",  # Seçili olduğunda işaret kutusunun rengi
+    text_color="black",
+    fg_color="#95aec9",
+    hover_color="#6c8a9e",
+    border_color="black",
+    border_width=2,
+    checkmark_color="black",
 )
 sistem_bildirim_checkbox.pack(anchor="w", pady=(60, 20), padx=10, fill="x")
 
 
-# 2. Seçenek
+# Sidebar 2. checkbox
 koyu_mod_var = ctk.BooleanVar()
-koyu_mod_var.set(ayar_yukle("koyu_modda_baslat", False))  # Başlangıçta False, koyu modda başlatma yok
+koyu_mod_var.set(ayar_yukle("koyu_modda_baslat", False))
+koyu_mod_var.trace_add("write", lambda *args: ayar_kaydet("koyu_modda_baslat", koyu_mod_var.get()))
 
 koyu_modda_baslat_checkbox = ctk.CTkCheckBox(
     master=sidebar_icerik,
     variable=koyu_mod_var,
-    command=lambda: ayar_kaydet("koyu_modda_baslat", koyu_mod_var.get()),  # Checkbox durumunu kaydediyoruz
+    command=lambda: ayar_kaydet("koyu_modda_baslat", koyu_mod_var.get()),
     onvalue=True,
     offvalue=False,
     font=("Helvetica", 15),
-    text_color="black",  # Metin rengi
-    fg_color="#95aec9",  # Arka plan rengi
-    hover_color="#6c8a9e",  # Hover efekti rengi
-    border_color="black",  # Border rengi
-    border_width=1,  # Kenar kalınlığı
-    checkmark_color="black",  # Seçili olduğunda işaret kutusunun rengi
+    text_color="black",
+    fg_color="#95aec9",
+    hover_color="#6c8a9e",
+    border_color="black",
+    border_width=2,
+    checkmark_color="black",
 )
 koyu_modda_baslat_checkbox.pack(anchor="w", pady=10, padx=10, fill="x")
 
-
-# Checkbox değiştiğinde sadece ayarı kaydet
-koyu_mod_var.trace_add("write", lambda *args: ayar_kaydet("koyu_modda_baslat", koyu_mod_var.get()))
-
 # Eğer koyu mod aktifse başlarken uygula
-if koyu_mod_var.get():  # Eğer ayarlarda koyu modda başlatma işareti varsa
+if koyu_mod_var.get():
     toggle_theme()
 
-
+# Dil ayarları
 aktif_dil = ayar_yukle("dil", "Tr")
 dil_var.set(aktif_dil)
 dili_degistir(aktif_dil)  # GUI'yi seçilen dile göre başlat
-
 
 
 root.mainloop()
