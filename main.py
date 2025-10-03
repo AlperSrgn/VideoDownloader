@@ -22,6 +22,20 @@ from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 # pyinstaller --onefile --noconsole --add-binary "C:\Users\alper\PycharmProjects\VideoDownloader\.venv\Lib\site-packages\imageio_ffmpeg\binaries\ffmpeg-win-x86_64-v7.1.exe;." --add-data "notificationIcon.ico;." --add-data "previewIcon.ico;." --add-data "appIcon.ico;." --add-data "languages.py;." --hidden-import=plyer.platforms.win.notification main.py
 
 
+# Uygulamayı kaldır
+def uninstall_app():
+    # Uygulamanın bulunduğu dizini al
+    app_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+
+    # uninstall.exe path
+    uninstall_path = os.path.join(app_dir, "unins000.exe")
+
+    if os.path.exists(uninstall_path):
+        subprocess.Popen([uninstall_path])
+        sys.exit()  # Uygulamayı sonlandır
+    else:
+        messagebox.showerror("Hata", aktif_dil["file_not_found_error"])
+
 
 # EXE ve script için doğru klasörü bul
 def get_appData_path(app_name="VideoDownloader"):
@@ -364,9 +378,9 @@ def indir():
             else:
                 cozunurluk_haritasi = {
                     "720p": "720p",
-                    "1080p": "1080p",
-                    "1440p (2K)": "2K",
-                    "2160p (4K)": "4K"
+                    "1080p ᴴᴰ": "1080p",
+                    "1440p ²ᴷ": "2K",
+                    "2160p ⁴ᴷ": "4K"
                 }
                 hedef_cozunurluk = cozunurluk_haritasi.get(secim)
                 if hedef_cozunurluk:
@@ -424,8 +438,8 @@ frame = ctk.CTkFrame(root, fg_color="#ebebeb")
 frame.pack(pady=30, padx=30)
 
 # İndirme seçenekleri
-secenek_var = ctk.StringVar(value="1080p")
-#secenekler = ["720p", "1080p", "1440p (2K)", "2160p (4K)", "Ses"]
+secenek_var = ctk.StringVar(value="1080p ᴴᴰ")
+#secenekler = ["720p", "1080p ᴴᴰ", "1440p ²ᴷ", "2160p ⁴ᴷ", "Ses"]
 
 # 'Kalite' etiketi
 indirme_secenegi_label = ctk.CTkLabel(frame, font=ctk.CTkFont(size=16))
@@ -473,12 +487,13 @@ playlist_checkbox.grid(row=1, column=3, sticky="w", padx=10, pady=5)
 playlist_checkbox.grid_remove()  # Başlangıçta gizle
 
 
-# İndir butonu (customtkinter versiyonu)
+# İndir butonu
 indir_buton = ctk.CTkButton(
     root,
     command=indir,
     width=120,
     height=45,
+    #image=download_icon,
     font=("Helvetica", 14, "bold"),
     fg_color="#458bc6",         # Normal arka plan rengi
     hover_color="#1f567a",      # Hover (üstüne gelince) rengi
@@ -494,12 +509,13 @@ iptal_buton = ctk.CTkButton(
     command=lambda: indirmeyi_iptal_et(),
     width=120,
     height=45,
+    #image=cancel_icon,
     font=("Helvetica", 14, "bold"),
     fg_color="#ebebeb",         # Arka plan rengi
     hover_color="#dddddd",      # Hover rengi
     text_color="#d9534f",
-    border_color="#d9534f",  # Kenarlık rengi (aynı tonla uyumlu)
-    border_width=1,            # Kenarlık kalınlığı
+    border_color="#d9534f",
+    border_width=2,
     corner_radius=5
 
 )
@@ -530,6 +546,7 @@ def open_downloads_folder():
 downloads_button = ctk.CTkButton(
     master=root,
     text="📁",
+    #image=folder_icon,
     command=open_downloads_folder,
     width=50,
     height=50,
@@ -568,7 +585,7 @@ def toggle_theme():
         video_url_label.configure(text_color="#ebebeb")  # Etiket rengini beyaza çevir
         indirme_secenegi_label.configure(text_color="#ebebeb")  # Etiket rengini beyaza çevir
         downloads_button.configure(fg_color="#565656")
-        theme_button.configure(text="🌞", fg_color="#565656")
+        theme_button.configure(text="🔆", fg_color="#565656")
         menu_button.configure(fg_color="#333333",text_color="#d0d0d0", hover_color="#565656")
         progress_label.configure(text_color="#ebebeb", bg_color="#333333")
         iptal_buton.configure(fg_color="#333333", hover_color="#565656",)
@@ -580,7 +597,8 @@ def toggle_theme():
 # 🌙 Koyu mod geçiş butonu
 theme_button = ctk.CTkButton(
     master=root,
-    text="🌙",  # Başlangıçta "🌙" sembolü
+    text="🌙",
+    #image=moon_icon,    # Başlangıçta "🌙" ikonu
     width=50,
     height=50,
     font=("Helvetica", 30, "bold"),
@@ -627,7 +645,7 @@ def animate_sidebar(target_x, step):
 close_button = ctk.CTkButton(
     master=sidebar_frame,
     text="✕",
-    font=("Helvetica", 20),
+    font=("Helvetica", 19),
     fg_color="#95aec9",  # Buton rengi
     text_color="black",
     width=35,
@@ -665,6 +683,7 @@ def dili_degistir(secili_dil):
     koyu_modda_baslat_checkbox.configure(text=aktif_dil["koyu_modda_baslat_checkbox"])
     bildirim_button.configure(text=aktif_dil["bildirim_button"])
     playlist_checkbox.configure(text=aktif_dil["oynatma_listesi_checkbox_text"])
+    uninstall_button.configure(text=aktif_dil["uninstall_button"])
     # Seçenekleri yeniden oluştur ve dropdown'a yükle
     secenekler = [
         aktif_dil["2160p"],
@@ -677,7 +696,7 @@ def dili_degistir(secili_dil):
     ayar_kaydet("dil", secili_dil)
 
 
-# Dil seçenekleri
+# Dil seçenekleri butonu
 dil_secenekleri = ["Tr", "En"]
 dil_var = ctk.StringVar(value=dil_secenekleri[0])  # Varsayılan dil Türkçe
 dil_menu_button = ctk.CTkOptionMenu(
@@ -692,8 +711,7 @@ dil_menu_button = ctk.CTkOptionMenu(
     button_color="#004566",
     text_color="#ebebeb"
 )
-# Sidebar içindeki dil menüsünü sağ alt köşeye yerleştir
-dil_menu_button.place(relx=1.0, rely=1.0, anchor="se", x=-10, y=-10)
+dil_menu_button.place(relx=0.0, rely=1.0, anchor="sw", x=10, y=-10)
 
 
 # Toggle butonu (≡) - Sidebar'ı kontrol etmek için
@@ -762,6 +780,7 @@ def bildirim_onizleme():
 bildirim_button = ctk.CTkButton(
     master=sidebar_icerik,
     font=("Helvetica", 12),
+    #image= notification_icon,
     command=bildirim_onizleme,
     fg_color="#4c6a8c",
     hover_color="#3b556f",
@@ -769,8 +788,22 @@ bildirim_button = ctk.CTkButton(
     width=100,
     height=30
 )
-# Butonu sol alt köşeye yerleştir
-bildirim_button.place(x=10, y=-10, relx=0, rely=1, anchor="sw")
+bildirim_button.place(x=10, y=-45, relx=0, rely=1, anchor="sw")
+
+
+#Uygulamayı silme butonu
+uninstall_button = ctk.CTkButton(
+    command=uninstall_app,
+    master=sidebar_icerik,
+    #image= trash_icon,
+    font=("Helvetica", 12),
+    width=30,
+    height=30,
+    fg_color="#cc3b3b",
+    hover_color="#ff4c4c",
+    text_color="#fbfbfb",
+)
+uninstall_button.place(relx=1.0, rely=1.0, anchor="se", x=-10, y=-10)
 
 
 # Sidebar 1. checkbox
@@ -784,12 +817,15 @@ sistem_bildirim_checkbox = ctk.CTkCheckBox(
     onvalue=True,
     offvalue=False,
     command=sistem_bildirim_degisti,
-    font=("Helvetica", 15),
+    font=("Helvetica", 14),
     text_color="black",
     fg_color="#95aec9",
     hover_color="#6c8a9e",
     border_color="black",
     border_width=2,
+    checkbox_width=20,
+    checkbox_height=20,
+    corner_radius=4,
     checkmark_color="black",
 )
 sistem_bildirim_checkbox.pack(anchor="w", pady=(60, 20), padx=10, fill="x")
@@ -806,12 +842,15 @@ koyu_modda_baslat_checkbox = ctk.CTkCheckBox(
     command=lambda: ayar_kaydet("koyu_modda_baslat", koyu_mod_var.get()),
     onvalue=True,
     offvalue=False,
-    font=("Helvetica", 15),
+    font=("Helvetica", 14),
     text_color="black",
     fg_color="#95aec9",
     hover_color="#6c8a9e",
     border_color="black",
     border_width=2,
+    checkbox_width=20,
+    checkbox_height=20,
+    corner_radius=4,
     checkmark_color="black",
 )
 koyu_modda_baslat_checkbox.pack(anchor="w", pady=10, padx=10, fill="x")
