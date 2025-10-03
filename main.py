@@ -364,9 +364,9 @@ def indir():
             else:
                 cozunurluk_haritasi = {
                     "720p": "720p",
-                    "1080p ᴴᴰ": "1080p",
-                    "1440p ²ᴷ": "2K",
-                    "2160p ⁴ᴷ": "4K"
+                    "1080p": "1080p",
+                    "1440p (2K)": "2K",
+                    "2160p (4K)": "4K"
                 }
                 hedef_cozunurluk = cozunurluk_haritasi.get(secim)
                 if hedef_cozunurluk:
@@ -424,8 +424,8 @@ frame = ctk.CTkFrame(root, fg_color="#ebebeb")
 frame.pack(pady=30, padx=30)
 
 # İndirme seçenekleri
-secenek_var = ctk.StringVar(value="1080p ᴴᴰ")
-#secenekler = ["720p", "1080p ᴴᴰ", "1440p ²ᴷ", "2160p ⁴ᴷ", "Ses"]
+secenek_var = ctk.StringVar(value="1080p")
+#secenekler = ["720p", "1080p", "1440p (2K)", "2160p (4K)", "Ses"]
 
 # 'Kalite' etiketi
 indirme_secenegi_label = ctk.CTkLabel(frame, font=ctk.CTkFont(size=16))
