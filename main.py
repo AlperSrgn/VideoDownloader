@@ -259,11 +259,6 @@ def youtube_video_indir_birlestir(url, kayit_yeri, hedef_cozunurluk):
                 timeout=3,
                 app_icon=notificationIcon_path
             )
-        else:
-            messagebox.showinfo(
-                aktif_dil["info_title"],
-                aktif_dil["download_complete_message"]
-            )
 
     except Exception as e:
         messagebox.showerror("Error", f"Merge error:\n{str(e)}")
@@ -302,11 +297,6 @@ def youtube_ses_indir(url, kayit_yeri):
                 message=aktif_dil["audio_download_complete_message"],
                 timeout=3,
                 app_icon=notificationIcon_path
-            )
-        else:
-            messagebox.showinfo(
-                aktif_dil["info_title"],
-                aktif_dil["audio_download_complete_message"]
             )
 
     except Exception as e:
@@ -415,7 +405,7 @@ def indirmeyi_iptal_et():
     progress_label.configure(text=aktif_dil["indirme_iptal_ediliyor"])
 
 
-# Url list parametre kontrolüne göre checkbox gizleme
+# Url list parametre kontrolüne göre checkbox gösterme
 def url_changed(*args):
     url = url_var.get()
     if "list=" in url:
@@ -757,11 +747,17 @@ def ayar_kaydet(anahtar, deger):
         print("Ayar kaydetme hatası:", e)
 # config.json dosya islemleri
 
-
 def sistem_bildirim_degisti():
     ayar_kaydet("sistem_bildirimi", sistem_bildirim_var.get())
 
-# Butona tıklatınca bildirim gönderme
+    # Butonu aktif/pasif yap
+    aktif = sistem_bildirim_var.get()
+    if aktif:
+        bildirim_button.configure(state="normal")
+    else:
+        bildirim_button.configure(state="disabled")
+
+# Butona tıklayınca bildirim gönderme
 def bildirim_onizleme():
     if sistem_bildirim_var.get():
         notification.notify(
@@ -769,11 +765,6 @@ def bildirim_onizleme():
             message=aktif_dil["system_notification_message"],
             timeout=3,
             app_icon=previewIcon_path
-        )
-    else:
-        messagebox.showinfo(
-            aktif_dil["preview_info_title"],
-            aktif_dil["preview_info_message"]
         )
 
 # "Bildirimi Önizle" butonu
@@ -785,7 +776,7 @@ bildirim_button = ctk.CTkButton(
     fg_color="#4c6a8c",
     hover_color="#3b556f",
     text_color="#fbfbfb",
-    width=100,
+    width=36,
     height=30
 )
 bildirim_button.place(x=10, y=-45, relx=0, rely=1, anchor="sw")
@@ -797,7 +788,7 @@ uninstall_button = ctk.CTkButton(
     master=sidebar_icerik,
     #image= trash_icon,
     font=("Helvetica", 12),
-    width=30,
+    width=50,
     height=30,
     fg_color="#cc3b3b",
     hover_color="#ff4c4c",
