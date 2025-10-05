@@ -17,7 +17,6 @@ from languages import LANGUAGES
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
 
-
 # exe
 # pyinstaller --onefile --noconsole --add-binary "C:\Users\alper\PycharmProjects\VideoDownloader\.venv\Lib\site-packages\imageio_ffmpeg\binaries\ffmpeg-win-x86_64-v7.1.exe;." --add-data "notificationIcon.ico;." --add-data "previewIcon.ico;." --add-data "appIcon.ico;." --add-data "languages.py;." --hidden-import=plyer.platforms.win.notification main.py
 
@@ -152,8 +151,59 @@ def temizle_dosya_adi(dosya_adi):
 
 
 
-# Video indirme ve birleştirme
+# SABR için uygun formatı bul
+def uygun_format_bul(formats, yukseklik):
+    """Hedef çözünürlüğe uygun video+ses eşleşmesi bulur, url kontrolü yapar."""
+    video_formatlar = [
+        f for f in formats
+        if f.get("url") and f.get("vcodec") != "none" and (f.get("height") is not None)
+    ]
+    audio_formatlar = [
+        f for f in formats
+        if f.get("url") and f.get("acodec") != "none" and f.get("vcodec") == "none"
+    ]
+
+    if not video_formatlar or not audio_formatlar:
+        return None, None
+
+    heights = sorted({f["height"] for f in video_formatlar if f["height"] <= yukseklik}, reverse=True)
+    if not heights:
+        heights = sorted({f["height"] for f in video_formatlar}, reverse=True)
+
+    for h in heights:
+        candidates_v = [f for f in video_formatlar if f.get("height") == h]
+        if not candidates_v:
+            continue
+        chosen_video = sorted(candidates_v, key=lambda x: x.get("tbr") or 0, reverse=True)[0]
+        chosen_audio = max(audio_formatlar, key=lambda x: x.get("abr", 0), default=None)
+
+        # URL kontrolü
+        if chosen_video and chosen_audio:
+            if chosen_video.get("url") and chosen_audio.get("url"):
+                print(
+                    f"[DEBUG] Compatible files found:\n "
+                    f"Video: {chosen_video['format_id']} ({chosen_video.get('height')}p)\n "
+                    f"Audio: {chosen_audio['format_id']}"
+                )
+                return chosen_video, chosen_audio
+            else:
+                print(
+                    f"[DEBUG] URL missing due to SABR protection -> "
+                    f"Video: {chosen_video['format_id']} ({chosen_video.get('height')}p), "
+                    f"Audio: {chosen_audio['format_id']}"
+                )
+
+                return None, None
+
+
+
+# Video ve ses indir-birlestir
 def youtube_video_indir_birlestir(url, kayit_yeri, hedef_cozunurluk):
+
+    if not url or not url.startswith(("http://", "https://")):
+        messagebox.showwarning(aktif_dil["warning_title"], aktif_dil["invalid_url_warning"])
+        return
+
     cozunurluk_haritasi = {
         "720p": 720,
         "1080p": 1080,
@@ -167,105 +217,112 @@ def youtube_video_indir_birlestir(url, kayit_yeri, hedef_cozunurluk):
 
     yukseklik = cozunurluk_haritasi[hedef_cozunurluk]
 
-    # Video bilgilerini al
-    with yt_dlp.YoutubeDL({"quiet": True}) as ydl:
-        info = ydl.extract_info(url, download=False)
-        video_title = info.get("title", "indirilen_video")
+    client_list = ["web", "android", "ios", "tv", "web_mobile"]
 
+    video_info = None
+    selected_client = None
+    video_format = None
+    audio_format = None
+
+    for client in client_list:
+        try:
+            print(f"[DEBUG] Trying client: {client}")
+            with yt_dlp.YoutubeDL({"quiet": True, "player_client": client}) as ydl:
+                info = ydl.extract_info(url, download=False)
+                formats = info.get("formats", [])
+                v_fmt, a_fmt = uygun_format_bul(formats, yukseklik)
+                if v_fmt and a_fmt:
+                    video_info = info
+                    selected_client = client
+                    video_format = v_fmt
+                    audio_format = a_fmt
+                    break
+                else:
+                    print(f"[DEBUG] Client {client}: No compatible format found or URL missing due to SABR protection.")
+        except Exception as e:
+            print(f"[DEBUG] Client {client} raised an error: {e}")
+            continue
+
+
+    if not video_info:
+        messagebox.showerror(aktif_dil["error_title"], aktif_dil["download_video_format_error"])
+        return
+
+
+    video_title = video_info.get("title", "indirilen_video")
     temiz_video_title = temizle_dosya_adi(video_title)
     base_filename = os.path.join(kayit_yeri, temiz_video_title)
 
-    # Progress'i göstermek için global bar'ı sıfırla
     progress_bar.set(0)
     progress_bar.pack(pady=10)
-    #progress_label.configure(text="Video indiriliyor...")
     progress_label.pack()
 
-    # İndirme ayarları
+    common_opts = {
+        "quiet": True,
+        "progress_hooks": [progress_hook],
+        "player_client": selected_client,
+    }
+
     ydl_opts_video = {
-        "format": f"bestvideo[height={yukseklik}]/bestvideo",
+        **common_opts,
+        "format": video_format["format_id"],
         "outtmpl": f"{base_filename}_(Video).%(ext)s",
-        "progress_hooks": [progress_hook],
-        "quiet": True
     }
-
     ydl_opts_audio = {
-        "format": "bestaudio",
-        "outtmpl": f"{base_filename}_(Ses).%(ext)s",
-        "progress_hooks": [progress_hook],
-        "quiet": True
+        **common_opts,
+        "format": audio_format["format_id"],
+        "outtmpl": f"{base_filename}_(Audio).%(ext)s",
     }
 
-    # Video indir
-    with yt_dlp.YoutubeDL(ydl_opts_video) as ydl:
-        ydl.download([url])
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts_video) as ydl:
+            ydl.download([url])
+        with yt_dlp.YoutubeDL(ydl_opts_audio) as ydl:
+            ydl.download([url])
+    except Exception as e:
+        messagebox.showerror("Error", f"Download error:\n{e}")
+        return
 
-    # Ses indir
-    #progress_label.configure(text="Ses indiriliyor...")
-    with yt_dlp.YoutubeDL(ydl_opts_audio) as ydl:
-        ydl.download([url])
+    try:
+        video_path = glob.glob(f"{base_filename}_(Video).*")[0]
+        audio_path = glob.glob(f"{base_filename}_(Audio).*")[0]
+    except IndexError:
+        messagebox.showerror("Error", "The downloaded files were not found.")
+        return
 
-    # Dosya yolları
-    video_path = glob.glob(f"{base_filename}_(Video).*")[0]
-    audio_path = glob.glob(f"{base_filename}_(Ses).*")[0]
-
-    # Çıkış dosyası
     output_filename = unique_filename(kayit_yeri, f"{temiz_video_title}.mp4")
     output_path = os.path.join(kayit_yeri, output_filename)
 
-    update_file_timestamp(video_path)
-    update_file_timestamp(audio_path)
+    ffmpeg_path = get_ffmpeg_path()
+    ffmpeg_cmd = [
+        ffmpeg_path, "-y",
+        "-i", video_path,
+        "-i", audio_path,
+        "-c:v", "copy",
+        "-c:a", "aac",
+        "-strict", "experimental",
+        "-shortest",
+        output_path
+    ]
 
-    # Dosyalar hazır mı kontrolü
-    while not os.path.exists(video_path) or not os.path.exists(audio_path):
-        time.sleep(1)
+    subprocess.run(ffmpeg_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, creationflags=subprocess.CREATE_NO_WINDOW)
 
-    try:
-        # Birleştirme
-        ffmpeg_path = get_ffmpeg_path()
-        ffmpeg_cmd = [
-            ffmpeg_path,
-            "-loglevel", "quiet",
-            "-y",
-            "-i", video_path,
-            "-i", audio_path,
-            "-c:v", "copy",
-            "-c:a", "aac",
-            "-strict", "experimental",
-            output_path
-        ]
+    os.remove(video_path)
+    os.remove(audio_path)
 
-        creationflags = 0
-        if sys.platform == "win32":
-            creationflags = subprocess.CREATE_NO_WINDOW
+    # Tamamlandığında bildir
+    if sistem_bildirim_var.get():
+        notification.notify(
+            title=aktif_dil["operation_completed"],
+            message=aktif_dil["download_complete_message"],
+            timeout=3,
+            app_icon=notificationIcon_path
+        )
+    print(f"[DEBUG] Download completed: {output_path}")
 
-        with open(os.devnull, 'w') as devnull:
-            subprocess.run(
-                ffmpeg_cmd,
-                stdout=devnull,
-                stderr=devnull,
-                check=True,
-                creationflags=creationflags
-            )
-
-        # Geçici dosyaları sil
-        os.remove(video_path)
-        os.remove(audio_path)
-
-        if sistem_bildirim_var.get():
-            notification.notify(
-                title=aktif_dil["operation_completed"],
-                message=aktif_dil["download_complete_message"],
-                timeout=3,
-                app_icon=notificationIcon_path
-            )
-
-    except Exception as e:
-        messagebox.showerror("Error", f"Merge error:\n{str(e)}")
-
-    finally:
-        progress_bar.pack_forget()
-        progress_label.pack_forget()
+    # Progressbar'ı sıfırla
+    progress_bar.pack_forget()
+    progress_label.pack_forget()
 
 
 
