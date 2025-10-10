@@ -1,7 +1,7 @@
 LANGUAGES = {
     "Tr": {
         "indir": "⬇ İndir",
-        "iptal": "✖ İptal Et",
+        "iptal": "❌ İptal Et",
         "link_placeholder": "Video bağlantısını buraya yapıştırın",
         "uyari": "Lütfen bir video linki girin!",
         "kalite": "Kalite",
@@ -27,8 +27,10 @@ LANGUAGES = {
         "file_not_found_error": "'unins000.exe' dosyası bulunamadı. Uygulama kurulu olmayabilir veya dosya silinmiş olabilir.",
         "uninstall_button": "Kaldır",
         "download_video_format_error": "Geçersiz bağlantı veya platform korumaları (ör. SABR)"
-                                       " nedeniyle uygun format bulunamadı.\n\n"
+                                       " nedeniyle içerik indirilemedi\n\n"
                                        "Lütfen bağlantının geçerli ve erişilebilir olduğundan emin olun.",
+        "uninstall_app_title": "Uygulamayı kaldır",
+        "uninstall_app_message": "Uygulama bilgisayarınızdan kaldırılacaktır.\nDevam etmek istiyor musunuz?",
         "2160p": "2160p ⁴ᴷ",
         "1440p": "1440p ²ᴷ",
         "1080p": "1080p ᴴᴰ",
@@ -38,7 +40,7 @@ LANGUAGES = {
     },
     "En": {
         "indir": "⬇ Download",
-        "iptal": "✖ Cancel",
+        "iptal": "❌ Cancel",
         "link_placeholder": "Paste video link here",
         "uyari": "Please enter a video link!",
         "kalite": "Quality",
@@ -64,9 +66,11 @@ LANGUAGES = {
         "file_not_found_error": "'unins000.exe' was not found. The application may not be installed or the file might have been deleted.",
         "uninstall_button": "Uninstall",
         "download_video_format_error": (
-            "No suitable format found due to invalid URL or platform protections (e.g., SABR).\n\n"
+            "Content could not be downloaded due to an invalid link or platform protections (e.g., SABR).\n\n"
             "Please ensure the link is valid and accessible."
         ),
+        "uninstall_app_title": "Uninstall app",
+        "uninstall_app_message": "This will remove the application from your computer.\nDo you want to continue?",
         "2160p": "2160p ⁴ᴷ",
         "1440p": "1440p ²ᴷ",
         "1080p": "1080p ᴴᴰ",

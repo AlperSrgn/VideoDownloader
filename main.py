@@ -25,15 +25,22 @@ from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 def uninstall_app():
     # Uygulamanın bulunduğu dizini al
     app_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
-
-    # uninstall.exe path
     uninstall_path = os.path.join(app_dir, "unins000.exe")
 
+    # Kullanıcıya onay penceresi göster
+    answer = messagebox.askyesno(aktif_dil["uninstall_app_title"], aktif_dil["uninstall_app_message"])
+
+    # No
+    if not answer:
+        return
+
+    # Yes
     if os.path.exists(uninstall_path):
         subprocess.Popen([uninstall_path])
         sys.exit()  # Uygulamayı sonlandır
     else:
         messagebox.showerror("Hata", aktif_dil["file_not_found_error"])
+
 
 
 # EXE ve script için doğru klasörü bul
@@ -217,7 +224,7 @@ def youtube_video_indir_birlestir(url, kayit_yeri, hedef_cozunurluk):
 
     yukseklik = cozunurluk_haritasi[hedef_cozunurluk]
 
-    client_list = ["web", "android", "ios", "tv", "web_mobile"]
+    client_list = ["android", "ios", "web", "tv", "web_mobile"]
 
     video_info = None
     selected_client = None
@@ -405,10 +412,16 @@ def indir():
         )
         return
 
-    indir_buton.configure(state="disabled")
-    url_entry.configure(state="disabled")
-    kalite_secenek_menu.configure(state="disabled")
-    playlist_checkbox.configure(state="disabled")
+    # disabled
+    for widget in [
+        bildirim_button,
+        indir_buton,
+        url_entry,
+        kalite_secenek_menu,
+        playlist_checkbox,
+        uninstall_button
+    ]:
+        widget.configure(state="disabled")
 
     iptal_buton.pack(pady=5)
 
@@ -440,12 +453,17 @@ def indir():
         except Exception as e:
             messagebox.showerror("Error", f"An error occurred:\n{str(e)}")
         finally:
-            bildirim_button.configure(state="normal")
-            dil_menu_button.configure(state="normal")
-            indir_buton.configure(state="normal")
-            url_entry.configure(state="normal")
-            kalite_secenek_menu.configure(state="normal")
-            playlist_checkbox.configure(state="normal")
+
+            # normal
+            for widget in [
+                bildirim_button,
+                indir_buton,
+                url_entry,
+                kalite_secenek_menu,
+                playlist_checkbox,
+                uninstall_button
+            ]:
+                widget.configure(state="normal")
 
             iptal_buton.pack_forget()  # Gizle
             progress_bar.pack_forget()
@@ -592,7 +610,7 @@ def open_downloads_folder():
 # 📁 İndirilenler klasörünü açma butonu
 downloads_button = ctk.CTkButton(
     master=root,
-    text="📁",
+    text="📂",
     #image=folder_icon,
     command=open_downloads_folder,
     width=50,
@@ -616,8 +634,8 @@ def toggle_theme():
         frame.configure(fg_color="#ebebeb")  # Frame'in arka planını şeffaf yap
         video_url_label.configure(text_color="#333333")  # Etiket rengini açığa döndür
         indirme_secenegi_label.configure(text_color="#333333")  # Etiket rengini açığa döndür
+        light_dark.configure(text="🌙")
         downloads_button.configure(fg_color="#dddddd")
-        theme_button.configure(text="🌙",fg_color="#dddddd")
         menu_button.configure(fg_color="#ebebeb", text_color="#333333", hover_color="#d0d0d0")
         progress_label.configure(text_color="#333333", bg_color="#ebebeb")
         url_entry.configure(fg_color="#ffffff", text_color="#333333")
@@ -631,8 +649,8 @@ def toggle_theme():
         frame.configure(fg_color="#333333")  # Frame'in arka planını koyu yap
         video_url_label.configure(text_color="#ebebeb")  # Etiket rengini beyaza çevir
         indirme_secenegi_label.configure(text_color="#ebebeb")  # Etiket rengini beyaza çevir
+        light_dark.configure(text="🔆")
         downloads_button.configure(fg_color="#565656")
-        theme_button.configure(text="🔆", fg_color="#565656")
         menu_button.configure(fg_color="#333333",text_color="#d0d0d0", hover_color="#565656")
         progress_label.configure(text_color="#ebebeb", bg_color="#333333")
         iptal_buton.configure(fg_color="#333333", hover_color="#565656",)
@@ -640,23 +658,6 @@ def toggle_theme():
         playlist_checkbox.configure(text_color="#ebebeb", bg_color="#333333", border_color="#ebebeb", fg_color="#ebebeb", checkmark_color="#333333")
         kalite_secenek_menu.configure(fg_color="#565656", text_color="#ebebeb", button_color="#444444", button_hover_color="#666666")
         koyu_mod = True
-
-# 🌙 Koyu mod geçiş butonu
-theme_button = ctk.CTkButton(
-    master=root,
-    text="🌙",
-    #image=moon_icon,    # Başlangıçta "🌙" ikonu
-    width=50,
-    height=50,
-    font=("Helvetica", 30, "bold"),
-    fg_color="#dddddd",  # Arka plan rengi
-    hover_color="#bbbbbb",  # Üzerine gelinceki rengi
-    text_color="black",  # Yazı rengi
-    corner_radius=8,  # Yuvarlak köşe
-    command=toggle_theme  # Butona tıklanınca toggle_theme fonksiyonunu çalıştır
-)
-
-theme_button.place(relx=1, rely=1, anchor="se", x=-10, y=-10)
 
 
 # Sidebar ayarları
@@ -753,19 +754,34 @@ dil_menu_button = ctk.CTkOptionMenu(
     command=dili_degistir,  # <==
     width=70,
     height=30,
-    font=("Helvetica", 12),
+    font=("Helvetica", 13),
     fg_color="#4c6a8c",
     button_color="#004566",
     text_color="#ebebeb"
 )
-dil_menu_button.place(relx=0.0, rely=1.0, anchor="sw", x=10, y=-10)
+dil_menu_button.place(relx=1.0, rely=1.0, anchor="se", x=-85, y=-10)
+
+
+# light-dark mode
+light_dark = ctk.CTkButton(
+    sidebar_icerik,
+    text="🌙",
+    font=("Helvetica", 30),
+    fg_color="#4c6a8c",
+    hover_color="#3b556f",
+    text_color="#fbfbfb",
+    width=45,
+    height=45,
+    command=toggle_theme  # Butona tıklanınca toggle_theme fonksiyonunu çalıştır
+)
+light_dark.place(relx=0.0, rely=1.0, anchor="sw", x=10, y=-10)
 
 
 # Toggle butonu (≡) - Sidebar'ı kontrol etmek için
 menu_button = ctk.CTkButton(
     master=root,
-    text="≡",
-    font=("Helvetica", 45, "bold"),
+    text="☰",
+    font=("Helvetica", 30, "bold"),
     fg_color="#ebebeb",  # Başlangıçta açık gri
     text_color="#333333",
     width=50,
@@ -807,12 +823,7 @@ def ayar_kaydet(anahtar, deger):
 def sistem_bildirim_degisti():
     ayar_kaydet("sistem_bildirimi", sistem_bildirim_var.get())
 
-    # Butonu aktif/pasif yap
-    aktif = sistem_bildirim_var.get()
-    if aktif:
-        bildirim_button.configure(state="normal")
-    else:
-        bildirim_button.configure(state="disabled")
+
 
 # Butona tıklayınca bildirim gönderme
 def bildirim_onizleme():
@@ -827,16 +838,16 @@ def bildirim_onizleme():
 # "Bildirimi Önizle" butonu
 bildirim_button = ctk.CTkButton(
     master=sidebar_icerik,
-    font=("Helvetica", 12),
+    font=("Helvetica", 13),
     #image= notification_icon,
     command=bildirim_onizleme,
     fg_color="#4c6a8c",
     hover_color="#3b556f",
     text_color="#fbfbfb",
-    width=36,
-    height=30
+    width=35,
+    height=35
 )
-bildirim_button.place(x=10, y=-45, relx=0, rely=1, anchor="sw")
+bildirim_button.place(x=10, y=-70, relx=0, rely=1, anchor="sw")
 
 
 #Uygulamayı silme butonu
@@ -844,8 +855,8 @@ uninstall_button = ctk.CTkButton(
     command=uninstall_app,
     master=sidebar_icerik,
     #image= trash_icon,
-    font=("Helvetica", 12),
-    width=50,
+    font=("Helvetica", 13),
+    width=70,
     height=30,
     fg_color="#cc3b3b",
     hover_color="#ff4c4c",
