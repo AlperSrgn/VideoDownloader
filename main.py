@@ -39,7 +39,7 @@ def uninstall_app():
         subprocess.Popen([uninstall_path])
         sys.exit()  # Uygulamayı sonlandır
     else:
-        messagebox.showerror("Hata", aktif_dil["file_not_found_error"])
+        messagebox.showerror(aktif_dil["error_title"], aktif_dil["file_not_found_error"])
 
 
 
@@ -484,7 +484,8 @@ def indirmeyi_iptal_et():
 def url_changed(*args):
     url = url_var.get()
     if "list=" in url:
-        playlist_checkbox.grid()  # Checkbox'ı göster
+        return
+        #playlist_checkbox.grid()  # Checkbox'ı göster
     else:
         playlist_checkbox.grid_remove()  # Checkbox'ı gizle
 
@@ -533,6 +534,7 @@ url_var = ctk.StringVar()
 url_var.trace_add("write", url_changed)  # Her değişiklikte tetiklenir
 url_entry = ctk.CTkEntry(frame, width=300, textvariable=url_var)
 url_entry.grid(row=0, column=3, padx=10, pady=5)
+
 
 # Checkbox (başta gizli)
 frame.grid_rowconfigure(1, minsize=50)
