@@ -20,6 +20,30 @@ from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 # exe
 # pyinstaller --onefile --noconsole --add-binary "C:\Users\alper\PycharmProjects\VideoDownloader\.venv\Lib\site-packages\imageio_ffmpeg\binaries\ffmpeg-win-x86_64-v7.1.exe;." --add-data "notificationIcon.ico;." --add-data "previewIcon.ico;." --add-data "appIcon.ico;." --add-data "languages.py;." --hidden-import=plyer.platforms.win.notification main.py
 
+# yt-dlp version
+def get_yt_dlp_version(callback):
+    def worker():
+        try:
+            startupinfo = None
+            if os.name == 'nt':
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+
+            output = subprocess.check_output(
+                ["yt-dlp", "--version"],
+                text=True,
+                startupinfo=startupinfo
+            )
+            version_str = f"yt-dlp v{output.strip()}"
+        except Exception as e:
+            version_str = "yt-dlp sürümü alınamadı"
+
+        # Etiketi güncelle (ana thread üzerinden)
+        callback(version_str)
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
 
 # Uygulamayı kaldır
 def uninstall_app():
@@ -630,36 +654,73 @@ downloads_button.place(relx=0, rely=1, anchor="sw", x=10, y=-10)
 koyu_mod = False  # Başlangıçta açık modda
 def toggle_theme():
     global koyu_mod
-    if koyu_mod:
-        # Koyu moddan çık, açık moda geç
-        root.configure(fg_color="#ebebeb")
-        frame.configure(fg_color="#ebebeb")  # Frame'in arka planını şeffaf yap
-        video_url_label.configure(text_color="#333333")  # Etiket rengini açığa döndür
-        indirme_secenegi_label.configure(text_color="#333333")  # Etiket rengini açığa döndür
-        light_dark.configure(text="🌙")
-        downloads_button.configure(fg_color="#dddddd")
-        menu_button.configure(fg_color="#ebebeb", text_color="#333333", hover_color="#d0d0d0")
-        progress_label.configure(text_color="#333333", bg_color="#ebebeb")
-        url_entry.configure(fg_color="#ffffff", text_color="#333333")
-        iptal_buton.configure(fg_color="#ebebeb", hover_color="#dddddd")
-        playlist_checkbox.configure(text_color="#333333", bg_color="#ebebeb", border_color="#333333", fg_color="#333333", checkmark_color="#ebebeb")
-        kalite_secenek_menu.configure(fg_color="#e0e0e0",  text_color="#333333",  button_color="#d0d0d0",  button_hover_color="#c0c0c0")
-        koyu_mod = False
-    else:
-        # Koyu moda geç
-        root.configure(fg_color="#333333")
-        frame.configure(fg_color="#333333")  # Frame'in arka planını koyu yap
-        video_url_label.configure(text_color="#ebebeb")  # Etiket rengini beyaza çevir
-        indirme_secenegi_label.configure(text_color="#ebebeb")  # Etiket rengini beyaza çevir
-        light_dark.configure(text="🔆")
-        downloads_button.configure(fg_color="#565656")
-        menu_button.configure(fg_color="#333333",text_color="#d0d0d0", hover_color="#565656")
-        progress_label.configure(text_color="#ebebeb", bg_color="#333333")
-        iptal_buton.configure(fg_color="#333333", hover_color="#565656",)
-        url_entry.configure(fg_color="#565656", text_color="#ebebeb")            #URL alanı
-        playlist_checkbox.configure(text_color="#ebebeb", bg_color="#333333", border_color="#ebebeb", fg_color="#ebebeb", checkmark_color="#333333")
-        kalite_secenek_menu.configure(fg_color="#565656", text_color="#ebebeb", button_color="#444444", button_hover_color="#666666")
-        koyu_mod = True
+
+    # Tema tanımları
+    tema = {
+        True: {  # Koyu mod
+            "root": {"fg_color": "#333333"},
+            "frame": {"fg_color": "#333333"},
+            "video_url_label": {"text_color": "#ebebeb"},
+            "indirme_secenegi_label": {"text_color": "#ebebeb"},
+            "light_dark": {"text": "🔆"},
+            "downloads_button": {"fg_color": "#565656"},
+            "menu_button": {"fg_color": "#333333", "text_color": "#d0d0d0", "hover_color": "#565656"},
+            "progress_label": {"text_color": "#ebebeb", "bg_color": "#333333"},
+            "iptal_buton": {"fg_color": "#333333", "hover_color": "#565656"},
+            "url_entry": {"fg_color": "#565656", "text_color": "#ebebeb"},
+            "playlist_checkbox": {
+                "text_color": "#ebebeb", "bg_color": "#333333", "border_color": "#ebebeb",
+                "fg_color": "#ebebeb", "checkmark_color": "#333333"
+            },
+            "kalite_secenek_menu": {
+                "fg_color": "#565656", "text_color": "#ebebeb",
+                "button_color": "#444444", "button_hover_color": "#666666"
+            },
+        },
+        False: {  # Açık mod
+            "root": {"fg_color": "#ebebeb"},
+            "frame": {"fg_color": "#ebebeb"},
+            "video_url_label": {"text_color": "#333333"},
+            "indirme_secenegi_label": {"text_color": "#333333"},
+            "light_dark": {"text": "🌙"},
+            "downloads_button": {"fg_color": "#dddddd"},
+            "menu_button": {"fg_color": "#ebebeb", "text_color": "#333333", "hover_color": "#d0d0d0"},
+            "progress_label": {"text_color": "#333333", "bg_color": "#ebebeb"},
+            "iptal_buton": {"fg_color": "#ebebeb", "hover_color": "#dddddd"},
+            "url_entry": {"fg_color": "#ffffff", "text_color": "#333333"},
+            "playlist_checkbox": {
+                "text_color": "#333333", "bg_color": "#ebebeb", "border_color": "#333333",
+                "fg_color": "#333333", "checkmark_color": "#ebebeb"
+            },
+            "kalite_secenek_menu": {
+                "fg_color": "#e0e0e0", "text_color": "#333333",
+                "button_color": "#d0d0d0", "button_hover_color": "#c0c0c0"
+            },
+        }
+    }
+
+    # Bileşenleri tema verilerine göre güncelle
+    aktif_tema = tema[not koyu_mod]
+
+    component_map = {
+        "root": root,
+        "frame": frame,
+        "video_url_label": video_url_label,
+        "indirme_secenegi_label": indirme_secenegi_label,
+        "light_dark": light_dark,
+        "downloads_button": downloads_button,
+        "menu_button": menu_button,
+        "progress_label": progress_label,
+        "iptal_buton": iptal_buton,
+        "url_entry": url_entry,
+        "playlist_checkbox": playlist_checkbox,
+        "kalite_secenek_menu": kalite_secenek_menu,
+    }
+
+    for key, widget in component_map.items():
+        widget.configure(**aktif_tema[key])
+
+    koyu_mod = not koyu_mod
 
 
 # Sidebar ayarları
@@ -924,6 +985,17 @@ if koyu_mod_var.get():
 aktif_dil = ayar_yukle("dil", "Tr")
 dil_var.set(aktif_dil)
 dili_degistir(aktif_dil)  # GUI'yi seçilen dile göre başlat
+
+
+# yt-dlp version label
+yt_dlp_version_text = get_yt_dlp_version(lambda text: yt_dlp_version_label.configure(text=text))
+yt_dlp_version_label = ctk.CTkLabel(
+    root,
+    text=yt_dlp_version_text,
+    font=ctk.CTkFont(size=10),
+    text_color="#888888"
+)
+yt_dlp_version_label.place(relx=1.0, rely=1.0, anchor="se", x=-10, y=-5)
 
 
 root.mainloop()
