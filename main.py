@@ -248,7 +248,7 @@ def youtube_video_indir_birlestir(url, kayit_yeri, hedef_cozunurluk):
 
     yukseklik = cozunurluk_haritasi[hedef_cozunurluk]
 
-    client_list = ["android", "ios", "web", "tv", "web_mobile"]
+    client_list = ["android", "web", "ios", "tv", "web_mobile"]
 
     video_info = None
     selected_client = None
@@ -331,7 +331,7 @@ def youtube_video_indir_birlestir(url, kayit_yeri, hedef_cozunurluk):
         "-i", audio_path,
         "-c:v", "copy",
         "-c:a", "aac",
-        "-strict", "experimental",
+        #"-strict", "experimental",
         "-shortest",
         output_path
     ]
@@ -786,16 +786,27 @@ def toggle_sidebar():
 def dili_degistir(secili_dil):
     global aktif_dil
     aktif_dil = LANGUAGES.get(secili_dil, LANGUAGES["Tr"])  # fallback
-    indir_buton.configure(text=aktif_dil["indir"])
-    iptal_buton.configure(text=aktif_dil["iptal"])
-    url_entry.configure(placeholder_text=aktif_dil["link_placeholder"])
-    indirme_secenegi_label.configure(text=aktif_dil["kalite"])
-    sistem_bildirim_checkbox.configure(text=aktif_dil["sistem_bildirim_checkbox"])
-    koyu_modda_baslat_checkbox.configure(text=aktif_dil["koyu_modda_baslat_checkbox"])
-    bildirim_button.configure(text=aktif_dil["bildirim_button"])
-    playlist_checkbox.configure(text=aktif_dil["oynatma_listesi_checkbox_text"])
-    uninstall_button.configure(text=aktif_dil["uninstall_button"])
-    # Seçenekleri yeniden oluştur ve dropdown'a yükle
+
+    # Güncellenecek widgetler
+    widgets = {
+        indir_buton: "indir",
+        iptal_buton: "iptal",
+        url_entry: "link_placeholder",  # placeholder_text özel olduğu için kontrol gerekir
+        indirme_secenegi_label: "kalite",
+        sistem_bildirim_checkbox: "sistem_bildirim_checkbox",
+        koyu_modda_baslat_checkbox: "koyu_modda_baslat_checkbox",
+        bildirim_button: "bildirim_button",
+        playlist_checkbox: "oynatma_listesi_checkbox_text",
+        uninstall_button: "uninstall_button",
+    }
+
+    for widget, key in widgets.items():
+        if widget == url_entry:
+            widget.configure(placeholder_text=aktif_dil[key])
+        else:
+            widget.configure(text=aktif_dil[key])
+
+    # Dropdown seçenekleri
     secenekler = [
         aktif_dil["2160p"],
         aktif_dil["1440p"],
@@ -804,6 +815,7 @@ def dili_degistir(secili_dil):
         aktif_dil["audio"]
     ]
     kalite_secenek_menu.configure(values=secenekler)
+
     ayar_kaydet("dil", secili_dil)
 
 
