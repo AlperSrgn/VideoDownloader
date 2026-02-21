@@ -20,7 +20,7 @@ from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 # exe
 # pyinstaller --onefile --noconsole --add-binary "C:\Users\alper\PycharmProjects\VideoDownloader\.venv\Lib\site-packages\imageio_ffmpeg\binaries\ffmpeg-win-x86_64-v7.1.exe;." --add-data "notificationIcon.ico;." --add-data "previewIcon.ico;." --add-data "appIcon.ico;." --add-data "languages.py;." --hidden-import=plyer.platforms.win.notification main.py
 
-# yt-dlp version
+# Get yt-dlp version
 def get_yt_dlp_version(callback):
     def worker():
         try:
@@ -36,9 +36,9 @@ def get_yt_dlp_version(callback):
             )
             version_str = f"yt-dlp v{output.strip()}"
         except Exception as e:
-            version_str = "yt-dlp sürümü alınamadı"
+            version_str = "Failed to retrieve yt-dlp version"
 
-        # Etiketi güncelle (ana thread üzerinden)
+        # Update the label via the main thread
         callback(version_str)
 
     threading.Thread(target=worker, daemon=True).start()
@@ -52,7 +52,7 @@ def uninstall_app():
     uninstall_path = os.path.join(app_dir, "unins000.exe")
 
     # Kullanıcıya onay penceresi göster
-    answer = messagebox.askyesno(aktif_dil["uninstall_app_title"], aktif_dil["uninstall_app_message"])
+    answer = messagebox.askyesno(current_language["uninstall_app_title"], current_language["uninstall_app_message"])
 
     # No
     if not answer:
@@ -63,7 +63,7 @@ def uninstall_app():
         subprocess.Popen([uninstall_path])
         sys.exit()  # Uygulamayı sonlandır
     else:
-        messagebox.showerror(aktif_dil["error_title"], aktif_dil["file_not_found_error"])
+        messagebox.showerror(current_language["error_title"], current_language["file_not_found_error"])
 
 
 
@@ -145,7 +145,7 @@ def progress_hook(d):
 
     global cancel_download
     if cancel_download:
-        raise Exception(aktif_dil["indirme_iptal_edildi"])
+        raise Exception(current_language["download_canceled_message"])
 
     if d['status'] == 'downloading':
         try:
@@ -161,7 +161,7 @@ def progress_hook(d):
             # Bilgi label'ı güncelle
             progress_label.configure(
                 text=f"{percent:.1f}%   |   {downloaded:.2f} / {total_size_mb:.2f}MB    |   {eta}\n"
-                     f"{aktif_dil['islem_devam_ediyor']}"
+                     f"{current_language['operation_in_progress_message']}"
             )
 
             root.update_idletasks()
@@ -172,43 +172,43 @@ def progress_hook(d):
 
 
 # Türkçe karakterleri değiştirerek dosya adlarını temizleme
-def temizle_dosya_adi(dosya_adi):
-    dosya_adi = dosya_adi.replace("ı", "i")  # 'ı' harflerini 'i' harfine çevir
-    dosya_adi = unicodedata.normalize("NFKD", dosya_adi).encode("ascii", "ignore").decode("utf-8")
-    dosya_adi = re.sub(r"[^\w\s.-]", "", dosya_adi)  # Geçersiz karakterleri kaldır
-    dosya_adi = dosya_adi.replace(" ", "_")  # Boşlukları alt çizgiye çevir
+def sanitize_filename(file_name):
+    file_name = file_name.replace("ı", "i")
+    file_name = unicodedata.normalize("NFKD", file_name).encode("ascii", "ignore").decode("utf-8")
+    file_name = re.sub(r"[^\w\s.-]", "", file_name)     # Remove invalid characters
+    file_name = file_name.replace(" ", "_")
 
-    return dosya_adi
+    return file_name
 
 
 
-# SABR için uygun formatı bul
-def uygun_format_bul(formats, yukseklik):
-    """Hedef çözünürlüğe uygun video+ses eşleşmesi bulur, url kontrolü yapar."""
-    video_formatlar = [
+# Find a format suitable for SABR
+def find_suitable_format(formats, video_height):
+    """Finds a video+audio pair matching the target resolution and validates the URL."""
+    video_formats  = [
         f for f in formats
         if f.get("url") and f.get("vcodec") != "none" and (f.get("height") is not None)
     ]
-    audio_formatlar = [
+    audio_formats = [
         f for f in formats
         if f.get("url") and f.get("acodec") != "none" and f.get("vcodec") == "none"
     ]
 
-    if not video_formatlar or not audio_formatlar:
+    if not video_formats  or not audio_formats:
         return None, None
 
-    heights = sorted({f["height"] for f in video_formatlar if f["height"] <= yukseklik}, reverse=True)
+    heights = sorted({f["height"] for f in video_formats  if f["height"] <= video_height}, reverse=True)
     if not heights:
-        heights = sorted({f["height"] for f in video_formatlar}, reverse=True)
+        heights = sorted({f["height"] for f in video_formats }, reverse=True)
 
     for h in heights:
-        candidates_v = [f for f in video_formatlar if f.get("height") == h]
+        candidates_v = [f for f in video_formats  if f.get("height") == h]
         if not candidates_v:
             continue
         chosen_video = sorted(candidates_v, key=lambda x: x.get("tbr") or 0, reverse=True)[0]
-        chosen_audio = max(audio_formatlar, key=lambda x: x.get("abr", 0), default=None)
+        chosen_audio = max(audio_formats, key=lambda x: x.get("abr", 0), default=None)
 
-        # URL kontrolü
+        # URL validation
         if chosen_video and chosen_audio:
             if chosen_video.get("url") and chosen_audio.get("url"):
                 print(
@@ -228,25 +228,25 @@ def uygun_format_bul(formats, yukseklik):
 
 
 
-# Video ve ses indir-birlestir
-def youtube_video_indir_birlestir(url, kayit_yeri, hedef_cozunurluk):
+# Download and merge video and audio
+def download_merge_video(url, save_location, target_resolution):
 
     if not url or not url.startswith(("http://", "https://")):
-        messagebox.showwarning(aktif_dil["warning_title"], aktif_dil["invalid_url_warning"])
+        messagebox.showwarning(current_language["warning_title"], current_language["invalid_url_warning"])
         return
 
-    cozunurluk_haritasi = {
+    resolution_map = {
         "720p": 720,
         "1080p": 1080,
         "2K": 1440,
         "4K": 2160
     }
 
-    if hedef_cozunurluk not in cozunurluk_haritasi:
-        messagebox.showerror("Error", f"Invalid resolution: {hedef_cozunurluk}")
+    if target_resolution not in resolution_map:
+        messagebox.showerror("Error", f"Invalid resolution: {target_resolution}")
         return
 
-    yukseklik = cozunurluk_haritasi[hedef_cozunurluk]
+    video_height = resolution_map[target_resolution]
 
     client_list = ["android", "web", "ios", "tv", "web_mobile"]
 
@@ -261,7 +261,7 @@ def youtube_video_indir_birlestir(url, kayit_yeri, hedef_cozunurluk):
             with yt_dlp.YoutubeDL({"quiet": True, "player_client": client}) as ydl:
                 info = ydl.extract_info(url, download=False)
                 formats = info.get("formats", [])
-                v_fmt, a_fmt = uygun_format_bul(formats, yukseklik)
+                v_fmt, a_fmt = find_suitable_format(formats, video_height)
                 if v_fmt and a_fmt:
                     video_info = info
                     selected_client = client
@@ -276,13 +276,13 @@ def youtube_video_indir_birlestir(url, kayit_yeri, hedef_cozunurluk):
 
 
     if not video_info:
-        messagebox.showerror(aktif_dil["error_title"], aktif_dil["download_video_format_error"])
+        messagebox.showerror(current_language["error_title"], current_language["download_video_format_error"])
         return
 
 
     video_title = video_info.get("title", "indirilen_video")
-    temiz_video_title = temizle_dosya_adi(video_title)
-    base_filename = os.path.join(kayit_yeri, temiz_video_title)
+    sanitized_video_title = sanitize_filename(video_title)
+    base_filename = os.path.join(save_location, sanitized_video_title)
 
     progress_bar.set(0)
     progress_bar.pack(pady=10)
@@ -321,8 +321,8 @@ def youtube_video_indir_birlestir(url, kayit_yeri, hedef_cozunurluk):
         messagebox.showerror("Error", "The downloaded files were not found.")
         return
 
-    output_filename = unique_filename(kayit_yeri, f"{temiz_video_title}.mp4")
-    output_path = os.path.join(kayit_yeri, output_filename)
+    output_filename = unique_filename(save_location, f"{sanitized_video_title}.mp4")
+    output_path = os.path.join(save_location, output_filename)
 
     ffmpeg_path = get_ffmpeg_path()
     ffmpeg_cmd = [
@@ -341,35 +341,35 @@ def youtube_video_indir_birlestir(url, kayit_yeri, hedef_cozunurluk):
     os.remove(video_path)
     os.remove(audio_path)
 
-    # Tamamlandığında bildir
-    if sistem_bildirim_var.get():
+    # Notify when completed
+    if system_notification_enabled.get():
         notification.notify(
-            title=aktif_dil["operation_completed"],
-            message=aktif_dil["download_complete_message"],
+            title=current_language["operation_completed_message"],
+            message=current_language["download_complete_message"],
             timeout=3,
             app_icon=notificationIcon_path
         )
     print(f"[DEBUG] Download completed: {output_path}")
 
-    # Progressbar'ı sıfırla
+    # Reset the progress bar
     progress_bar.pack_forget()
     progress_label.pack_forget()
 
 
 
-# Video sesini indirme
-def youtube_ses_indir(url, kayit_yeri):
+# Download audio only
+def download_audio(url, save_location):
     try:
         with yt_dlp.YoutubeDL({"quiet": True}) as ydl:
             info = ydl.extract_info(url, download=False)
-            audio_title = info.get("title", "indirilen_ses")
+            audio_title = info.get("title", "downloaded_audio")
 
-        temiz_video_title = temizle_dosya_adi(audio_title)
-        output_filename = unique_filename(kayit_yeri, f"{temiz_video_title}.mp3")
+        sanitized_video_title = sanitize_filename(audio_title)
+        output_filename = unique_filename(save_location, f"{sanitized_video_title}.mp3")
 
         ydl_opts_audio = {
             "format": "bestaudio",
-            "outtmpl": os.path.join(kayit_yeri, output_filename),
+            "outtmpl": os.path.join(save_location, output_filename),
             "progress_hooks": [progress_hook],
             "quiet": True
         }
@@ -377,12 +377,12 @@ def youtube_ses_indir(url, kayit_yeri):
         with yt_dlp.YoutubeDL(ydl_opts_audio) as ydl:
             ydl.download([url])
 
-        update_file_timestamp(os.path.join(kayit_yeri, output_filename))
+        update_file_timestamp(os.path.join(save_location, output_filename))
 
-        if sistem_bildirim_var.get():
+        if system_notification_enabled.get():
             notification.notify(
-                title=aktif_dil["operation_completed"],
-                message=aktif_dil["audio_download_complete_message"],
+                title=current_language["operation_completed_message"],
+                message=current_language["audio_download_complete_message"],
                 timeout=3,
                 app_icon=notificationIcon_path
             )
@@ -408,7 +408,7 @@ def clear_playlist_parameter(url):
     new_query = urlencode(query_params, doseq=True)
 
     # Temiz URL
-    temiz_url = urlunparse((
+    clean_url = urlunparse((
         parsed_url.scheme,
         parsed_url.netloc,
         parsed_url.path,
@@ -417,62 +417,62 @@ def clear_playlist_parameter(url):
         parsed_url.fragment
     ))
 
-    return temiz_url
+    return clean_url
 
 
 
-# İndir butonuna ait fonksiyon
-def indir():
+# download butonuna ait fonksiyon
+def download():
     global cancel_download
-    cancel_download = False  # Her yeni işlemde sıfırla
+    cancel_download = False     # Reset on every new operation
     url = clear_playlist_parameter(url_entry.get())
-    secim = secenek_var.get()
-    kayit_yeri = os.path.join(os.path.expanduser("~"), "Downloads")
+    selection = option_var.get()
+    save_location = os.path.join(os.path.expanduser("~"), "Downloads")
 
     if not url:
         messagebox.showwarning(
-            aktif_dil["warning_title"],
-            aktif_dil["empty_url_warning"]
+            current_language["warning_title"],
+            current_language["empty_url_warning"]
         )
         return
 
     # disabled
     for widget in [
-        bildirim_button,
-        indir_buton,
+        preview_notification_button,
+        download_button,
         url_entry,
-        kalite_secenek_menu,
+        quality_options_menu,
         playlist_checkbox,
         uninstall_button
     ]:
         widget.configure(state="disabled")
 
-    iptal_buton.pack(pady=5)
+    cancel_button .pack(pady=5)
 
-    # Progress bar ve label'ı göster
+    # Show the progress bar and label
     progress_bar.set(0)
     progress_bar.pack(pady=10)
-    progress_label.configure(text=aktif_dil["indirme_baslatiliyor"])
+    progress_label.configure(text=current_language["download_starting_message"])
     progress_label.pack()
 
-    def indirme_islemi():
+    def download_process():
         try:
-            if secim == aktif_dil["audio"]:
-                youtube_ses_indir(url, kayit_yeri)
+            if selection == current_language["audio"]:
+                download_audio(url, save_location)
             else:
-                cozunurluk_haritasi = {
+                resolution_map = {
                     "720p": "720p",
                     "1080p ᴴᴰ": "1080p",
                     "1440p ²ᴷ": "2K",
                     "2160p ⁴ᴷ": "4K"
                 }
-                hedef_cozunurluk = cozunurluk_haritasi.get(secim)
-                if hedef_cozunurluk:
-                    youtube_video_indir_birlestir(url, kayit_yeri, hedef_cozunurluk)
+                target_resolution = resolution_map.get(selection)
+                if target_resolution:
+                    download_merge_video(url, save_location, target_resolution)
                 else:
                     messagebox.showerror(
-                        aktif_dil["error_title"],
-                        aktif_dil["quality_error_message"]
+                        current_language["error_title"],
+                        current_language["quality_error_message"]
                     )
         except Exception as e:
             messagebox.showerror("Error", f"An error occurred:\n{str(e)}")
@@ -480,38 +480,38 @@ def indir():
 
             # normal
             for widget in [
-                bildirim_button,
-                indir_buton,
+                preview_notification_button,
+                download_button,
                 url_entry,
-                kalite_secenek_menu,
+                quality_options_menu,
                 playlist_checkbox,
                 uninstall_button
             ]:
                 widget.configure(state="normal")
 
-            iptal_buton.pack_forget()  # Gizle
+            cancel_button .pack_forget()  # Hide
             progress_bar.pack_forget()
             progress_label.pack_forget()
 
-    threading.Thread(target=indirme_islemi, daemon=True).start()
+    threading.Thread(target=download_process, daemon=True).start()
 
 
 
-# İptal fonksiyonu
-def indirmeyi_iptal_et():
+# Cancel function
+def cancel_download_task():
     global cancel_download
     cancel_download = True
-    progress_label.configure(text=aktif_dil["indirme_iptal_ediliyor"])
+    progress_label.configure(text=current_language["download_canceling_message"])
 
 
-# Url list parametre kontrolüne göre checkbox gösterme
+# Show checkbox based on URL list parameter check
 def url_changed(*args):
     url = url_var.get()
     if "list=" in url:
         return
-        #playlist_checkbox.grid()  # Checkbox'ı göster
+        #playlist_checkbox.grid()  # Show the checkbox
     else:
-        playlist_checkbox.grid_remove()  # Checkbox'ı gizle
+        playlist_checkbox.grid_remove()  # Hide the checkbox
 
 
 #######################################################################################################################
@@ -528,24 +528,24 @@ frame = ctk.CTkFrame(root, fg_color="#ebebeb")
 frame.pack(pady=30, padx=30)
 
 # İndirme seçenekleri
-secenek_var = ctk.StringVar(value="1080p ᴴᴰ")
-#secenekler = ["720p", "1080p ᴴᴰ", "1440p ²ᴷ", "2160p ⁴ᴷ", "Ses"]
+option_var = ctk.StringVar(value="1080p ᴴᴰ")
+#dropdown_options = ["720p", "1080p ᴴᴰ", "1440p ²ᴷ", "2160p ⁴ᴷ", "Ses"]
 
 # 'Kalite' etiketi
-indirme_secenegi_label = ctk.CTkLabel(frame, font=ctk.CTkFont(size=16))
-indirme_secenegi_label.grid(row=0, column=0, padx=10, pady=5)
+download_option_label = ctk.CTkLabel(frame, font=ctk.CTkFont(size=16))
+download_option_label.grid(row=0, column=0, padx=10, pady=5)
 
 # Seçim menüsü (Combobox eşdeğeri)
-kalite_secenek_menu = ctk.CTkOptionMenu(
+quality_options_menu = ctk.CTkOptionMenu(
     frame,
-    variable=secenek_var,
-    # values=secenekler,
+    variable=option_var,
+    # values=dropdown_options,
     fg_color="#e0e0e0",         # Menü butonunun arka plan rengi
     text_color="#333333",       # Yazı rengi
     button_color="#d0d0d0",     # Açılır ok butonunun rengi
     button_hover_color="#c0c0c0"  # Hover sırasında ok butonu rengi
 )
-kalite_secenek_menu.grid(row=0, column=1, padx=10, pady=5)
+quality_options_menu.grid(row=0, column=1, padx=10, pady=5)
 
 
 # 'Video URL' etiketi
@@ -578,10 +578,10 @@ playlist_checkbox.grid(row=1, column=3, sticky="w", padx=10, pady=5)
 playlist_checkbox.grid_remove()  # Başlangıçta gizle
 
 
-# İndir butonu
-indir_buton = ctk.CTkButton(
+# download butonu
+download_button = ctk.CTkButton(
     root,
-    command=indir,
+    command=download,
     width=120,
     height=45,
     #image=download_icon,
@@ -591,49 +591,49 @@ indir_buton = ctk.CTkButton(
     text_color="#fbfbfb" ,       # Yazı rengi
     corner_radius=5
 )
-indir_buton.pack(pady=20)
+download_button.pack(pady=20)
 
 
 # İptal butonu
-iptal_buton = ctk.CTkButton(
+cancel_button  = ctk.CTkButton(
     root,
-    command=lambda: indirmeyi_iptal_et(),
+    command=lambda: cancel_download_task(),
     width=120,
     height=45,
     #image=cancel_icon,
     font=("Helvetica", 14, "bold"),
-    fg_color="#ebebeb",         # Arka plan rengi
-    hover_color="#dddddd",      # Hover rengi
+    fg_color="#ebebeb",
+    hover_color="#dddddd",
     text_color="#d9534f",
     border_color="#d9534f",
     border_width=2,
     corner_radius=5
 
 )
-iptal_buton.pack(pady=0)
-iptal_buton.pack_forget()  # Başta görünmesin
+cancel_button .pack(pady=0)
+cancel_button .pack_forget()   # Don't show initially
 
 # ProgressBar
 progress_bar = ctk.CTkProgressBar(master=root, orientation="horizontal", width=300, height=15)
 progress_bar.set(0)
 progress_bar.pack(pady=10)
-progress_bar.pack_forget()  # Başta gizli
+progress_bar.pack_forget()  # Hidden at start
 
+# ProgressLabel
 progress_label = ctk.CTkLabel(master=root, text="", font=("Helvetica", 13))
 progress_label.pack()
 progress_label.pack_forget()
 
 
-
-# İndirilenler klasörünü açma fonksiyonu
+# Function to open the Downloads folder
 def open_downloads_folder():
-    downloads_path = os.path.expanduser("~/Downloads")
+    downloads_folder_path  = os.path.expanduser("~/Downloads")
     if os.name == "nt":  # Windows
-        os.startfile(downloads_path)
+        os.startfile(downloads_folder_path )
     elif os.name == "posix":  # macOS & Linux
-        webbrowser.open(downloads_path)
+        webbrowser.open(downloads_folder_path )
 
-# 📁 İndirilenler klasörünü açma butonu
+# 📁 Button to open the downloads folder
 downloads_button = ctk.CTkButton(
     master=root,
     text="📂",
@@ -650,77 +650,77 @@ downloads_button = ctk.CTkButton(
 downloads_button.place(relx=0, rely=1, anchor="sw", x=10, y=-10)
 
 
-# Koyu mod geçiş fonksiyonu
-koyu_mod = False  # Başlangıçta açık modda
+# Dark mode toggle function
+dark_mode = False
 def toggle_theme():
-    global koyu_mod
+    global dark_mode
 
-    # Tema tanımları
-    tema = {
-        True: {  # Koyu mod
+    # Theme definitions
+    theme = {
+        True: {  # Dark mode
             "root": {"fg_color": "#333333"},
             "frame": {"fg_color": "#333333"},
             "video_url_label": {"text_color": "#ebebeb"},
-            "indirme_secenegi_label": {"text_color": "#ebebeb"},
+            "download_option_label": {"text_color": "#ebebeb"},
             "light_dark": {"text": "🔆"},
             "downloads_button": {"fg_color": "#565656"},
             "menu_button": {"fg_color": "#333333", "text_color": "#d0d0d0", "hover_color": "#565656"},
             "progress_label": {"text_color": "#ebebeb", "bg_color": "#333333"},
-            "iptal_buton": {"fg_color": "#333333", "hover_color": "#565656"},
+            "cancel_button ": {"fg_color": "#333333", "hover_color": "#565656"},
             "url_entry": {"fg_color": "#565656", "text_color": "#ebebeb"},
             "playlist_checkbox": {
                 "text_color": "#ebebeb", "bg_color": "#333333", "border_color": "#ebebeb",
                 "fg_color": "#ebebeb", "checkmark_color": "#333333"
             },
-            "kalite_secenek_menu": {
+            "quality_options_menu": {
                 "fg_color": "#565656", "text_color": "#ebebeb",
                 "button_color": "#444444", "button_hover_color": "#666666"
             },
         },
-        False: {  # Açık mod
+        False: {  # Light mode
             "root": {"fg_color": "#ebebeb"},
             "frame": {"fg_color": "#ebebeb"},
             "video_url_label": {"text_color": "#333333"},
-            "indirme_secenegi_label": {"text_color": "#333333"},
+            "download_option_label": {"text_color": "#333333"},
             "light_dark": {"text": "🌙"},
             "downloads_button": {"fg_color": "#dddddd"},
             "menu_button": {"fg_color": "#ebebeb", "text_color": "#333333", "hover_color": "#d0d0d0"},
             "progress_label": {"text_color": "#333333", "bg_color": "#ebebeb"},
-            "iptal_buton": {"fg_color": "#ebebeb", "hover_color": "#dddddd"},
+            "cancel_button ": {"fg_color": "#ebebeb", "hover_color": "#dddddd"},
             "url_entry": {"fg_color": "#ffffff", "text_color": "#333333"},
             "playlist_checkbox": {
                 "text_color": "#333333", "bg_color": "#ebebeb", "border_color": "#333333",
                 "fg_color": "#333333", "checkmark_color": "#ebebeb"
             },
-            "kalite_secenek_menu": {
+            "quality_options_menu": {
                 "fg_color": "#e0e0e0", "text_color": "#333333",
                 "button_color": "#d0d0d0", "button_hover_color": "#c0c0c0"
             },
         }
     }
 
-    # Bileşenleri tema verilerine göre güncelle
-    aktif_tema = tema[not koyu_mod]
+    # Update components based on theme data
+    current_theme = theme[not dark_mode]
 
     component_map = {
         "root": root,
         "frame": frame,
         "video_url_label": video_url_label,
-        "indirme_secenegi_label": indirme_secenegi_label,
+        "download_option_label": download_option_label,
         "light_dark": light_dark,
         "downloads_button": downloads_button,
         "menu_button": menu_button,
         "progress_label": progress_label,
-        "iptal_buton": iptal_buton,
+        "cancel_button ": cancel_button ,
         "url_entry": url_entry,
         "playlist_checkbox": playlist_checkbox,
-        "kalite_secenek_menu": kalite_secenek_menu,
+        "quality_options_menu": quality_options_menu,
     }
 
     for key, widget in component_map.items():
-        widget.configure(**aktif_tema[key])
+        widget.configure(**current_theme[key])
 
-    koyu_mod = not koyu_mod
+    dark_mode = not dark_mode
 
 
 # Sidebar ayarları
@@ -738,8 +738,8 @@ sidebar_frame = ctk.CTkFrame(
 sidebar_frame.place(x=sidebar_x, y=0, relheight=1)
 
 # Sidebar içeriği (içerik eklemek için)
-sidebar_icerik = ctk.CTkFrame(sidebar_frame, fg_color="#95aec9")
-sidebar_icerik.pack(padx=0, pady=0, anchor="nw", fill="both", expand=True)
+sidebar_content = ctk.CTkFrame(sidebar_frame, fg_color="#95aec9")
+sidebar_content.pack(padx=0, pady=0, anchor="nw", fill="both", expand=True)
 
 
 # Sidebar'ı açıp kapatmak için animasyon fonksiyonu
@@ -782,51 +782,51 @@ def toggle_sidebar():
     sidebar_acik = not sidebar_acik  # Durum değiştirme
 
 
-# Dil değiştirme
-def dili_degistir(secili_dil):
-    global aktif_dil
-    aktif_dil = LANGUAGES.get(secili_dil, LANGUAGES["Tr"])  # fallback
+# Change language
+def change_language(selected_language):
+    global current_language
+    current_language = LANGUAGES.get(selected_language, LANGUAGES["Tr"])  # fallback
 
-    # Güncellenecek widgetler
+    # Widgets to update
     widgets = {
-        indir_buton: "indir",
-        iptal_buton: "iptal",
+        download_button: "download",
+        cancel_button : "cancel",
         url_entry: "link_placeholder",  # placeholder_text özel olduğu için kontrol gerekir
-        indirme_secenegi_label: "kalite",
-        sistem_bildirim_checkbox: "sistem_bildirim_checkbox",
-        koyu_modda_baslat_checkbox: "koyu_modda_baslat_checkbox",
-        bildirim_button: "bildirim_button",
-        playlist_checkbox: "oynatma_listesi_checkbox_text",
+        download_option_label: "kalite",
+        system_notification_checkbox: "system_notification_checkbox",
+        start_in_dark_mode_checkbox: "start_in_dark_mode_checkbox",
+        preview_notification_button: "preview_notification_button",
+        playlist_checkbox: "playlist_checkbox_text",
         uninstall_button: "uninstall_button",
     }
 
     for widget, key in widgets.items():
         if widget == url_entry:
-            widget.configure(placeholder_text=aktif_dil[key])
+            widget.configure(placeholder_text=current_language[key])
         else:
-            widget.configure(text=aktif_dil[key])
+            widget.configure(text=current_language[key])
 
-    # Dropdown seçenekleri
-    secenekler = [
-        aktif_dil["2160p"],
-        aktif_dil["1440p"],
-        aktif_dil["1080p"],
-        aktif_dil["720p"],
-        aktif_dil["audio"]
+    # Dropdown options
+    dropdown_options = [
+        current_language["2160p"],
+        current_language["1440p"],
+        current_language["1080p"],
+        current_language["720p"],
+        current_language["audio"]
     ]
-    kalite_secenek_menu.configure(values=secenekler)
+    quality_options_menu.configure(values=dropdown_options)
 
-    ayar_kaydet("dil", secili_dil)
+    save_setting("language", selected_language)
 
 
-# Dil seçenekleri butonu
-dil_secenekleri = ["Tr", "En"]
-dil_var = ctk.StringVar(value=dil_secenekleri[0])  # Varsayılan dil Türkçe
-dil_menu_button = ctk.CTkOptionMenu(
-    sidebar_icerik,
-    variable=dil_var,
-    values=dil_secenekleri,
-    command=dili_degistir,  # <==
+# Language options button
+language_options = ["Tr", "En"]
+language_enabled = ctk.StringVar(value=language_options[0])  # Default language is Turkish
+language_menu_button = ctk.CTkOptionMenu(
+    sidebar_content,
+    variable=language_enabled,
+    values=language_options,
+    command=change_language,  # <==
     width=70,
     height=30,
     font=("Helvetica", 13),
@@ -834,12 +834,12 @@ dil_menu_button = ctk.CTkOptionMenu(
     button_color="#004566",
     text_color="#ebebeb"
 )
-dil_menu_button.place(relx=1.0, rely=1.0, anchor="se", x=-85, y=-10)
+language_menu_button.place(relx=1.0, rely=1.0, anchor="se", x=-85, y=-10)
 
 
 # light-dark mode
 light_dark = ctk.CTkButton(
-    sidebar_icerik,
+    sidebar_content,
     text="🌙",
     font=("Helvetica", 30),
     fg_color="#4c6a8c",
@@ -847,88 +847,88 @@ light_dark = ctk.CTkButton(
     text_color="#fbfbfb",
     width=45,
     height=45,
-    command=toggle_theme  # Butona tıklanınca toggle_theme fonksiyonunu çalıştır
+    command=toggle_theme
 )
 light_dark.place(relx=0.0, rely=1.0, anchor="sw", x=10, y=-10)
 
 
-# Toggle butonu (≡) - Sidebar'ı kontrol etmek için
+# Toggle button (≡) to control the sidebar
 menu_button = ctk.CTkButton(
     master=root,
     text="☰",
     font=("Helvetica", 30, "bold"),
-    fg_color="#ebebeb",  # Başlangıçta açık gri
+    fg_color="#ebebeb",     # Light gray at startup
     text_color="#333333",
     width=50,
     height=50,
-    command=toggle_sidebar,  # Butona tıklandığında sidebar'ı aç
+    command=toggle_sidebar,
     hover_color="#d0d0d0"
 )
 menu_button.place(x=10, y=10)
 
 
-# config.json dosya islemleri
+# config.json file operations
 config_path = os.path.join(get_appData_path(), "config.json")
 
-def ayar_yukle(anahtar, varsayilan=False):
+def load_setting(json_key, json_default=False):
     try:
         if os.path.exists(config_path) and os.path.getsize(config_path) > 0:
-            with open(config_path, "r", encoding="utf-8") as dosya:
-                ayarlar = json.load(dosya)
-                return ayarlar.get(anahtar, varsayilan)
+            with open(config_path, "r", encoding="utf-8") as json_file:
+                json_settings = json.load(json_file)
+                return json_settings.get(json_key, json_default)
     except Exception as e:
-        print("Ayar yükleme hatası:", e)
-    return varsayilan
+        print("Failed to load settings:", e)
+    return json_default
 
-def ayar_kaydet(anahtar, deger):
+def save_setting(json_key, json_value):
     try:
-        ayarlar = {}
+        json_settings = {}
         if os.path.exists(config_path) and os.path.getsize(config_path) > 0:
-            with open(config_path, "r", encoding="utf-8") as dosya:
-                ayarlar = json.load(dosya)
+            with open(config_path, "r", encoding="utf-8") as json_file:
+                json_settings = json.load(json_file)
 
-        ayarlar[anahtar] = deger
+        json_settings[json_key] = json_value
 
-        with open(config_path, "w", encoding="utf-8") as dosya:
-            json.dump(ayarlar, dosya, indent=4)
+        with open(config_path, "w", encoding="utf-8") as json_file:
+            json.dump(json_settings, json_file, indent=4)
     except Exception as e:
-        print("Ayar kaydetme hatası:", e)
-# config.json dosya islemleri
+        print("Failed to save settings:", e)
+# config.json file operations
 
-def sistem_bildirim_degisti():
-    ayar_kaydet("sistem_bildirimi", sistem_bildirim_var.get())
+def system_notification_changed():
+    save_setting("system_notification", system_notification_enabled.get())
 
 
 
-# Butona tıklayınca bildirim gönderme
-def bildirim_onizleme():
-    if sistem_bildirim_var.get():
+# Send notification when the button is clicked
+def preview_notification():
+    if system_notification_enabled.get():
         notification.notify(
-            title=aktif_dil["preview_info_title"],
-            message=aktif_dil["system_notification_message"],
+            title=current_language["preview_info_title"],
+            message=current_language["system_notification_message"],
             timeout=3,
             app_icon=previewIcon_path
         )
 
-# "Bildirimi Önizle" butonu
-bildirim_button = ctk.CTkButton(
-    master=sidebar_icerik,
+# "Preview Notification" button
+preview_notification_button = ctk.CTkButton(
+    master=sidebar_content,
     font=("Helvetica", 13),
     #image= notification_icon,
-    command=bildirim_onizleme,
+    command=preview_notification,
     fg_color="#4c6a8c",
     hover_color="#3b556f",
     text_color="#fbfbfb",
     width=35,
     height=35
 )
-bildirim_button.place(x=10, y=-70, relx=0, rely=1, anchor="sw")
+preview_notification_button.place(x=10, y=-70, relx=0, rely=1, anchor="sw")
 
 
-#Uygulamayı silme butonu
+# Delete application button
 uninstall_button = ctk.CTkButton(
     command=uninstall_app,
-    master=sidebar_icerik,
+    master=sidebar_content,
     #image= trash_icon,
     font=("Helvetica", 13),
     width=70,
@@ -941,16 +941,16 @@ uninstall_button.place(relx=1.0, rely=1.0, anchor="se", x=-10, y=-10)
 
 
 # Sidebar 1. checkbox
-sistem_bildirim_var = ctk.BooleanVar()
-sistem_bildirim_var.set(ayar_yukle("sistem_bildirimi", True))
-sistem_bildirim_var.trace_add("write", lambda *args: ayar_kaydet("sistem_bildirimi", sistem_bildirim_var.get()))
+system_notification_enabled = ctk.BooleanVar()
+system_notification_enabled.set(load_setting("system_notification", True))
+system_notification_enabled.trace_add("write", lambda *args: save_setting("system_notification", system_notification_enabled.get()))
 
-sistem_bildirim_checkbox = ctk.CTkCheckBox(
-    master=sidebar_icerik,
-    variable=sistem_bildirim_var,
+system_notification_checkbox = ctk.CTkCheckBox(
+    master=sidebar_content,
+    variable=system_notification_enabled,
     onvalue=True,
     offvalue=False,
-    command=sistem_bildirim_degisti,
+    command=system_notification_changed,
     font=("Helvetica", 14),
     text_color="black",
     fg_color="#95aec9",
@@ -962,18 +962,18 @@ sistem_bildirim_checkbox = ctk.CTkCheckBox(
     corner_radius=4,
     checkmark_color="black",
 )
-sistem_bildirim_checkbox.pack(anchor="w", pady=(60, 20), padx=10, fill="x")
+system_notification_checkbox.pack(anchor="w", pady=(60, 20), padx=10, fill="x")
 
 
 # Sidebar 2. checkbox
-koyu_mod_var = ctk.BooleanVar()
-koyu_mod_var.set(ayar_yukle("koyu_modda_baslat", False))
-koyu_mod_var.trace_add("write", lambda *args: ayar_kaydet("koyu_modda_baslat", koyu_mod_var.get()))
+dark_mode_enabled = ctk.BooleanVar()
+dark_mode_enabled.set(load_setting("start_in_dark_mode", False))
+dark_mode_enabled.trace_add("write", lambda *args: save_setting("start_in_dark_mode", dark_mode_enabled.get()))
 
-koyu_modda_baslat_checkbox = ctk.CTkCheckBox(
-    master=sidebar_icerik,
-    variable=koyu_mod_var,
-    command=lambda: ayar_kaydet("koyu_modda_baslat", koyu_mod_var.get()),
+start_in_dark_mode_checkbox = ctk.CTkCheckBox(
+    master=sidebar_content,
+    variable=dark_mode_enabled,
+    command=lambda: save_setting("start_in_dark_mode", dark_mode_enabled.get()),
     onvalue=True,
     offvalue=False,
     font=("Helvetica", 14),
@@ -987,16 +987,16 @@ koyu_modda_baslat_checkbox = ctk.CTkCheckBox(
     corner_radius=4,
     checkmark_color="black",
 )
-koyu_modda_baslat_checkbox.pack(anchor="w", pady=10, padx=10, fill="x")
+start_in_dark_mode_checkbox.pack(anchor="w", pady=10, padx=10, fill="x")
 
-# Eğer koyu mod aktifse başlarken uygula
-if koyu_mod_var.get():
+# Apply if dark mode is enabled at startup
+if dark_mode_enabled.get():
     toggle_theme()
 
-# Dil ayarları
-aktif_dil = ayar_yukle("dil", "Tr")
-dil_var.set(aktif_dil)
-dili_degistir(aktif_dil)  # GUI'yi seçilen dile göre başlat
+# Language settings
+current_language = load_setting("language", "Tr")
+language_enabled.set(current_language)
+change_language(current_language)       # Initialize the GUI according to the selected language
 
 
 # yt-dlp version label
