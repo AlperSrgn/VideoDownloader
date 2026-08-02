@@ -5,7 +5,9 @@ since YouTube keeps changing things) without needing to rebuild and
 redistribute the whole application exe.
 
 The binary is stored in the app's AppData folder and is downloaded on first
-run, then asked to self-update on every subsequent launch.
+run, then asked to self-update — but only once per app run, not before every
+single download. Without this, queuing up a big batch of videos would fire
+off a GitHub update check before every single item.
 """
 
 import json
@@ -23,6 +25,12 @@ YT_DLP_DOWNLOAD_URL = "https://github.com/yt-dlp/yt-dlp/releases/latest/download
 CLIENT_LIST = ["android", "web", "ios", "tv", "web_mobile"]
 
 _NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+
+# In-process cache: once ensure_ytdlp has run in this session, skip the
+# update check for the rest of the session — subsequent downloads (e.g. the
+# rest of a queue) just reuse the already-checked binary.
+_session_checked = False
+_cached_exe_path = None
 
 
 class YtDlpError(Exception):
@@ -45,15 +53,21 @@ def download_ytdlp_exe(dest_path: str) -> None:
     logger.info("yt-dlp.exe downloaded to %s", dest_path)
 
 
-def ensure_ytdlp(appdata_dir: str) -> str:
+def ensure_ytdlp(appdata_dir: str, force_check: bool = False) -> str:
     """
-    Make sure yt-dlp.exe exists and is up to date. Safe to call on every
-    startup or before every download — never raises; on any failure it just
-    falls back to whatever copy is already on disk (or downloads one if
-    there isn't one yet).
+    Make sure yt-dlp.exe exists and is up to date. Safe to call before every
+    download — never raises; on any failure it just falls back to whatever
+    copy is already on disk (or downloads one if there isn't one yet).
+
+    The actual "ask GitHub for a newer release" step only runs once per app
+    run (typically triggered by fetch_ytdlp_version at startup); every
+    subsequent call in the same session — e.g. each item in a download
+    queue — just reuses that result instead of checking again.
 
     Returns the path to the executable.
     """
+    global _session_checked, _cached_exe_path
+
     exe_path = get_ytdlp_path(appdata_dir)
 
     if not os.path.exists(exe_path):
@@ -61,7 +75,12 @@ def ensure_ytdlp(appdata_dir: str) -> str:
             download_ytdlp_exe(exe_path)
         except Exception as e:
             logger.error("Could not download yt-dlp.exe: %s", e)
+        _session_checked = True
+        _cached_exe_path = exe_path
         return exe_path
+
+    if _session_checked and not force_check:
+        return _cached_exe_path or exe_path
 
     try:
         # Official yt-dlp.exe builds know how to update themselves in place.
@@ -73,6 +92,8 @@ def ensure_ytdlp(appdata_dir: str) -> str:
     except Exception as e:
         logger.warning("yt-dlp self-update check failed, continuing with existing copy: %s", e)
 
+    _session_checked = True
+    _cached_exe_path = exe_path
     return exe_path
 
 

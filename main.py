@@ -1,9 +1,11 @@
+import itertools
 import logging
 import os
 import subprocess
 import sys
 import threading
 import webbrowser
+from collections import deque
 
 import customtkinter as ctk
 from plyer import notification
@@ -14,8 +16,11 @@ from languages import LANGUAGES
 from settings import load_setting, save_setting
 from utils import clean_playlist_url, copy_icons, get_icon_path
 
-
 # Convert to exe file
+# NOTE: yt_dlp is no longer a Python dependency of this app — it's called as
+# an external yt-dlp.exe that's downloaded/self-updated at runtime (see
+# ytdlp_manager.py), so it should be removed from requirements.txt and no
+# longer needs a --hidden-import. Add ytdlp_manager.py to --add-data instead.
 # pyinstaller --onefile --noconsole --add-binary "C:\Users\alper\PycharmProjects\VideoDownloader\.venv\Lib\site-packages\imageio_ffmpeg\binaries\ffmpeg-win-x86_64-v7.1.exe;." --add-data "notificationIcon.ico;." --add-data "previewIcon.ico;." --add-data "appIcon.ico;." --add-data "languages.py;." --add-data "settings.py;." --add-data "utils.py;." --add-data "downloader.py;." --add-data "ytdlp_manager.py;." --hidden-import=plyer.platforms.win.notification main.py
 
 # ---------------------------------------------------------------------------
@@ -101,6 +106,8 @@ THEMES = {
             "fg_color": "#565656", "text_color": "#ebebeb",
             "button_color": "#444444", "button_hover_color": "#666666"
         },
+        "queue_header_label":  {"text_color": "#ebebeb"},
+        "queue_list_frame":    {"fg_color": "#3d3d3d"},
     },
     "light": {
         "root":                {"fg_color": "#ebebeb"},
@@ -121,6 +128,8 @@ THEMES = {
             "fg_color": "#e0e0e0", "text_color": "#333333",
             "button_color": "#d0d0d0", "button_hover_color": "#c0c0c0"
         },
+        "queue_header_label":  {"text_color": "#333333"},
+        "queue_list_frame":    {"fg_color": "#f5f5f5"},
     },
 }
 
@@ -135,15 +144,18 @@ sidebar_open = False
 SIDEBAR_WIDTH = 250
 sidebar_x = -SIDEBAR_WIDTH
 
+# Download queue — items waiting to start. The item currently downloading
+# has already been popped out of this queue (see current_queue_item).
+download_queue = deque()
+current_queue_item = None  # {"id": int, "url": str} or None when idle
+_queue_id_counter = itertools.count(1)
+
 
 # ---------------------------------------------------------------------------
 # UI helpers
 # ---------------------------------------------------------------------------
 def set_widgets_state(state: str):
-    for w in [
-        preview_notification_button, download_button, url_entry,
-        quality_options_menu, playlist_checkbox, uninstall_button,
-    ]:
+    for w in [uninstall_button]:
         w.configure(state=state)
 
 
@@ -179,9 +191,7 @@ def on_download_done(success_msg_key: str):
 
 
 def _finalize_download(success_msg_key: str):
-    hide_progress()
-    set_widgets_state("normal")
-    cancel_button.pack_forget()
+    global current_queue_item
 
     if system_notification_enabled.get():
         notification.notify(
@@ -191,25 +201,130 @@ def _finalize_download(success_msg_key: str):
             app_icon=NOTIFICATION_ICON,
         )
 
+    current_queue_item = None
+    if download_queue:
+        process_next_in_queue()
+    else:
+        hide_progress()
+        set_widgets_state("normal")
+        download_button.configure(state="normal")
+        queue_add_button.pack_forget()
+        cancel_button.pack_forget()
+
 
 def on_download_error(msg: str):
     root.after(0, lambda: _handle_error(msg))
 
 
 def _handle_error(msg: str):
-    hide_progress()
-    set_widgets_state("normal")
-    cancel_button.pack_forget()
+    global current_queue_item
+
     messagebox.showerror(current_language["error_title"], msg)
 
+    current_queue_item = None
+    if download_queue:
+        process_next_in_queue()
+    else:
+        hide_progress()
+        set_widgets_state("normal")
+        download_button.configure(state="normal")
+        queue_add_button.pack_forget()
+        cancel_button.pack_forget()
+
 
 # ---------------------------------------------------------------------------
-# Download entry point
+# Quality selection helpers
 # ---------------------------------------------------------------------------
-def start_download():
-    global cancel_requested
-    cancel_requested = False
+# The dropdown shows language-flavored labels ("1080p ᴴᴰ", "Ses"/"Audio"),
+# but each queue item needs to remember its OWN pick as a stable, language-
+# independent key ("720p", "1080p", "2K", "4K", "audio") so that switching
+# the UI language later doesn't break already-queued items.
+RESOLUTION_UI_MAP = {
+    "720p":       "720p",
+    "1080p ᴴᴰ":  "1080p",
+    "1440p ²ᴷ":  "2K",
+    "2160p ⁴ᴷ":  "4K",
+}
+QUALITY_KEY_TO_LANG_FIELD = {
+    "720p": "720p",
+    "1080p": "1080p",
+    "2K": "1440p",
+    "4K": "2160p",
+    "audio": "audio",
+}
 
+
+def resolve_quality_key(selection: str):
+    """Turn the dropdown's current display text into a stable quality key,
+    or None if it doesn't match anything (shouldn't normally happen)."""
+    if selection == current_language.get("audio"):
+        return "audio"
+    return RESOLUTION_UI_MAP.get(selection)
+
+
+def quality_label(quality_key: str) -> str:
+    """Turn a stored quality key back into a label in the current language,
+    for display in the queue list."""
+    lang_field = QUALITY_KEY_TO_LANG_FIELD.get(quality_key)
+    return current_language.get(lang_field, quality_key) if lang_field else quality_key
+
+
+# ---------------------------------------------------------------------------
+# Queue management
+# ---------------------------------------------------------------------------
+def render_queue_list():
+    """Redraw the waiting-items list. The currently-downloading item is not
+    shown here — it's already been popped off download_queue and is instead
+    reflected in the progress label above."""
+    for child in queue_list_frame.winfo_children():
+        child.destroy()
+
+    if not download_queue:
+        queue_list_frame.grid_remove()
+        queue_header_label.grid_remove()
+        clear_queue_button.grid_remove()
+        return
+
+    queue_header_label.configure(
+        text=f"{current_language['queue_title_label']} ({len(download_queue)})"
+    )
+    queue_header_label.grid()
+    clear_queue_button.grid()
+    queue_list_frame.grid()
+
+    for idx, item in enumerate(download_queue, start=1):
+        row = ctk.CTkFrame(queue_list_frame, fg_color="transparent")
+        row.pack(fill="x", pady=2, padx=2)
+
+        display_url = item["url"] if len(item["url"]) <= 60 else item["url"][:57] + "..."
+        label = ctk.CTkLabel(
+            row,
+            text=f"{idx}. [{quality_label(item['quality_key'])}] {display_url}",
+            anchor="w", font=("Helvetica", 12),
+        )
+        label.pack(side="left", fill="x", expand=True, padx=(5, 5))
+
+        remove_btn = ctk.CTkButton(
+            row, text="✕", width=24, height=24,
+            fg_color="transparent", hover_color="#dddddd", text_color="#d9534f",
+            command=lambda item_id=item["id"]: remove_from_queue(item_id),
+        )
+        remove_btn.pack(side="right", padx=5)
+
+
+def remove_from_queue(item_id: int):
+    global download_queue
+    download_queue = deque(item for item in download_queue if item["id"] != item_id)
+    render_queue_list()
+
+
+def clear_queue():
+    global download_queue
+    download_queue = deque()
+    render_queue_list()
+
+
+def add_to_queue():
     raw_url = url_entry.get().strip()
     if not raw_url:
         messagebox.showwarning(
@@ -225,22 +340,52 @@ def start_download():
         )
         return
 
+    quality_key = resolve_quality_key(option_var.get())
+    if not quality_key:
+        messagebox.showwarning(
+            current_language["warning_title"],
+            current_language["quality_error_message"],
+        )
+        return
+
     url = clean_playlist_url(raw_url)
-    selection = option_var.get()
+    download_queue.append({"id": next(_queue_id_counter), "url": url, "quality_key": quality_key})
+    url_entry.delete(0, "end")
+    render_queue_list()
+
+    if current_queue_item is None:
+        process_next_in_queue()
+
+
+def process_next_in_queue():
+    """Pop the next item off the queue and start downloading it. Assumes
+    current_queue_item is currently None (nothing else is in flight)."""
+    global current_queue_item, cancel_requested
+
+    if not download_queue:
+        current_queue_item = None
+        return
+
+    current_queue_item = download_queue.popleft()
+    render_queue_list()
+    cancel_requested = False
+
+    url = current_queue_item["url"]
+    quality_key = current_queue_item["quality_key"]
     save_location = os.path.join(os.path.expanduser("~"), "Downloads")
 
     set_widgets_state("disabled")
+    download_button.configure(state="disabled")
+    queue_add_button.pack(side="left", padx=5)
     cancel_button.pack(pady=5)
-    show_progress(current_language["download_starting_message"])
 
-    resolution_ui_map = {
-        "720p":       "720p",
-        "1080p ᴴᴰ":  "1080p",
-        "1440p ²ᴷ":  "2K",
-        "2160p ⁴ᴷ":  "4K",
-    }
+    remaining = len(download_queue)
+    starting_text = current_language["download_starting_message"]
+    if remaining:
+        starting_text += f"  ({current_language['queue_remaining_label']}: {remaining})"
+    show_progress(starting_text)
 
-    if selection == current_language.get("audio"):
+    if quality_key == "audio":
         download_audio(
             url=url,
             save_location=save_location,
@@ -250,22 +395,22 @@ def start_download():
             on_error=on_download_error,
             lang=current_language,
         )
-    elif selection in resolution_ui_map:
+    else:
         download_video(
             url=url,
             save_location=save_location,
-            target_resolution=resolution_ui_map[selection],
+            target_resolution=quality_key,
             on_progress=on_progress,
             on_cancel_check=on_cancel_check,
             on_done=lambda: on_download_done("download_complete_message"),
             on_error=on_download_error,
             lang=current_language,
         )
-    else:
-        _handle_error(current_language["quality_error_message"])
 
 
 def cancel_download():
+    """Cancels only the item currently downloading. If more items are
+    queued, the next one starts automatically once this one stops."""
     global cancel_requested
     cancel_requested = True
     progress_label.configure(text=current_language["download_canceling_message"])
@@ -292,6 +437,8 @@ def toggle_theme():
         "url_entry":           url_entry,
         "playlist_checkbox":   playlist_checkbox,
         "quality_options_menu": quality_options_menu,
+        "queue_header_label":  queue_header_label,
+        "queue_list_frame":    queue_list_frame,
     }
 
     for key, widget in widget_map.items():
@@ -340,9 +487,13 @@ def change_language(selected: str):
         preview_notification_button:  "preview_notification_button",
         playlist_checkbox:            "playlist_checkbox_text",
         uninstall_button:             "uninstall_button",
+        clear_queue_button:           "clear_queue_button",
+        queue_add_button:             "add_to_queue_button",
     }
     for widget, key in label_map.items():
         widget.configure(text=current_language[key])
+
+    render_queue_list()  # refreshes the "Queue (N)" header text in the new language
 
     url_entry.configure(placeholder_text=current_language["link_placeholder"])
 
@@ -393,7 +544,7 @@ def preview_notification():
 # ---------------------------------------------------------------------------
 root = ctk.CTk()
 root.title("Video Downloader")
-root.geometry("800x370")
+root.geometry("800x600")
 root.iconbitmap(APP_ICON)
 
 # Main frame
@@ -443,10 +594,41 @@ playlist_checkbox = ctk.CTkCheckBox(
 #playlist_checkbox.grid(row=1, column=3, sticky="w", padx=10, pady=5)
 #playlist_checkbox.grid_remove()
 
-# Download button
+# Queue header + clear button (row 2, hidden until something is queued)
+queue_header_label = ctk.CTkLabel(frame, text="", font=ctk.CTkFont(size=13, weight="bold"))
+queue_header_label.grid(row=2, column=0, columnspan=2, padx=10, pady=(10, 0), sticky="w")
+queue_header_label.grid_remove()
+
+clear_queue_button = ctk.CTkButton(
+    frame,
+    command=clear_queue,
+    width=100, height=24,
+    font=("Helvetica", 11),
+    fg_color="#ebebeb", hover_color="#dddddd", text_color="#d9534f",
+)
+clear_queue_button.grid(row=2, column=2, columnspan=2, padx=10, pady=(10, 0), sticky="e")
+clear_queue_button.grid_remove()
+
+# Queue list (waiting items only — the active download shows in the progress area)
+queue_list_frame = ctk.CTkScrollableFrame(frame, width=440, height=90, fg_color="#f5f5f5")
+queue_list_frame.grid(row=3, column=0, columnspan=4, padx=10, pady=(5, 10), sticky="ew")
+queue_list_frame.grid_remove()
+
+# Bottom action panel: pinned to the bottom of the window with place(), so
+# it never gets pushed off-screen no matter how tall the queue list above
+# grows. Everything inside it (buttons, progress bar/label) uses normal
+# pack() among themselves, same as before.
+bottom_panel = ctk.CTkFrame(root, fg_color="transparent")
+bottom_panel.place(relx=0.5, rely=1.0, anchor="s", y=-15)
+
+# Action buttons row: "İndir" (always visible) + "➕ Sıraya Ekle"
+# (only shown once a download is already running, per process_next_in_queue)
+action_buttons_frame = ctk.CTkFrame(bottom_panel, fg_color="transparent")
+action_buttons_frame.pack(pady=(0, 10))
+
 download_button = ctk.CTkButton(
-    root,
-    command=start_download,
+    action_buttons_frame,
+    command=add_to_queue,
     width=120,
     height=45,
     font=("Helvetica", 14, "bold"),
@@ -455,11 +637,25 @@ download_button = ctk.CTkButton(
     text_color="#fbfbfb",
     corner_radius=5,
 )
-download_button.pack(pady=20)
+download_button.pack(side="left", padx=5)
+
+queue_add_button = ctk.CTkButton(
+    action_buttons_frame,
+    command=add_to_queue,
+    width=150,
+    height=45,
+    font=("Helvetica", 14, "bold"),
+    fg_color="#5cb85c",
+    hover_color="#449d44",
+    text_color="#fbfbfb",
+    corner_radius=5,
+)
+queue_add_button.pack(side="left", padx=5)
+queue_add_button.pack_forget()
 
 # Cancel button
 cancel_button = ctk.CTkButton(
-    root,
+    bottom_panel,
     command=cancel_download,
     width=120,
     height=45,
@@ -475,13 +671,13 @@ cancel_button.pack(pady=0)
 cancel_button.pack_forget()
 
 # Progress bar
-progress_bar = ctk.CTkProgressBar(root, orientation="horizontal", width=300, height=15)
+progress_bar = ctk.CTkProgressBar(bottom_panel, orientation="horizontal", width=300, height=15)
 progress_bar.set(0)
 progress_bar.pack(pady=10)
 progress_bar.pack_forget()
 
 # Progress label
-progress_label = ctk.CTkLabel(root, text="", font=("Helvetica", 13))
+progress_label = ctk.CTkLabel(bottom_panel, text="", font=("Helvetica", 13))
 progress_label.pack()
 progress_label.pack_forget()
 

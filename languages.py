@@ -36,6 +36,10 @@ LANGUAGES = {
         "1080p": "1080p ᴴᴰ",
         "720p": "720p",
         "audio": "Ses",
+        "queue_remaining_label": "Kuyrukta kalan",
+        "queue_title_label": "Kuyruk",
+        "clear_queue_button": "Kuyruğu Temizle",
+        "add_to_queue_button": "➕ Sıraya Ekle",
 
     },
     "En": {
@@ -76,6 +80,10 @@ LANGUAGES = {
         "1080p": "1080p ᴴᴰ",
         "720p": "720p",
         "audio": "Audio",
+        "queue_remaining_label": "Remaining in queue",
+        "queue_title_label": "Queue",
+        "clear_queue_button": "Clear Queue",
+        "add_to_queue_button": "➕ Add to Queue",
 
     }
 }
