@@ -14,8 +14,9 @@ from languages import LANGUAGES
 from settings import load_setting, save_setting
 from utils import clean_playlist_url, copy_icons, get_icon_path
 
+
 # Convert to exe file
-# pyinstaller --onefile --noconsole --add-binary "C:\Users\alper\PycharmProjects\VideoDownloader\.venv\Lib\site-packages\imageio_ffmpeg\binaries\ffmpeg-win-x86_64-v7.1.exe;." --add-data "notificationIcon.ico;." --add-data "previewIcon.ico;." --add-data "appIcon.ico;." --add-data "languages.py;." --add-data "settings.py;." --add-data "utils.py;." --add-data "downloader.py;." --hidden-import=plyer.platforms.win.notification main.py
+# pyinstaller --onefile --noconsole --add-binary "C:\Users\alper\PycharmProjects\VideoDownloader\.venv\Lib\site-packages\imageio_ffmpeg\binaries\ffmpeg-win-x86_64-v7.1.exe;." --add-data "notificationIcon.ico;." --add-data "previewIcon.ico;." --add-data "appIcon.ico;." --add-data "languages.py;." --add-data "settings.py;." --add-data "utils.py;." --add-data "downloader.py;." --add-data "ytdlp_manager.py;." --hidden-import=plyer.platforms.win.notification main.py
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -42,8 +43,13 @@ APP_ICON = get_icon_path("appIcon.ico")
 def fetch_ytdlp_version(callback):
     def worker():
         try:
-            import yt_dlp
-            callback(f"yt-dlp v{yt_dlp.version.__version__}")
+            from settings import get_appdata_path
+            from ytdlp_manager import ensure_ytdlp, get_ytdlp_version
+            # ensure_ytdlp downloads yt-dlp.exe on first run and otherwise
+            # asks it to self-update — this is also where the "auto update"
+            # actually happens, once per app launch.
+            exe_path = ensure_ytdlp(get_appdata_path())
+            callback(f"yt-dlp v{get_ytdlp_version(exe_path)}")
         except Exception:
             callback("yt-dlp version unavailable")
     threading.Thread(target=worker, daemon=True).start()
@@ -425,7 +431,7 @@ frame.grid_rowconfigure(1, minsize=50)
 playlist_checkbox_var = ctk.BooleanVar()
 playlist_checkbox = ctk.CTkCheckBox(
     frame,
-    variable=playlist_checkbox_var,
+    #variable=playlist_checkbox_var,
     font=ctk.CTkFont(size=15),
     checkbox_height=20,
     checkbox_width=20,
@@ -434,8 +440,8 @@ playlist_checkbox = ctk.CTkCheckBox(
     hover_color="#cccccc",
     corner_radius=4,
 )
-playlist_checkbox.grid(row=1, column=3, sticky="w", padx=10, pady=5)
-playlist_checkbox.grid_remove()
+#playlist_checkbox.grid(row=1, column=3, sticky="w", padx=10, pady=5)
+#playlist_checkbox.grid_remove()
 
 # Download button
 download_button = ctk.CTkButton(

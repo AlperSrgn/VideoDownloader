@@ -1,16 +1,22 @@
 import logging
 import os
+import re
 import subprocess
 import threading
 
-import yt_dlp
-
+from settings import get_appdata_path
 from utils import (
     get_ffmpeg_path,
     sanitize_filename,
     unique_filename,
     update_file_timestamp,
     find_glob_file,
+)
+from ytdlp_manager import (
+    ensure_ytdlp,
+    extract_info,
+    find_info_with_compatible_format,
+    CLIENT_LIST,
 )
 
 logger = logging.getLogger(__name__)
@@ -22,14 +28,19 @@ RESOLUTION_MAP = {
     "4K": 2160,
 }
 
-CLIENT_LIST = ["android", "web", "ios", "tv", "web_mobile"]
+_NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 # Shared cancel flag — set to True from UI to abort an active download
 cancel_download = False
 
 
+class DownloadCancelled(Exception):
+    pass
+
+
 # ---------------------------------------------------------------------------
-# Format selection
+# Format selection (unchanged — operates on the same 'formats' list shape
+# that yt-dlp's --dump-json output produces)
 # ---------------------------------------------------------------------------
 
 def find_suitable_format(formats: list, video_height: int):
@@ -80,30 +91,74 @@ def find_suitable_format(formats: list, video_height: int):
 
 
 # ---------------------------------------------------------------------------
-# Progress hook
+# Progress parsing (replaces yt_dlp's progress_hooks — we now read yt-dlp
+# CLI's --newline stdout output directly)
 # ---------------------------------------------------------------------------
 
-def make_progress_hook(on_progress, on_cancel_check, lang):
-    """
-    Returns a yt-dlp progress hook that calls on_progress(percent, downloaded_mb,
-    total_mb, eta) and raises if cancel is requested.
-    """
-    def hook(d):
-        if on_cancel_check():
-            raise Exception(lang["download_canceled_message"])
+# Matches lines like:
+# "[download]  45.2% of   10.00MiB at    1.20MiB/s ETA 00:05"
+_PROGRESS_RE = re.compile(
+    r"\[download\]\s+([\d.]+)%\s+of\s+~?\s*([\d.]+)(B|KiB|MiB|GiB)"
+    r"(?:\s+at\s+(\S+))?"
+    r"(?:\s+ETA\s+(\S+))?"
+)
 
-        if d["status"] == "downloading":
-            try:
-                percent = float(d["_percent_str"].strip("%"))
-                downloaded_mb = d.get("downloaded_bytes", 0) / (1024 * 1024)
-                total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
-                total_mb = total / (1024 * 1024)
-                eta = d.get("_eta_str", "--:--")
-                on_progress(percent, downloaded_mb, total_mb, eta)
-            except Exception as e:
-                logger.debug("Progress hook parse error: %s", e)
+_UNIT_TO_MB = {"B": 1 / (1024 * 1024), "KiB": 1 / 1024, "MiB": 1, "GiB": 1024}
 
-    return hook
+
+def _parse_progress_line(line: str):
+    """Return (percent, downloaded_mb, total_mb, eta) or None if not a progress line."""
+    match = _PROGRESS_RE.search(line)
+    if not match:
+        return None
+
+    percent = float(match.group(1))
+    total_value = float(match.group(2))
+    unit = match.group(3)
+    eta = match.group(5) or "--:--"
+
+    total_mb = total_value * _UNIT_TO_MB.get(unit, 1)
+    downloaded_mb = total_mb * (percent / 100)
+    return percent, downloaded_mb, total_mb, eta
+
+
+def _run_download(cmd, on_progress, on_cancel_check, cancel_message):
+    """
+    Run a yt-dlp.exe download command, streaming its --newline progress
+    output into on_progress, and killing it if on_cancel_check() becomes
+    True mid-download.
+    """
+    process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        bufsize=1,
+        creationflags=_NO_WINDOW,
+    )
+
+    try:
+        for line in process.stdout:
+            if on_cancel_check():
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                raise DownloadCancelled(cancel_message)
+
+            parsed = _parse_progress_line(line)
+            if parsed:
+                on_progress(*parsed)
+    finally:
+        if process.stdout:
+            process.stdout.close()
+
+    process.wait()
+    if process.returncode != 0:
+        raise RuntimeError(f"yt-dlp exited with code {process.returncode}")
 
 
 # ---------------------------------------------------------------------------
@@ -130,54 +185,44 @@ def download_video(
             return
 
         video_height = RESOLUTION_MAP[target_resolution]
-        video_info = None
-        selected_client = None
-        video_format = None
-        audio_format = None
+        exe_path = ensure_ytdlp(get_appdata_path())
 
-        # Try each client until one returns accessible URLs
-        for client in CLIENT_LIST:
-            try:
-                logger.debug("Trying client: %s", client)
-                with yt_dlp.YoutubeDL({"quiet": True, "player_client": client}) as ydl:
-                    info = ydl.extract_info(url, download=False)
-                    v_fmt, a_fmt = find_suitable_format(info.get("formats", []), video_height)
-                    if v_fmt and a_fmt:
-                        video_info = info
-                        selected_client = client
-                        video_format = v_fmt
-                        audio_format = a_fmt
-                        break
-                    else:
-                        logger.debug("Client %s: no compatible format or SABR protected.", client)
-            except Exception as e:
-                logger.debug("Client %s raised an error: %s", client, e)
+        def selector(formats):
+            return find_suitable_format(formats, video_height)
 
-        if not video_info:
+        info, client, (video_format, audio_format) = find_info_with_compatible_format(
+            exe_path, url, selector
+        )
+
+        if not info:
             on_error(lang["download_video_format_error"])
             return
 
-        title = video_info.get("title", "video")
+        title = info.get("title", "video")
         safe_title = sanitize_filename(title)
         base = os.path.join(save_location, safe_title)
 
-        progress_hook = make_progress_hook(on_progress, on_cancel_check, lang)
-
-        common_opts = {
-            "quiet": True,
-            "progress_hooks": [progress_hook],
-            "player_client": selected_client,
-        }
+        video_cmd = [
+            exe_path,
+            "-f", video_format["format_id"],
+            "--extractor-args", f"youtube:player_client={client}",
+            "--newline", "--no-warnings",
+            "-o", f"{base}_(Video).%(ext)s",
+            url,
+        ]
+        audio_cmd = [
+            exe_path,
+            "-f", audio_format["format_id"],
+            "--extractor-args", f"youtube:player_client={client}",
+            "--newline", "--no-warnings",
+            "-o", f"{base}_(Audio).%(ext)s",
+            url,
+        ]
 
         try:
-            with yt_dlp.YoutubeDL({**common_opts, "format": video_format["format_id"],
-                                    "outtmpl": f"{base}_(Video).%(ext)s"}) as ydl:
-                ydl.download([url])
-
-            with yt_dlp.YoutubeDL({**common_opts, "format": audio_format["format_id"],
-                                    "outtmpl": f"{base}_(Audio).%(ext)s"}) as ydl:
-                ydl.download([url])
-        except Exception as e:
+            _run_download(video_cmd, on_progress, on_cancel_check, lang["download_canceled_message"])
+            _run_download(audio_cmd, on_progress, on_cancel_check, lang["download_canceled_message"])
+        except (DownloadCancelled, RuntimeError) as e:
             on_error(str(e))
             return
 
@@ -208,7 +253,7 @@ def download_video(
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 check=True,
-                creationflags=subprocess.CREATE_NO_WINDOW,
+                creationflags=_NO_WINDOW,
             )
         except subprocess.CalledProcessError as e:
             on_error(f"FFmpeg merge failed (exit code {e.returncode}). "
@@ -244,31 +289,52 @@ def download_audio(
 ) -> None:
     """Download audio only as mp3. Runs in a background thread."""
     def worker():
+        exe_path = ensure_ytdlp(get_appdata_path())
+
+        info = None
+        for client in CLIENT_LIST:
+            try:
+                info = extract_info(exe_path, url, client)
+                break
+            except Exception as e:
+                logger.debug("Client %s failed: %s", client, e)
+
+        if not info:
+            on_error(lang["download_video_format_error"])
+            return
+
+        title = info.get("title", "audio")
+        safe_title = sanitize_filename(title)
+        output_filename = unique_filename(save_location, f"{safe_title}.mp3")
+        output_path = os.path.join(save_location, output_filename)
+        output_template = os.path.join(save_location, safe_title)
+
+        cmd = [
+            exe_path,
+            "-f", "bestaudio",
+            "-x", "--audio-format", "mp3",
+            "--ffmpeg-location", get_ffmpeg_path(),
+            "--newline", "--no-warnings",
+            "-o", f"{output_template}.%(ext)s",
+            url,
+        ]
+
         try:
-            with yt_dlp.YoutubeDL({"quiet": True}) as ydl:
-                info = ydl.extract_info(url, download=False)
-                title = info.get("title", "audio")
-
-            safe_title = sanitize_filename(title)
-            output_filename = unique_filename(save_location, f"{safe_title}.mp3")
-            output_path = os.path.join(save_location, output_filename)
-
-            progress_hook = make_progress_hook(on_progress, on_cancel_check, lang)
-
-            ydl_opts = {
-                "format": "bestaudio",
-                "outtmpl": output_path,
-                "progress_hooks": [progress_hook],
-                "quiet": True,
-            }
-
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
-
-            update_file_timestamp(output_path)
-            on_done()
-
-        except Exception as e:
+            _run_download(cmd, on_progress, on_cancel_check, lang["download_canceled_message"])
+        except (DownloadCancelled, RuntimeError) as e:
             on_error(str(e))
+            return
+
+        try:
+            final_path = find_glob_file(f"{output_template}.mp3")
+        except FileNotFoundError as e:
+            on_error(str(e))
+            return
+
+        if os.path.abspath(final_path) != os.path.abspath(output_path):
+            os.replace(final_path, output_path)
+
+        update_file_timestamp(output_path)
+        on_done()
 
     threading.Thread(target=worker, daemon=True).start()
