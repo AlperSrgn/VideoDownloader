@@ -17,10 +17,6 @@ from settings import load_setting, save_setting
 from utils import clean_playlist_url, copy_icons, get_icon_path
 
 # Convert to exe file
-# NOTE: yt_dlp is no longer a Python dependency of this app — it's called as
-# an external yt-dlp.exe that's downloaded/self-updated at runtime (see
-# ytdlp_manager.py), so it should be removed from requirements.txt and no
-# longer needs a --hidden-import. Add ytdlp_manager.py to --add-data instead.
 # pyinstaller --onefile --noconsole --add-binary "C:\Users\alper\PycharmProjects\VideoDownloader\.venv\Lib\site-packages\imageio_ffmpeg\binaries\ffmpeg-win-x86_64-v7.1.exe;." --add-data "notificationIcon.ico;." --add-data "previewIcon.ico;." --add-data "appIcon.ico;." --add-data "languages.py;." --add-data "settings.py;." --add-data "utils.py;." --add-data "downloader.py;." --add-data "ytdlp_manager.py;." --hidden-import=plyer.platforms.win.notification main.py
 
 # ---------------------------------------------------------------------------

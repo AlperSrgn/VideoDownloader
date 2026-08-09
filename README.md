@@ -4,11 +4,13 @@ Download videos from websites. Provides the following features:
 
 - Download videos up to 4K resolution [ 2160P(4K), 1440P(2K), 1080P, 720P ]
 - Download the audio of the video as MP3
+- **Download queue** — queue up multiple links, each with its own quality/format, and let them download one after another. You can keep adding more links while a download is already in progress
 - Dark mode feature
 - System notification support with preview
 - Download videos by URL
 - Automatically selects the best video format based on your quality preference
 - Automatically handles SABR-protected YouTube videos by trying multiple clients
+- Uses a standalone `yt-dlp.exe` that downloads and self-updates in the background, so the app can keep up with YouTube changes without waiting on an app update
 
 Based on [yt-dlp](https://github.com/yt-dlp/yt-dlp).
 
@@ -18,7 +20,7 @@ Based on [yt-dlp](https://github.com/yt-dlp/yt-dlp).
 
 ## Download VideoDownloaderSetup.exe
 
-### [![İNDİR](https://github.com/user-attachments/assets/8d8adf06-7013-4017-8434-51984f624e3b)](https://github.com/AlperSrgn/VideoDownloader/releases/download/v2.0/VideoDownloaderSetup.exe)
+### [![İNDİR](https://github.com/user-attachments/assets/8d8adf06-7013-4017-8434-51984f624e3b)](https://github.com/AlperSrgn/VideoDownloader/releases/download/v3.0/VideoDownloaderSetup.exe)
 
 <br>
 
@@ -42,11 +44,13 @@ After running this command, the _imageio-ffmpeg_ installation will be completed.
 
 `$ return os.path.join(project_dir, ".venv", "Lib", "site-packages", "imageio_ffmpeg", "binaries", "ffmpeg-win-x86_64-v7.1.exe")`
 
+**Note:** This app no longer depends on the `yt-dlp` Python package. Instead, `ytdlp_manager.py` downloads the official standalone `yt-dlp.exe` into `%LOCALAPPDATA%\VideoDownloader` on first launch and asks it to self-update once per app run — so there's nothing to `pip install` for yt-dlp itself, but the app does need internet access on first launch to fetch it.
+
 ---
 
 ## Convert to Exe
 
-The project must be built using the **virtual environment's** Python and PyInstaller to ensure the correct versions of all packages (especially yt-dlp) are bundled.
+The project must be built using the **virtual environment's** Python and PyInstaller to ensure the correct versions of all packages are bundled.
 
 **Step 1 — Install PyInstaller into the virtual environment:**
 
@@ -54,11 +58,11 @@ The project must be built using the **virtual environment's** Python and PyInsta
 
 **Step 2 — Build the exe:**
 
-`$ pyinstaller --onefile --noconsole --add-binary "C:\Users\alper\PycharmProjects\VideoDownloader\.venv\Lib\site-packages\imageio_ffmpeg\binaries\ffmpeg-win-x86_64-v7.1.exe;." --add-data "notificationIcon.ico;." --add-data "previewIcon.ico;." --add-data "appIcon.ico;." --add-data "languages.py;." --add-data "settings.py;." --add-data "utils.py;." --add-data "downloader.py;." --hidden-import=plyer.platforms.win.notification main.py`
+`$ pyinstaller --onefile --noconsole --add-binary "C:\Users\alper\PycharmProjects\VideoDownloader\.venv\Lib\site-packages\imageio_ffmpeg\binaries\ffmpeg-win-x86_64-v7.1.exe;." --add-data "notificationIcon.ico;." --add-data "previewIcon.ico;." --add-data "appIcon.ico;." --add-data "languages.py;." --add-data "settings.py;." --add-data "utils.py;." --add-data "downloader.py;." --add-data "ytdlp_manager.py;." --hidden-import=plyer.platforms.win.notification main.py`
 
 <br>
 
-> ⚠️ **Important:** Always use the virtual environment's `python.exe` and `pip.exe` directly (as shown above) instead of the global `python` or `pip` commands. Using the global commands may cause an older or different version of yt-dlp to be bundled, which can break video downloads.
+> ⚠️ **Important:** Always use the virtual environment's `python.exe` and `pip.exe` directly (as shown above) instead of the global `python` or `pip` commands, to make sure the exe is built with the correct versions of all packages.
 
 > ⚠️ **Important:** Don't forget to replace the _imageio-ffmpeg_ and the _pyinstaller_ file path in the PyInstaller command with your own path!
 
@@ -66,13 +70,14 @@ The project must be built using the **virtual environment's** Python and PyInsta
 
 ## Project Structure
 
-| File            | Description                                                                       |
-| --------------- | --------------------------------------------------------------------------------- |
-| `main.py`       | UI layer — builds and manages all interface components                            |
-| `downloader.py` | Download logic — yt-dlp format selection, ffmpeg merge, audio download            |
-| `utils.py`      | File helpers — filename sanitization, ffmpeg path, icon copy, URL cleaning        |
-| `settings.py`   | Config — reads and writes settings to `AppData\Local\VideoDownloader\config.json` |
-| `languages.py`  | Language strings for Turkish and English                                          |
+| File               | Description                                                                                |
+| ------------------ | ------------------------------------------------------------------------------------------- |
+| `main.py`           | UI layer — builds and manages all interface components, including the download queue        |
+| `downloader.py`     | Download logic — runs `yt-dlp.exe` as a subprocess, format selection, ffmpeg merge, audio download |
+| `ytdlp_manager.py`  | Manages the standalone `yt-dlp.exe` binary — downloads it on first run and self-updates it once per app session |
+| `utils.py`          | File helpers — filename sanitization, ffmpeg path, icon copy, URL cleaning                   |
+| `settings.py`       | Config — reads and writes settings to `AppData\Local\VideoDownloader\config.json`            |
+| `languages.py`      | Language strings for Turkish and English                                                     |
 
 ---
 
