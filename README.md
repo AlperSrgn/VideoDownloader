@@ -83,10 +83,10 @@ The project must be built using the **virtual environment's** Python and PyInsta
 
 # SCREENSHOTS
 
-![light](https://github.com/user-attachments/assets/9ac1b144-e211-46a9-8372-5c16926c38da)
+![light](https://github.com/user-attachments/assets/6c79828f-1b69-4c82-8855-b9cd7806790b)
 
-![dark](https://github.com/user-attachments/assets/649260b1-45c8-46b3-a837-fcffbc007278)
+![dark](https://github.com/user-attachments/assets/ae49438b-c9c5-45a4-a945-3aa16c7eb6b5)
 
-![sidebar](https://github.com/user-attachments/assets/15486dc0-f65a-4317-b65e-2d466a6de46e)
+![sidebar](https://github.com/user-attachments/assets/1b32fdeb-de0d-44ff-98f7-336d765f6584)
 
-![cancel](https://github.com/user-attachments/assets/8204f73e-0ed2-4df3-a762-a4a536916d54)
+![cancel](https://github.com/user-attachments/assets/a6ecdc98-0427-4e31-be08-a724378a4f02)
