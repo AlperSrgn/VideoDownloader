@@ -104,6 +104,7 @@ THEMES = {
         },
         "queue_header_label":  {"text_color": "#ebebeb"},
         "queue_list_frame":    {"fg_color": "#3d3d3d"},
+        "queue_item_label":    {"text_color": "#ebebeb"},
     },
     "light": {
         "root":                {"fg_color": "#ebebeb"},
@@ -126,6 +127,7 @@ THEMES = {
         },
         "queue_header_label":  {"text_color": "#333333"},
         "queue_list_frame":    {"fg_color": "#f5f5f5"},
+        "queue_item_label":    {"text_color": "#333333"},
     },
 }
 
@@ -139,6 +141,11 @@ current_language: dict = {}
 sidebar_open = False
 SIDEBAR_WIDTH = 250
 sidebar_x = -SIDEBAR_WIDTH
+
+# Text color used for the dynamically-created queue item rows — kept in
+# sync with the active theme by toggle_theme(), since these labels are
+# built on the fly in render_queue_list() rather than created once upfront.
+queue_item_text_color = THEMES["light"]["queue_item_label"]["text_color"]
 
 # Download queue — items waiting to start. The item currently downloading
 # has already been popped out of this queue (see current_queue_item).
@@ -297,6 +304,7 @@ def render_queue_list():
             row,
             text=f"{idx}. [{quality_label(item['quality_key'])}] {display_url}",
             anchor="w", font=("Helvetica", 12),
+            text_color=queue_item_text_color,
         )
         label.pack(side="left", fill="x", expand=True, padx=(5, 5))
 
@@ -416,7 +424,7 @@ def cancel_download():
 # Theme toggle
 # ---------------------------------------------------------------------------
 def toggle_theme():
-    global dark_mode
+    global dark_mode, queue_item_text_color
     theme_key = "dark" if not dark_mode else "light"
     theme = THEMES[theme_key]
 
@@ -439,6 +447,9 @@ def toggle_theme():
 
     for key, widget in widget_map.items():
         widget.configure(**theme[key])
+
+    queue_item_text_color = theme["queue_item_label"]["text_color"]
+    render_queue_list()  # repaints any already-visible queue rows with the new color
 
     dark_mode = not dark_mode
 
