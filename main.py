@@ -41,7 +41,16 @@ APP_ICON = get_icon_path("appIcon.ico")
 # ---------------------------------------------------------------------------
 # yt-dlp version (async)
 # ---------------------------------------------------------------------------
-def fetch_ytdlp_version(callback):
+def fetch_ytdlp_version(callback, on_status=None):
+    """
+    Runs ensure_ytdlp (download-on-first-run / self-update) in the
+    background, then reports the resolved version via `callback`.
+
+    If given, `on_status(stage, percent)` is invoked as ensure_ytdlp
+    progresses — see ytdlp_manager.ensure_ytdlp for the stage values. This
+    lets the UI show something better than a blank window while yt-dlp.exe
+    is being fetched for the first time.
+    """
     def worker():
         try:
             from settings import get_appdata_path
@@ -49,11 +58,12 @@ def fetch_ytdlp_version(callback):
             # ensure_ytdlp downloads yt-dlp.exe on first run and otherwise
             # asks it to self-update — this is also where the "auto update"
             # actually happens, once per app launch.
-            exe_path = ensure_ytdlp(get_appdata_path())
+            exe_path = ensure_ytdlp(get_appdata_path(), on_status=on_status)
             callback(f"yt-dlp v{get_ytdlp_version(exe_path)}")
         except Exception:
             callback("yt-dlp version unavailable")
     threading.Thread(target=worker, daemon=True).start()
+
 
 
 # ---------------------------------------------------------------------------
@@ -628,6 +638,15 @@ queue_list_frame.grid_remove()
 bottom_panel = ctk.CTkFrame(root, fg_color="transparent")
 bottom_panel.place(relx=0.5, rely=1.0, anchor="s", y=-15)
 
+# yt-dlp preparation banner — shown while yt-dlp.exe is being downloaded on
+# first run (or, more briefly, while it's checking for updates). Hidden the
+# rest of the time. See on_ytdlp_status().
+ytdlp_status_label = ctk.CTkLabel(
+    bottom_panel, text="", font=("Helvetica", 14, "italic"), text_color="#888888",
+)
+ytdlp_status_label.pack(pady=(0, 5))
+ytdlp_status_label.pack_forget()
+
 # Action buttons row: "İndir" (always visible) + "➕ Sıraya Ekle"
 # (only shown once a download is already running, per process_next_in_queue)
 action_buttons_frame = ctk.CTkFrame(bottom_panel, fg_color="transparent")
@@ -643,6 +662,7 @@ download_button = ctk.CTkButton(
     hover_color="#1f567a",
     text_color="#fbfbfb",
     corner_radius=5,
+    state="disabled",  # re-enabled once on_ytdlp_status reports "ready"
 )
 download_button.pack(side="left", padx=5)
 
@@ -839,7 +859,39 @@ yt_dlp_version_label = ctk.CTkLabel(
     text_color="#888888",
 )
 yt_dlp_version_label.place(relx=1.0, rely=1.0, anchor="se", x=-10, y=-5)
-fetch_ytdlp_version(lambda t: yt_dlp_version_label.configure(text=t))
+
+
+def on_ytdlp_status(stage: str, percent):
+    """Called (possibly from a background thread) as ensure_ytdlp progresses.
+    Shows a small banner above the download button while yt-dlp.exe is being
+    fetched for the first time, and keeps the download button locked until
+    it's actually ready to be used."""
+    def apply():
+        lang = current_language or LANGUAGES.get("Tr", {})
+
+        if stage == "ready":
+            ytdlp_status_label.pack_forget()
+            if current_queue_item is None:  # don't steal control from an active download
+                download_button.configure(state="normal")
+            return
+
+        if stage == "checking_update":
+            text = lang["ytdlp_checking_message"]
+        elif stage == "downloading" and percent is not None:
+            text = lang["ytdlp_downloading_message"].replace("{percent}", f"{percent:.0f}")
+        else:
+            text = lang["ytdlp_downloading_indeterminate_message"]
+
+        ytdlp_status_label.configure(text=text)
+        ytdlp_status_label.pack(pady=(0, 5), before=action_buttons_frame)
+
+    root.after(0, apply)
+
+
+fetch_ytdlp_version(
+    lambda t: yt_dlp_version_label.configure(text=t),
+    on_status=on_ytdlp_status,
+)
 
 # ---------------------------------------------------------------------------
 # Apply saved settings on startup

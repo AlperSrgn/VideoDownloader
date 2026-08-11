@@ -20,12 +20,16 @@ Based on [yt-dlp](https://github.com/yt-dlp/yt-dlp).
 
 ## Download VideoDownloaderSetup.exe
 
-### [![İNDİR](https://github.com/user-attachments/assets/8d8adf06-7013-4017-8434-51984f624e3b)](https://github.com/AlperSrgn/VideoDownloader/releases/download/v3.0/VideoDownloaderSetup.exe)
+### [![İNDİR](https://github.com/user-attachments/assets/8d8adf06-7013-4017-8434-51984f624e3b)](https://github.com/AlperSrgn/VideoDownloader/releases/download/v3.0.1/VideoDownloaderSetup.exe)
 
 <br>
 
 **Note:** Video Downloader comes bundled with FFmpeg which is used for merging video and audio streams. When you download it as a setup file, you do not need to take any action.
 You can complete the installation process by running the setup file.
+
+> ⚠️ **Windows SmartScreen warning:** When you run the installer, Windows may show a blue **"Windows protected your PC"** screen. This is expected and **not a sign of malware** — it happens because the exe isn't signed with a paid code-signing certificate, which Microsoft uses as a trust signal regardless of what the app actually does. The project is fully open source, so you're welcome to review the code yourself before running it. To continue: click **"More info"**, then **"Run anyway"**.
+>
+> Your antivirus may also flag or scan `yt-dlp.exe` the first time the app downloads it — this is the same story: it's an unsigned executable that gets fetched at runtime (see [Project Structure](#project-structure) below), not malicious behavior. It's downloaded directly from the [official yt-dlp GitHub releases](https://github.com/yt-dlp/yt-dlp/releases).
 
 ---
 

@@ -40,6 +40,9 @@ LANGUAGES = {
         "queue_title_label": "Kuyruk",
         "clear_queue_button": "Kuyruğu Temizle",
         "add_to_queue_button": "➕ Sıraya Ekle",
+        "ytdlp_downloading_message": "yt-dlp hazırlanıyor... %{percent}",
+        "ytdlp_downloading_indeterminate_message": "yt-dlp hazırlanıyor...",
+        "ytdlp_checking_message": "Güncellemeler kontrol ediliyor...",
 
     },
     "En": {
@@ -84,6 +87,9 @@ LANGUAGES = {
         "queue_title_label": "Queue",
         "clear_queue_button": "Clear Queue",
         "add_to_queue_button": "➕ Add to Queue",
+        "ytdlp_downloading_message": "Preparing yt-dlp... %{percent}",
+        "ytdlp_downloading_indeterminate_message": "Preparing yt-dlp...",
+        "ytdlp_checking_message": "Checking for updates...",
 
     }
 }

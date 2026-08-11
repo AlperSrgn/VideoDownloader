@@ -45,15 +45,27 @@ def get_ytdlp_path(appdata_dir: str) -> str:
     return os.path.join(appdata_dir, YT_DLP_EXE_NAME)
 
 
-def download_ytdlp_exe(dest_path: str) -> None:
-    """Download the latest yt-dlp.exe release from GitHub."""
+def download_ytdlp_exe(dest_path: str, on_progress=None) -> None:
+    """Download the latest yt-dlp.exe release from GitHub. If on_progress is
+    given, it's called with a 0-100 float as the download proceeds (only
+    when the server reports a content-length; otherwise it's simply not
+    called and the caller should treat this as an indeterminate download)."""
     tmp_path = dest_path + ".tmp"
-    urllib.request.urlretrieve(YT_DLP_DOWNLOAD_URL, tmp_path)
+
+    def _reporthook(block_num, block_size, total_size):
+        if on_progress and total_size > 0:
+            percent = min(100.0, block_num * block_size * 100 / total_size)
+            on_progress(percent)
+
+    urllib.request.urlretrieve(
+        YT_DLP_DOWNLOAD_URL, tmp_path,
+        reporthook=_reporthook if on_progress else None,
+    )
     os.replace(tmp_path, dest_path)
     logger.info("yt-dlp.exe downloaded to %s", dest_path)
 
 
-def ensure_ytdlp(appdata_dir: str, force_check: bool = False) -> str:
+def ensure_ytdlp(appdata_dir: str, force_check: bool = False, on_status=None) -> str:
     """
     Make sure yt-dlp.exe exists and is up to date. Safe to call before every
     download — never raises; on any failure it just falls back to whatever
@@ -64,24 +76,39 @@ def ensure_ytdlp(appdata_dir: str, force_check: bool = False) -> str:
     subsequent call in the same session — e.g. each item in a download
     queue — just reuses that result instead of checking again.
 
+    If given, on_status(stage, percent) is called to report progress, where
+    stage is one of "downloading", "checking_update", or "ready", and
+    percent is a 0-100 float (only meaningful for "downloading"; None
+    otherwise). This is called from whatever thread ensure_ytdlp runs on —
+    callers updating UI from it must marshal back to the main thread
+    themselves (e.g. via root.after in Tkinter).
+
     Returns the path to the executable.
     """
     global _session_checked, _cached_exe_path
 
+    def _notify(stage, percent=None):
+        if on_status:
+            on_status(stage, percent)
+
     exe_path = get_ytdlp_path(appdata_dir)
 
     if not os.path.exists(exe_path):
+        _notify("downloading", 0.0)
         try:
-            download_ytdlp_exe(exe_path)
+            download_ytdlp_exe(exe_path, on_progress=lambda p: _notify("downloading", p))
         except Exception as e:
             logger.error("Could not download yt-dlp.exe: %s", e)
         _session_checked = True
         _cached_exe_path = exe_path
+        _notify("ready")
         return exe_path
 
     if _session_checked and not force_check:
+        _notify("ready")
         return _cached_exe_path or exe_path
 
+    _notify("checking_update")
     try:
         # Official yt-dlp.exe builds know how to update themselves in place.
         result = _run_hidden(
@@ -94,6 +121,7 @@ def ensure_ytdlp(appdata_dir: str, force_check: bool = False) -> str:
 
     _session_checked = True
     _cached_exe_path = exe_path
+    _notify("ready")
     return exe_path
 
 
