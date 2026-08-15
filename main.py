@@ -9,7 +9,7 @@ from collections import deque
 
 import customtkinter as ctk
 from plyer import notification
-from tkinter import messagebox
+from tkinter import filedialog, messagebox
 
 from downloader import download_video, download_audio
 from languages import LANGUAGES
@@ -162,6 +162,20 @@ queue_item_text_color = THEMES["light"]["queue_item_label"]["text_color"]
 download_queue = deque()
 current_queue_item = None  # {"id": int, "url": str} or None when idle
 _queue_id_counter = itertools.count(1)
+
+# Where finished downloads are written. Defaults to the user's Downloads
+# folder on first run, but is user-changeable via the sidebar and persisted
+# to config.json so it's remembered across app restarts.
+DEFAULT_SAVE_LOCATION = os.path.join(os.path.expanduser("~"), "Downloads")
+save_location = load_setting("save_location", DEFAULT_SAVE_LOCATION)
+if not os.path.isdir(save_location):
+    # Saved folder may have been moved/deleted (e.g. an external drive) —
+    # fall back rather than silently failing every download.
+    save_location = DEFAULT_SAVE_LOCATION
+# Always persist the resolved value, so "save_location" shows up in
+# config.json from the very first run instead of only appearing after the
+# user explicitly picks a folder.
+save_setting("save_location", save_location)
 
 
 # ---------------------------------------------------------------------------
@@ -386,7 +400,9 @@ def process_next_in_queue():
 
     url = current_queue_item["url"]
     quality_key = current_queue_item["quality_key"]
-    save_location = os.path.join(os.path.expanduser("~"), "Downloads")
+    # Uses the current global save_location (see "Save location" state /
+    # sidebar setting) — whatever the user has it set to when this item
+    # actually starts downloading.
 
     set_widgets_state("disabled")
     download_button.configure(state="disabled")
@@ -506,6 +522,7 @@ def change_language(selected: str):
         uninstall_button:             "uninstall_button",
         clear_queue_button:           "clear_queue_button",
         queue_add_button:             "add_to_queue_button",
+        save_location_button:         "choose_folder_button",
     }
     for widget, key in label_map.items():
         widget.configure(text=current_language[key])
@@ -539,11 +556,34 @@ def url_changed(*_):
 # Misc UI callbacks
 # ---------------------------------------------------------------------------
 def open_downloads_folder():
-    path = os.path.expanduser("~/Downloads")
     if os.name == "nt":
-        os.startfile(path)
+        os.startfile(save_location)
     else:
-        webbrowser.open(path)
+        webbrowser.open(save_location)
+
+
+def _format_save_location_display(path: str) -> str:
+    """Shorten a path for display in the sidebar's limited width."""
+    max_len = 28
+    if len(path) <= max_len:
+        return path
+    return "…" + path[-(max_len - 1):]
+
+
+def update_save_location_label():
+    save_location_value_label.configure(text=_format_save_location_display(save_location))
+
+
+def choose_save_location():
+    global save_location
+    folder = filedialog.askdirectory(
+        initialdir=save_location if os.path.isdir(save_location) else DEFAULT_SAVE_LOCATION,
+        title=current_language.get("choose_folder_button", "Choose Folder"),
+    )
+    if folder:
+        save_location = folder
+        save_setting("save_location", folder)
+        update_save_location_label()
 
 
 def preview_notification():
@@ -826,6 +866,27 @@ start_in_dark_mode_checkbox = ctk.CTkCheckBox(
     checkmark_color="black",
 )
 start_in_dark_mode_checkbox.pack(anchor="w", pady=10, padx=10, fill="x")
+
+# Save location picker
+save_location_button = ctk.CTkButton(
+    sidebar_content,
+    command=choose_save_location,
+    font=("Helvetica", 13),
+    fg_color="#4c6a8c",
+    hover_color="#3b556f",
+    text_color="#fbfbfb",
+    height=30,
+)
+save_location_button.pack(anchor="w", pady=(10, 0), padx=10, fill="x")
+
+save_location_value_label = ctk.CTkLabel(
+    sidebar_content,
+    text="",
+    font=("Helvetica", 11),
+    text_color="#333333",
+)
+save_location_value_label.pack(anchor="w", pady=(2, 10), padx=10, fill="x")
+update_save_location_label()
 
 # Preview notification button
 preview_notification_button = ctk.CTkButton(

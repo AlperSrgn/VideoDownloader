@@ -4,13 +4,14 @@ Download videos from websites. Provides the following features:
 
 - Download videos up to 4K resolution [ 2160P(4K), 1440P(2K), 1080P, 720P ]
 - Download the audio of the video as MP3
+- **Choose your download location** — pick any folder from the sidebar; the app remembers it between sessions
 - **Download queue** — queue up multiple links, each with its own quality/format, and let them download one after another. You can keep adding more links while a download is already in progress
 - Dark mode feature
 - System notification support with preview
 - Download videos by URL
 - Automatically selects the best video format based on your quality preference
 - Automatically handles SABR-protected YouTube videos by trying multiple clients
-- Uses a standalone `yt-dlp.exe` that downloads and self-updates in the background, so the app can keep up with YouTube changes without waiting on an app update
+- Uses a standalone `yt-dlp.exe` that downloads and self-updates in the background (on the **nightly** channel, for faster fixes to YouTube-side breakage), so the app can keep up with YouTube changes without waiting on an app update
 
 Based on [yt-dlp](https://github.com/yt-dlp/yt-dlp).
 
@@ -20,7 +21,7 @@ Based on [yt-dlp](https://github.com/yt-dlp/yt-dlp).
 
 ## Download VideoDownloaderSetup.exe
 
-### [![İNDİR](https://github.com/user-attachments/assets/8d8adf06-7013-4017-8434-51984f624e3b)](https://github.com/AlperSrgn/VideoDownloader/releases/download/v3.0.1/VideoDownloaderSetup.exe)
+### [![İNDİR](https://github.com/user-attachments/assets/8d8adf06-7013-4017-8434-51984f624e3b)](https://github.com/AlperSrgn/VideoDownloader/releases/download/v3.0.2/VideoDownloaderSetup.exe)
 
 <br>
 
@@ -29,7 +30,7 @@ You can complete the installation process by running the setup file.
 
 > ⚠️ **Windows SmartScreen warning:** When you run the installer, Windows may show a blue **"Windows protected your PC"** screen. This is expected and **not a sign of malware** — it happens because the exe isn't signed with a paid code-signing certificate, which Microsoft uses as a trust signal regardless of what the app actually does. The project is fully open source, so you're welcome to review the code yourself before running it. To continue: click **"More info"**, then **"Run anyway"**.
 >
-> Your antivirus may also flag or scan `yt-dlp.exe` the first time the app downloads it — this is the same story: it's an unsigned executable that gets fetched at runtime (see [Project Structure](#project-structure) below), not malicious behavior. It's downloaded directly from the [official yt-dlp GitHub releases](https://github.com/yt-dlp/yt-dlp/releases).
+> Your antivirus may also flag or scan `yt-dlp.exe` the first time the app downloads it — this is the same story: it's an unsigned executable that gets fetched at runtime (see [Project Structure](#project-structure) below), not malicious behavior. It's downloaded directly from the official [yt-dlp nightly builds GitHub releases](https://github.com/yt-dlp/yt-dlp-nightly-builds/releases) (the same yt-dlp project, just its more frequently-updated nightly channel).
 
 ---
 
@@ -48,7 +49,7 @@ After running this command, the _imageio-ffmpeg_ installation will be completed.
 
 `$ return os.path.join(project_dir, ".venv", "Lib", "site-packages", "imageio_ffmpeg", "binaries", "ffmpeg-win-x86_64-v7.1.exe")`
 
-**Note:** This app no longer depends on the `yt-dlp` Python package. Instead, `ytdlp_manager.py` downloads the official standalone `yt-dlp.exe` into `%LOCALAPPDATA%\VideoDownloader` on first launch and asks it to self-update once per app run — so there's nothing to `pip install` for yt-dlp itself, but the app does need internet access on first launch to fetch it.
+**Note:** This app no longer depends on the `yt-dlp` Python package. Instead, `ytdlp_manager.py` downloads the official standalone `yt-dlp.exe` (nightly channel) into `%LOCALAPPDATA%\VideoDownloader` on first launch and asks it to self-update (staying on the nightly channel) once per app run — so there's nothing to `pip install` for yt-dlp itself, but the app does need internet access on first launch to fetch it.
 
 ---
 
@@ -78,7 +79,7 @@ The project must be built using the **virtual environment's** Python and PyInsta
 | ------------------ | ------------------------------------------------------------------------------------------- |
 | `main.py`           | UI layer — builds and manages all interface components, including the download queue        |
 | `downloader.py`     | Download logic — runs `yt-dlp.exe` as a subprocess, format selection, ffmpeg merge, audio download |
-| `ytdlp_manager.py`  | Manages the standalone `yt-dlp.exe` binary — downloads it on first run and self-updates it once per app session |
+| `ytdlp_manager.py`  | Manages the standalone `yt-dlp.exe` binary (nightly channel) — downloads it on first run and self-updates it once per app session |
 | `utils.py`          | File helpers — filename sanitization, ffmpeg path, icon copy, URL cleaning                   |
 | `settings.py`       | Config — reads and writes settings to `AppData\Local\VideoDownloader\config.json`            |
 | `languages.py`      | Language strings for Turkish and English                                                     |

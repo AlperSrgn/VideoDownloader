@@ -19,7 +19,13 @@ import urllib.request
 logger = logging.getLogger(__name__)
 
 YT_DLP_EXE_NAME = "yt-dlp.exe"
-YT_DLP_DOWNLOAD_URL = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe"
+# Using the nightly channel instead of stable: YouTube-side breakage often
+# gets fixed in nightly days/weeks before it lands in a stable release, and
+# stable releases have occasionally shipped in a broken state (e.g. the
+# 2026.07.04 release failing downloads outright). Nightly is still an
+# official yt-dlp channel (not a fork), just published more often.
+YT_DLP_DOWNLOAD_URL = "https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp.exe"
+YT_DLP_UPDATE_CHANNEL = "nightly"
 
 # Player clients to try, in order, when extracting video info.
 CLIENT_LIST = ["android", "web", "ios", "tv", "web_mobile"]
@@ -111,8 +117,12 @@ def ensure_ytdlp(appdata_dir: str, force_check: bool = False, on_status=None) ->
     _notify("checking_update")
     try:
         # Official yt-dlp.exe builds know how to update themselves in place.
+        # --update-to nightly (instead of plain -U) both updates AND makes
+        # sure we stay on the nightly channel — plain -U only updates within
+        # whatever channel the binary was already built for, so an existing
+        # stable .exe would otherwise keep re-updating to stable.
         result = _run_hidden(
-            [exe_path, "-U"],
+            [exe_path, "--update-to", YT_DLP_UPDATE_CHANNEL],
             capture_output=True, text=True, timeout=30,
         )
         logger.debug("yt-dlp self-update output: %s", result.stdout.strip())

@@ -43,6 +43,7 @@ LANGUAGES = {
         "ytdlp_downloading_message": "yt-dlp hazırlanıyor... %{percent}",
         "ytdlp_downloading_indeterminate_message": "yt-dlp hazırlanıyor...",
         "ytdlp_checking_message": "Güncellemeler kontrol ediliyor...",
+        "choose_folder_button": "📁 İndirme Konumunu Seç",
 
     },
     "En": {
@@ -90,6 +91,7 @@ LANGUAGES = {
         "ytdlp_downloading_message": "Preparing yt-dlp... %{percent}",
         "ytdlp_downloading_indeterminate_message": "Preparing yt-dlp...",
         "ytdlp_checking_message": "Checking for updates...",
+        "choose_folder_button": "📁 Choose Download Location",
 
     }
 }
