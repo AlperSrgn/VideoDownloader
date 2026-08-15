@@ -92,6 +92,6 @@ The project must be built using the **virtual environment's** Python and PyInsta
 
 ![dark](https://github.com/user-attachments/assets/ae49438b-c9c5-45a4-a945-3aa16c7eb6b5)
 
-![sidebar](https://github.com/user-attachments/assets/1b32fdeb-de0d-44ff-98f7-336d765f6584)
+![sidebar](https://github.com/user-attachments/assets/ea224b48-ee9b-4e57-885b-144dd9548aff)
 
 ![cancel](https://github.com/user-attachments/assets/a6ecdc98-0427-4e31-be08-a724378a4f02)
