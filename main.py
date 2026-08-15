@@ -9,7 +9,7 @@ from collections import deque
 
 import customtkinter as ctk
 from plyer import notification
-from tkinter import filedialog, messagebox
+from tkinter import Menu, filedialog, messagebox
 
 from downloader import download_video, download_audio
 from languages import LANGUAGES
@@ -555,6 +555,49 @@ def url_changed(*_):
 # ---------------------------------------------------------------------------
 # Misc UI callbacks
 # ---------------------------------------------------------------------------
+def show_entry_context_menu(event, entry: ctk.CTkEntry):
+    """Right-click Cut/Copy/Paste/Select All menu for a CTkEntry.
+
+    Plain tkinter/CTk Entry widgets don't get an OS-provided right-click
+    menu on Windows the way native controls do, so without this, users who
+    don't know the Ctrl+V shortcut have no way to paste a link in.
+
+    CTkEntry is a wrapper around a real tkinter.Entry stored at
+    entry._entry — only a handful of methods (get/insert/delete/
+    select_range/...) are forwarded onto the wrapper itself, event_generate
+    is not one of them, so Cut/Copy/Paste virtual events must be fired on
+    entry._entry directly or they're silently swallowed by the wrapper.
+    """
+    real_entry = entry._entry
+    menu = Menu(
+        entry,
+        tearoff=0,
+        font=("Helvetica", 13),
+        activeborderwidth=6,
+    )
+    menu.add_command(
+        label=f"✂   {current_language['cut_label']}",
+        command=lambda: real_entry.event_generate("<<Cut>>"),
+    )
+    menu.add_command(
+        label=f"⧉   {current_language['copy_label']}",
+        command=lambda: real_entry.event_generate("<<Copy>>"),
+    )
+    menu.add_command(
+        label=f"📋   {current_language['paste_label']}",
+        command=lambda: real_entry.event_generate("<<Paste>>"),
+    )
+    menu.add_separator()
+    menu.add_command(
+        label=f"▤   {current_language['select_all_label']}",
+        command=lambda: entry.select_range(0, "end"),
+    )
+    try:
+        menu.tk_popup(event.x_root, event.y_root)
+    finally:
+        menu.grab_release()
+
+
 def open_downloads_folder():
     if os.name == "nt":
         os.startfile(save_location)
@@ -633,6 +676,7 @@ url_var = ctk.StringVar()
 url_var.trace_add("write", url_changed)
 url_entry = ctk.CTkEntry(frame, width=300, textvariable=url_var)
 url_entry.grid(row=0, column=3, padx=10, pady=5)
+url_entry.bind("<Button-3>", lambda e: show_entry_context_menu(e, url_entry))
 
 # Playlist checkbox (hidden until list= detected)
 frame.grid_rowconfigure(1, minsize=50)

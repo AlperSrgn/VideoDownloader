@@ -44,6 +44,10 @@ LANGUAGES = {
         "ytdlp_downloading_indeterminate_message": "yt-dlp hazırlanıyor...",
         "ytdlp_checking_message": "Güncellemeler kontrol ediliyor...",
         "choose_folder_button": "📁 İndirme Konumunu Seç",
+        "cut_label": "Kes",
+        "copy_label": "Kopyala",
+        "paste_label": "Yapıştır",
+        "select_all_label": "Tümünü Seç",
 
     },
     "En": {
@@ -92,6 +96,10 @@ LANGUAGES = {
         "ytdlp_downloading_indeterminate_message": "Preparing yt-dlp...",
         "ytdlp_checking_message": "Checking for updates...",
         "choose_folder_button": "📁 Choose Download Location",
+        "cut_label": "Cut",
+        "copy_label": "Copy",
+        "paste_label": "Paste",
+        "select_all_label": "Select All",
 
     }
 }
