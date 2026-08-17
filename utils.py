@@ -5,7 +5,6 @@ import re
 import shutil
 import sys
 import time
-import unicodedata
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
 from settings import get_appdata_path
@@ -56,12 +55,62 @@ def get_ffmpeg_path() -> str:
 # Filename helpers
 # ---------------------------------------------------------------------------
 
+# Windows device names that are illegal as a filename stem, regardless of
+# extension (e.g. "CON.mp4" is just as invalid as "CON").
+_WINDOWS_RESERVED_NAMES = {
+    "CON", "PRN", "AUX", "NUL",
+    "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+    "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+}
+
+# Characters Windows forbids in filenames, plus ASCII control characters.
+# Unicode letters (Turkish, etc.) are deliberately left untouched — modern
+# NTFS/Windows handles them fine, no need to transliterate to ASCII.
+_WINDOWS_FORBIDDEN_CHARS_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+# Conservative cap that leaves headroom for a " (n)" uniqueness suffix, the
+# file extension, and the rest of the path (Windows' legacy MAX_PATH=260
+# limit still bites unless long-path support is explicitly enabled).
+MAX_FILENAME_LENGTH = 150
+
+
 def sanitize_filename(name: str) -> str:
-    """Remove Turkish chars and special symbols unsafe for filenames."""
-    name = name.replace("ı", "i")
-    name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("utf-8")
-    name = re.sub(r"[^\w\s.-]", "", name)
+    """
+    Make `name` safe to use as a Windows filename while preserving
+    non-ASCII characters (Turkish, etc.) instead of transliterating them.
+    Handles forbidden characters, reserved device names, trailing dots/
+    spaces, and overly long names.
+    """
+    if not name:
+        return "video"
+
+    # Strip characters Windows forbids in filenames (also covers path
+    # separators, so no directory traversal via the title).
+    name = _WINDOWS_FORBIDDEN_CHARS_RE.sub("", name)
+
+    # Collapse whitespace/newlines, then use underscores for readability.
+    name = re.sub(r"\s+", " ", name).strip()
     name = name.replace(" ", "_")
+
+    # Windows silently strips trailing dots/spaces from filenames — do it
+    # ourselves so behavior is explicit rather than OS-dependent.
+    name = name.rstrip(". ")
+
+    # Guard against empty results and "." / ".." (special directory entries).
+    if not name or set(name) <= {"."}:
+        name = "video"
+
+    # Reserved device names are invalid even with an extension attached
+    # (e.g. "CON.mp4"), so check the stem only, case-insensitively.
+    stem = name.split(".", 1)[0].upper()
+    if stem in _WINDOWS_RESERVED_NAMES:
+        name = f"_{name}"
+
+    if len(name) > MAX_FILENAME_LENGTH:
+        name = name[:MAX_FILENAME_LENGTH].rstrip(". _")
+        if not name:
+            name = "video"
+
     return name
 
 
