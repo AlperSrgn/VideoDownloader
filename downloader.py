@@ -3,6 +3,7 @@ import os
 import re
 import subprocess
 import threading
+import uuid
 
 from settings import get_appdata_path
 from utils import (
@@ -200,14 +201,21 @@ def download_video(
 
         title = info.get("title", "video")
         safe_title = sanitize_filename(title)
-        base = os.path.join(save_location, safe_title)
+
+        # Temp files use a per-download UUID rather than safe_title. This
+        # guarantees uniqueness even if the same video is queued/downloaded
+        # more than once, and it means find_glob_file's pattern can only
+        # ever match *this* download's own temp file — never a stale
+        # leftover from a previous failed run.
+        temp_id = uuid.uuid4().hex
+        temp_base = os.path.join(save_location, f".ytdlp_tmp_{temp_id}")
 
         video_cmd = [
             exe_path,
             "-f", video_format["format_id"],
             "--extractor-args", f"youtube:player_client={client}",
             "--newline", "--no-warnings",
-            "-o", f"{base}_(Video).%(ext)s",
+            "-o", f"{temp_base}_video.%(ext)s",
             url,
         ]
         audio_cmd = [
@@ -215,7 +223,7 @@ def download_video(
             "-f", audio_format["format_id"],
             "--extractor-args", f"youtube:player_client={client}",
             "--newline", "--no-warnings",
-            "-o", f"{base}_(Audio).%(ext)s",
+            "-o", f"{temp_base}_audio.%(ext)s",
             url,
         ]
 
@@ -228,8 +236,8 @@ def download_video(
 
         # Locate downloaded temp files
         try:
-            video_path = find_glob_file(f"{base}_(Video).*")
-            audio_path = find_glob_file(f"{base}_(Audio).*")
+            video_path = find_glob_file(f"{temp_base}_video.*")
+            audio_path = find_glob_file(f"{temp_base}_audio.*")
         except FileNotFoundError as e:
             on_error(str(e))
             return
@@ -307,7 +315,13 @@ def download_audio(
         safe_title = sanitize_filename(title)
         output_filename = unique_filename(save_location, f"{safe_title}.mp3")
         output_path = os.path.join(save_location, output_filename)
-        output_template = os.path.join(save_location, safe_title)
+
+        # Same reasoning as download_video: use a per-download UUID for the
+        # temp download template so find_glob_file can't accidentally match
+        # a pre-existing file (e.g. an older download with the same title)
+        # that happens to already sit in save_location.
+        temp_id = uuid.uuid4().hex
+        output_template = os.path.join(save_location, f".ytdlp_tmp_{temp_id}")
 
         cmd = [
             exe_path,
