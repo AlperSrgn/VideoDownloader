@@ -163,6 +163,48 @@ def _run_download(cmd, on_progress, on_cancel_check, cancel_message):
 
 
 # ---------------------------------------------------------------------------
+# Cancellable subprocess runner for ffmpeg (no stdout parsing needed here —
+# output is discarded — so we just poll on_cancel_check() while waiting).
+# ---------------------------------------------------------------------------
+
+_CANCEL_POLL_INTERVAL = 0.2  # seconds
+
+
+def _run_cancellable_subprocess(cmd, on_cancel_check, cancel_message, **popen_kwargs):
+    """
+    Run `cmd` via Popen, polling on_cancel_check() roughly every
+    _CANCEL_POLL_INTERVAL seconds while it runs. If cancellation is
+    requested, terminate the process (kill if it doesn't exit promptly) and
+    raise DownloadCancelled. On normal completion, raises RuntimeError if
+    the exit code is non-zero.
+    """
+    process = subprocess.Popen(cmd, creationflags=_NO_WINDOW, **popen_kwargs)
+
+    returncode = None
+    try:
+        while True:
+            try:
+                returncode = process.wait(timeout=_CANCEL_POLL_INTERVAL)
+                break
+            except subprocess.TimeoutExpired:
+                if on_cancel_check():
+                    process.terminate()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                    raise DownloadCancelled(cancel_message)
+    finally:
+        if process.stdout:
+            process.stdout.close()
+        if process.stderr:
+            process.stderr.close()
+
+    if returncode != 0:
+        raise RuntimeError(f"Process exited with code {returncode}")
+
+
+# ---------------------------------------------------------------------------
 # Video download (with merge)
 # ---------------------------------------------------------------------------
 
@@ -198,6 +240,14 @@ def download_video(
         if not info:
             on_error(lang["download_video_format_error"])
             return
+
+        logger.info(
+            "Selected client=%s video_format=%s (vcodec=%s, tbr=%s) "
+            "audio_format=%s (acodec=%s, abr=%s)",
+            client,
+            video_format.get("format_id"), video_format.get("vcodec"), video_format.get("tbr"),
+            audio_format.get("format_id"), audio_format.get("acodec"), audio_format.get("abr"),
+        )
 
         title = info.get("title", "video")
         safe_title = sanitize_filename(title)
@@ -256,19 +306,32 @@ def download_video(
         ]
 
         try:
-            subprocess.run(
+            _run_cancellable_subprocess(
                 ffmpeg_cmd,
+                on_cancel_check,
+                lang["download_canceled_message"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                check=True,
-                creationflags=_NO_WINDOW,
             )
-        except subprocess.CalledProcessError as e:
-            on_error(f"FFmpeg merge failed (exit code {e.returncode}). "
+        except DownloadCancelled as e:
+            # ffmpeg was killed mid-merge — output_path may contain a
+            # partially-written, unplayable file. Remove it so it doesn't
+            # look like a completed download.
+            if os.path.exists(output_path):
+                try:
+                    os.remove(output_path)
+                except OSError:
+                    pass
+            on_error(str(e))
+            return
+        except RuntimeError as e:
+            on_error(f"FFmpeg merge failed ({e}). "
                      "The downloaded temp files were kept for inspection.")
             return
         finally:
-            # Clean up temp files only if merge succeeded
+            # Always clean up the video/audio temp files, regardless of
+            # whether the merge succeeded, failed, or was cancelled — we
+            # don't keep them around for inspection.
             for path in [video_path, audio_path]:
                 if os.path.exists(path):
                     try:
