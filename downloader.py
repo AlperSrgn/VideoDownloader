@@ -16,9 +16,7 @@ from utils import (
 )
 from ytdlp_manager import (
     ensure_ytdlp,
-    extract_info,
     find_info_with_compatible_format,
-    CLIENT_LIST,
 )
 
 logger = logging.getLogger(__name__)
@@ -62,6 +60,39 @@ class DownloadCancelled(Exception):
 # that yt-dlp's --dump-json output produces)
 # ---------------------------------------------------------------------------
 
+def _select_original_audio(audio_formats: list):
+    """
+    Pick the *original* audio track rather than an auto-dubbed one.
+
+    Many YouTube videos now expose several audio-only formats — one per
+    language (original + auto-dubbed tracks such as Arabic, English,
+    Turkish, etc.). yt-dlp tags each of these with:
+      - "language": a language code (e.g. "en", "ar", "tr")
+      - "language_preference": a signed int where the original/default
+        track gets the highest value (commonly 10) and dubbed tracks get
+        a lower one (often -1 or 0).
+
+    This selects the subset of formats with the highest language_preference
+    (i.e. the original track), then breaks ties by bitrate.
+    """
+    if not audio_formats:
+        return None
+
+    max_pref = max((f.get("language_preference") or -1) for f in audio_formats)
+    original_candidates = [
+        f for f in audio_formats
+        if (f.get("language_preference") or -1) == max_pref
+    ]
+    chosen = max(original_candidates, key=lambda x: x.get("abr") or 0)
+
+    logger.debug(
+        "Original audio track selected: format=%s language=%s language_preference=%s abr=%s",
+        chosen.get("format_id"), chosen.get("language"),
+        chosen.get("language_preference"), chosen.get("abr"),
+    )
+    return chosen
+
+
 def find_suitable_format(formats: list, video_height: int):
     """
     Return (video_format, audio_format) for the best available resolution
@@ -92,9 +123,9 @@ def find_suitable_format(formats: list, video_height: int):
             continue
 
         chosen_video = max(candidates, key=lambda x: x.get("tbr") or 0)
-        chosen_audio = max(audio_formats, key=lambda x: x.get("abr") or 0)
+        chosen_audio = _select_original_audio(audio_formats)
 
-        if chosen_video.get("url") and chosen_audio.get("url"):
+        if chosen_video.get("url") and chosen_audio and chosen_audio.get("url"):
             logger.debug(
                 "Compatible formats found — Video: %s (%dp), Audio: %s",
                 chosen_video["format_id"], h, chosen_audio["format_id"]
@@ -107,6 +138,24 @@ def find_suitable_format(formats: list, video_height: int):
             return None, None
 
     return None, None
+
+
+def find_suitable_audio_format(formats: list):
+    """
+    Return (audio_format,) for the original audio track — a 1-tuple so this
+    plugs directly into find_info_with_compatible_format the same way
+    find_suitable_format's (video_format, audio_format) does.
+
+    Returns (None,) if this player client's formats have no usable
+    (url-bearing) audio-only track — the caller (find_info_with_compatible_
+    format) will then move on and retry with the next client, exactly like
+    the video path already does.
+    """
+    audio_formats = [
+        f for f in formats
+        if f.get("url") and f.get("acodec") != "none" and f.get("vcodec") == "none"
+    ]
+    return (_select_original_audio(audio_formats),)
 
 
 # ---------------------------------------------------------------------------
@@ -541,17 +590,22 @@ def download_audio(
 
         exe_path = ensure_ytdlp(get_appdata_path())
 
-        info = None
-        for client in CLIENT_LIST:
-            try:
-                info = extract_info(exe_path, url, client)
-                break
-            except Exception as e:
-                logger.debug("Client %s failed: %s", client, e)
+        def selector(formats):
+            return find_suitable_audio_format(formats)
 
-        if not info:
+        info, client, (chosen_audio,) = find_info_with_compatible_format(
+            exe_path, url, selector
+        )
+
+        if not info or not chosen_audio:
             on_error(lang["download_video_format_error"])
             return
+
+        logger.info(
+            "Selected client=%s audio_format=%s (acodec=%s, abr=%s, language=%s)",
+            client, chosen_audio.get("format_id"), chosen_audio.get("acodec"),
+            chosen_audio.get("abr"), chosen_audio.get("language"),
+        )
 
         title = info.get("title", "audio")
         safe_title = sanitize_filename(title)
@@ -567,7 +621,8 @@ def download_audio(
 
         cmd = [
             exe_path,
-            "-f", "bestaudio",
+            "-f", chosen_audio["format_id"],
+            "--extractor-args", f"youtube:player_client={client}",
             "-x", "--audio-format", "mp3",
             "--ffmpeg-location", get_ffmpeg_path(),
             "--newline", "--no-warnings",
