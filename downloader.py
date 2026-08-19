@@ -34,10 +34,18 @@ RESOLUTION_MAP = {
 # video download — video download, audio download, ffmpeg merge — into a
 # single overall percentage, so the UI can drive one progress bar across
 # all three instead of resetting it to 0 at the start of each phase.
-
+#
+# Previously computed dynamically from each format's filesize, but many
+# DASH/adaptive video formats don't report a filesize, which could zero out
+# a phase's weight entirely (percent stuck at 0.0%) and, separately,
+# yt-dlp's own size estimate for fragmented downloads fluctuates as it
+# downloads more fragments, making the displayed total look unstable.
+# Fixed weights avoid both: simple and predictable, at the cost of not
+# reflecting actual per-download size ratios.
 VIDEO_PHASE_WEIGHT = 75
 AUDIO_PHASE_WEIGHT = 15
 MERGE_PHASE_WEIGHT = 10
+
 
 _NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
@@ -347,6 +355,22 @@ def download_video(
     processed), not MB-based like the download progress is.
     """
     def worker():
+        try:
+            _worker_impl()
+        except Exception as e:
+            # Safety net: any unexpected exception (e.g. ffmpeg/yt-dlp
+            # missing, permissions, disk full) would otherwise kill this
+            # background thread silently, leaving the UI stuck showing
+            # "downloading"/"merging" forever with on_done/on_error never
+            # called.
+            logger.exception("Unexpected error in download_video worker")
+            on_error(str(e) or lang.get("unexpected_error_message", "Unexpected error"))
+
+    def _worker_impl():
+        if not os.path.exists(get_ffmpeg_path()):
+            on_error(lang["ffmpeg_not_found_error"])
+            return
+
         if target_resolution not in RESOLUTION_MAP:
             on_error(f"Invalid resolution: {target_resolution}")
             return
@@ -504,6 +528,17 @@ def download_audio(
 ) -> None:
     """Download audio only as mp3. Runs in a background thread."""
     def worker():
+        try:
+            _worker_impl()
+        except Exception as e:
+            logger.exception("Unexpected error in download_audio worker")
+            on_error(str(e) or lang.get("unexpected_error_message", "Unexpected error"))
+
+    def _worker_impl():
+        if not os.path.exists(get_ffmpeg_path()):
+            on_error(lang["ffmpeg_not_found_error"])
+            return
+
         exe_path = ensure_ytdlp(get_appdata_path())
 
         info = None

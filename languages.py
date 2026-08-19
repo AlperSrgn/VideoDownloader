@@ -30,6 +30,11 @@ LANGUAGES = {
         "download_video_format_error": "Geçersiz bağlantı veya platform korumaları (ör. SABR)"
                                        " nedeniyle içerik indirilemedi\n\n"
                                        "Lütfen bağlantının geçerli ve erişilebilir olduğundan emin olun.",
+        "ffmpeg_not_found_error": "FFmpeg bulunamadı, indirme başlatılamadı.\n\n"
+                                  "Eğer projeyi GitHub'dan indirdiyseniz, terminalde şu komutu çalıştırın:\n"
+                                  "pip install imageio-ffmpeg\n\n"
+                                  "Kurulum tamamlandıktan sonra uygulamayı yeniden başlatın.",
+        "unexpected_error_message": "Beklenmeyen bir hata oluştu. Lütfen tekrar deneyin.",
         "uninstall_app_title": "Uygulamayı kaldır",
         "uninstall_app_message": "Uygulama bilgisayarınızdan kaldırılacaktır.\nDevam etmek istiyor musunuz?",
         "2160p": "2160p ⁴ᴷ",
@@ -83,6 +88,13 @@ LANGUAGES = {
             "Content could not be downloaded due to an invalid link or platform protections (e.g., SABR).\n\n"
             "Please ensure the link is valid and accessible."
         ),
+        "ffmpeg_not_found_error": (
+                   "FFmpeg was not found, download could not start.\n\n"
+                   "If you cloned this project from GitHub, run this in a terminal:\n"
+                   "pip install imageio-ffmpeg\n\n"
+                  "Then restart the application."
+              ),
+        "unexpected_error_message": "An unexpected error occurred. Please try again.",
         "uninstall_app_title": "Uninstall app",
         "uninstall_app_message": "This will remove the application from your computer.\nDo you want to continue?",
         "2160p": "2160p ⁴ᴷ",
