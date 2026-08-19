@@ -1,0 +1,16 @@
+# PyCharm / IntelliJ
+.idea/
+*.iml
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Uygulamaya özel kullanıcı verisi
+config.json
+
+# PyInstaller build çıktıları
+build/
+dist/
+*.spec
