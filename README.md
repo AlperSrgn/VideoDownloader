@@ -21,7 +21,7 @@ Based on [yt-dlp](https://github.com/yt-dlp/yt-dlp).
 
 ## Download VideoDownloaderSetup.exe
 
-### [![İNDİR](https://github.com/user-attachments/assets/8d8adf06-7013-4017-8434-51984f624e3b)](https://github.com/AlperSrgn/VideoDownloader/releases/download/v3.0.4/VideoDownloaderSetup.exe)
+### [![İNDİR](https://github.com/user-attachments/assets/8d8adf06-7013-4017-8434-51984f624e3b)](https://github.com/AlperSrgn/VideoDownloader/releases/download/v3.0.5/VideoDownloaderSetup.exe)
 
 <br>
 
