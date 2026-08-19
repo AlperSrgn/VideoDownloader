@@ -209,6 +209,24 @@ def on_progress(percent: float, downloaded_mb: float, total_mb: float, eta: str)
     root.update_idletasks()
 
 
+def on_merge_progress(percent: float, elapsed_seconds: float, total_seconds: float, eta: str):
+    """Separate from on_progress: merge progress is time-based (seconds of
+    media processed by ffmpeg), not MB-based, so it gets its own label
+    format instead of misleadingly reusing the "X / Y MB" one. percent is 0
+    for the whole merge if total_seconds is unknown (indeterminate state) —
+    the progress bar still moves via the pulsing done by ffmpeg's periodic
+    updates, it just won't reach 100% until ffmpeg actually finishes.
+    """
+    progress_bar.set(percent / 100)
+    progress_label.configure(
+        text=(
+            f"{percent:.1f}%   |   {eta}\n"
+            f"{current_language['merging_message']}"
+        )
+    )
+    root.update_idletasks()
+
+
 def on_cancel_check() -> bool:
     return cancel_requested
 
@@ -435,6 +453,7 @@ def process_next_in_queue():
             on_done=lambda: on_download_done("download_complete_message"),
             on_error=on_download_error,
             lang=current_language,
+            on_merge_progress=on_merge_progress,
         )
 
 
