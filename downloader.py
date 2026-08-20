@@ -543,7 +543,7 @@ def download_video(
             return
         except RuntimeError as e:
             on_error(f"FFmpeg merge failed ({e}). "
-                     "The downloaded temp files were kept for inspection.")
+                     "Temporary files were removed.")
             return
         finally:
             # Always clean up the video/audio temp files, regardless of

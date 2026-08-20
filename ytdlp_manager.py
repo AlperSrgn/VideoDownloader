@@ -180,14 +180,22 @@ def find_info_with_compatible_format(exe_path: str, url: str, format_selector):
     (None, None, (None, None)).
     """
     for client in CLIENT_LIST:
+        logger.debug("Trying client=%s", client)
         try:
             info = extract_info(exe_path, url, client)
         except YtDlpError as e:
-            logger.debug("Client %s failed: %s", client, e)
+            logger.debug("Client %s failed to extract info: %s", client, e)
             continue
 
-        result = format_selector(info.get("formats", []))
+        formats = info.get("formats", [])
+        result = format_selector(formats)
         if result and all(result):
+            logger.debug("Client %s: found compatible format(s)", client)
             return info, client, result
+
+        logger.debug(
+            "Client %s: extracted info but no compatible format among %d formats",
+            client, len(formats),
+        )
 
     return None, None, (None, None)
