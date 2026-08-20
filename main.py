@@ -199,6 +199,13 @@ def hide_progress():
 
 
 def on_progress(percent: float, downloaded_mb: float, total_mb: float, eta: str):
+    """Called from the background download thread — must not touch Tkinter
+    widgets directly, so the actual UI update is marshaled onto the main
+    thread via root.after()."""
+    root.after(0, lambda: _update_progress_ui(percent, downloaded_mb, total_mb, eta))
+
+
+def _update_progress_ui(percent: float, downloaded_mb: float, total_mb: float, eta: str):
     progress_bar.set(percent / 100)
     progress_label.configure(
         text=(
@@ -206,7 +213,6 @@ def on_progress(percent: float, downloaded_mb: float, total_mb: float, eta: str)
             f"{current_language['operation_in_progress_message']}"
         )
     )
-    root.update_idletasks()
 
 
 def on_merge_progress(percent: float, elapsed_seconds: float, total_seconds: float, eta: str):
@@ -216,7 +222,14 @@ def on_merge_progress(percent: float, elapsed_seconds: float, total_seconds: flo
     for the whole merge if total_seconds is unknown (indeterminate state) —
     the progress bar still moves via the pulsing done by ffmpeg's periodic
     updates, it just won't reach 100% until ffmpeg actually finishes.
+
+    Also called from the background thread — same root.after() marshaling
+    as on_progress.
     """
+    root.after(0, lambda: _update_merge_progress_ui(percent, eta))
+
+
+def _update_merge_progress_ui(percent: float, eta: str):
     progress_bar.set(percent / 100)
     progress_label.configure(
         text=(
@@ -224,7 +237,6 @@ def on_merge_progress(percent: float, elapsed_seconds: float, total_seconds: flo
             f"{current_language['merging_message']}"
         )
     )
-    root.update_idletasks()
 
 
 def on_cancel_check() -> bool:
@@ -1013,7 +1025,7 @@ def on_ytdlp_status(stage: str, percent):
 
 
 fetch_ytdlp_version(
-    lambda t: yt_dlp_version_label.configure(text=t),
+    lambda t: root.after(0, lambda: yt_dlp_version_label.configure(text=t)),
     on_status=on_ytdlp_status,
 )
 
