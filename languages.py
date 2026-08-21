@@ -27,8 +27,8 @@ LANGUAGES = {
         "playlist_checkbox_text": "Oynatma listesini indir",
         "file_not_found_error": "'unins000.exe' dosyası bulunamadı. Uygulama kurulu olmayabilir veya dosya silinmiş olabilir.",
         "uninstall_button": "Kaldır",
-        "download_video_format_error": "Geçersiz bağlantı veya platform korumaları (ör. SABR)"
-                                       " nedeniyle içerik indirilemedi\n\n"
+        "download_video_format_error": "Geçersiz bağlantı veya platform korumaları"
+                                       " nedeniyle içerik indirilemedi.\n\n"
                                        "Lütfen bağlantının geçerli ve erişilebilir olduğundan emin olun.",
         "ffmpeg_not_found_error": "FFmpeg bulunamadı, indirme başlatılamadı.\n\n"
                                   "Eğer projeyi GitHub'dan indirdiyseniz, terminalde şu komutu çalıştırın:\n"
@@ -54,6 +54,18 @@ LANGUAGES = {
         "copy_label": "Kopyala",
         "paste_label": "Yapıştır",
         "select_all_label": "Tümünü Seç",
+
+        # Hata sınıflandırma
+        "error_no_internet": "İnternet bağlantısı yok.\n\nLütfen bağlantınızı kontrol edip tekrar deneyin.",
+        "error_video_not_found": "Video bulunamadı.\n\nBağlantı yanlış olabilir veya video kaldırılmış olabilir.",
+        "error_video_private": "Bu video gizli (private).\n\nGizli videolar indirilemez.",
+        "error_age_restricted": "Bu video için yaş doğrulaması gerekiyor.\n\nYaş kısıtlaması olan videolar bu uygulamayla indirilemez.",
+        "error_access_blocked": "YouTube bu isteği engelledi (bot koruması ya da çok sık istek).\n\nBir süre bekleyip tekrar deneyin.",
+        "error_format_not_found": "Bu video için uygun bir format bulunamadı.",
+        "error_ffmpeg_generic": "Video ve ses birleştirilirken bir hata oluştu.",
+        "error_disk_full": "Disk alanı yetersiz.\n\nLütfen yer açıp tekrar deneyin.",
+        "error_permission": "Dosyaya yazma izni yok.\n\nİndirme konumunun yazma izinlerini kontrol edin.",
+        "error_unknown_ytdlp": "İndirme sırasında bilinmeyen bir hata oluştu.",
 
     },
     "En": {
@@ -85,7 +97,7 @@ LANGUAGES = {
         "file_not_found_error": "'unins000.exe' was not found. The application may not be installed or the file might have been deleted.",
         "uninstall_button": "Uninstall",
         "download_video_format_error": (
-            "Content could not be downloaded due to an invalid link or platform protections (e.g., SABR).\n\n"
+            "Content could not be downloaded due to an invalid link or platform protections.\n\n"
             "Please ensure the link is valid and accessible."
         ),
         "ffmpeg_not_found_error": (
@@ -114,6 +126,18 @@ LANGUAGES = {
         "copy_label": "Copy",
         "paste_label": "Paste",
         "select_all_label": "Select All",
+
+        # Error classification
+        "error_no_internet": "No internet connection.\n\nPlease check your connection and try again.",
+        "error_video_not_found": "Video not found.\n\nThe link may be wrong, or the video may have been removed.",
+        "error_video_private": "This video is private.\n\nPrivate videos can't be downloaded.",
+        "error_age_restricted": "This video requires age verification.\n\nAge-restricted videos can't be downloaded with this app.",
+        "error_access_blocked": "YouTube blocked this request (bot protection or rate limiting).\n\nWait a while and try again.",
+        "error_format_not_found": "No suitable format was found for this video.",
+        "error_ffmpeg_generic": "An error occurred while merging the video and audio.",
+        "error_disk_full": "Not enough disk space.\n\nFree up some space and try again.",
+        "error_permission": "Permission denied while writing the file.\n\nCheck the write permissions of the download location.",
+        "error_unknown_ytdlp": "An unknown error occurred during download.",
 
     }
 }

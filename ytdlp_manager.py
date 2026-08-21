@@ -1,13 +1,7 @@
 """
-Handles the standalone yt-dlp.exe binary instead of the `yt_dlp` Python
-package. This lets the app pick up new yt-dlp releases (which happen often,
-since YouTube keeps changing things) without needing to rebuild and
-redistribute the whole application exe.
-
-The binary is stored in the app's AppData folder and is downloaded on first
-run, then asked to self-update — but only once per app run, not before every
-single download. Without this, queuing up a big batch of videos would fire
-off a GitHub update check before every single item.
+Uses the standalone yt-dlp.exe binary so new yt-dlp releases can be picked up
+without rebuilding the app.The binary is stored in AppData and updated
+once per app run, rather than before every download.
 """
 
 import json
@@ -19,22 +13,19 @@ import urllib.request
 logger = logging.getLogger(__name__)
 
 YT_DLP_EXE_NAME = "yt-dlp.exe"
-# Using the nightly channel instead of stable: YouTube-side breakage often
-# gets fixed in nightly days/weeks before it lands in a stable release, and
-# stable releases have occasionally shipped in a broken state (e.g. the
-# 2026.07.04 release failing downloads outright). Nightly is still an
-# official yt-dlp channel (not a fork), just published more often.
+# Using nightly instead of stable; YouTube-side issues are usually fixed faster.
+# Nightly is an official yt-dlp channel and is released more frequently.
+
 YT_DLP_DOWNLOAD_URL = "https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp.exe"
 YT_DLP_UPDATE_CHANNEL = "nightly"
 
 # Player clients to try, in order, when extracting video info.
-CLIENT_LIST = ["android", "web", "ios", "tv", "web_mobile"]
+CLIENT_LIST = ["web_mobile", "web", "ios", "android", "tv"]
 
 _NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
-# In-process cache: once ensure_ytdlp has run in this session, skip the
-# update check for the rest of the session — subsequent downloads (e.g. the
-# rest of a queue) just reuse the already-checked binary.
+# In-process cache: After ensure_ytdlp runs once,
+# update checks are skipped; subsequent downloads reuse the existing binary.
 _session_checked = False
 _cached_exe_path = None
 
@@ -52,10 +43,8 @@ def get_ytdlp_path(appdata_dir: str) -> str:
 
 
 def download_ytdlp_exe(dest_path: str, on_progress=None) -> None:
-    """Download the latest yt-dlp.exe release from GitHub. If on_progress is
-    given, it's called with a 0-100 float as the download proceeds (only
-    when the server reports a content-length; otherwise it's simply not
-    called and the caller should treat this as an indeterminate download)."""
+    """Downloads the latest yt-dlp.exe from GitHub. If on_progress is provided,
+    it reports download progress from 0-100%; otherwise, progress is indeterminate."""
     tmp_path = dest_path + ".tmp"
 
     def _reporthook(block_num, block_size, total_size):
@@ -73,22 +62,10 @@ def download_ytdlp_exe(dest_path: str, on_progress=None) -> None:
 
 def ensure_ytdlp(appdata_dir: str, force_check: bool = False, on_status=None) -> str:
     """
-    Make sure yt-dlp.exe exists and is up to date. Safe to call before every
-    download — never raises; on any failure it just falls back to whatever
-    copy is already on disk (or downloads one if there isn't one yet).
-
-    The actual "ask GitHub for a newer release" step only runs once per app
-    run (typically triggered by fetch_ytdlp_version at startup); every
-    subsequent call in the same session — e.g. each item in a download
-    queue — just reuses that result instead of checking again.
-
-    If given, on_status(stage, percent) is called to report progress, where
-    stage is one of "downloading", "checking_update", or "ready", and
-    percent is a 0-100 float (only meaningful for "downloading"; None
-    otherwise). This is called from whatever thread ensure_ytdlp runs on —
-    callers updating UI from it must marshal back to the main thread
-    themselves (e.g. via root.after in Tkinter).
-
+    Ensures yt-dlp.exe exists and is up to date. On failure, uses the existing
+    copy or downloads one if none exists. The update check runs only
+    once per app session; subsequent calls reuse the result.
+    If provided, on_status reports the download status.
     Returns the path to the executable.
     """
     global _session_checked, _cached_exe_path
@@ -172,12 +149,13 @@ def extract_info(exe_path: str, url: str, client: str) -> dict:
         raise YtDlpError(f"Could not parse yt-dlp output: {e}")
 
 
-def find_info_with_compatible_format(exe_path: str, url: str, format_selector):
+def find_info_with_compatible_format(exe_path: str, url: str, format_selector, collected_errors=None):
     """
-    Try each client in CLIENT_LIST until `format_selector(formats)` returns a
-    fully truthy result (e.g. a (video_format, audio_format) tuple with both
-    entries set). Returns (info, client, result). If nothing works, returns
-    (None, None, (None, None)).
+    Tries each client in CLIENT_LIST until format_selector(formats) succeeds.
+    Returns (info, client, result) on success, or (None, None, (None, None)) if all clients fail.
+    If collected_errors is provided,
+    it stores each YtDlpError message so the caller can identify the actual failure reason
+    instead of showing a generic “no compatible format” error.
     """
     for client in CLIENT_LIST:
         logger.debug("Trying client=%s", client)
@@ -185,6 +163,8 @@ def find_info_with_compatible_format(exe_path: str, url: str, format_selector):
             info = extract_info(exe_path, url, client)
         except YtDlpError as e:
             logger.debug("Client %s failed to extract info: %s", client, e)
+            if collected_errors is not None:
+                collected_errors.append(str(e))
             continue
 
         formats = info.get("formats", [])

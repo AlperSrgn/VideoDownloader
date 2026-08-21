@@ -5,6 +5,7 @@ import subprocess
 import threading
 import queue
 import uuid
+from collections import deque
 
 from settings import get_appdata_path
 from utils import (
@@ -17,6 +18,15 @@ from utils import (
 from ytdlp_manager import (
     ensure_ytdlp,
     find_info_with_compatible_format,
+)
+from error_classifier import (
+    DownloadCancelled,
+    YtDlpProcessError,
+    FfmpegProcessError,
+    classify_ytdlp_error,
+    classify_ffmpeg_error,
+    classify_extraction_failure,
+    classify_generic_exception,
 )
 
 logger = logging.getLogger(__name__)
@@ -49,10 +59,6 @@ _NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 # Shared cancel flag — set to True from UI to abort an active download
 cancel_download = False
-
-
-class DownloadCancelled(Exception):
-    pass
 
 
 # ---------------------------------------------------------------------------
@@ -192,9 +198,9 @@ def _parse_progress_line(line: str):
 
 def _run_download(cmd, on_progress, on_cancel_check, cancel_message):
     """
-    Run a yt-dlp.exe download command, streaming its --newline progress
-    output into on_progress, and killing it if on_cancel_check() becomes
-    True mid-download.
+    Runs the yt-dlp.exe download, sends progress to on_progress, and stops
+    when on_cancel_check() returns True.
+    Cancellation is checked periodically even when no output is received.
     """
     process = subprocess.Popen(
         cmd,
@@ -207,8 +213,21 @@ def _run_download(cmd, on_progress, on_cancel_check, cancel_message):
         creationflags=_NO_WINDOW,
     )
 
+    line_queue = queue.Queue()
+    reader_thread = threading.Thread(
+        target=_enqueue_lines, args=(process.stdout, line_queue), daemon=True
+    )
+    reader_thread.start()
+
+    # Keep the last N lines of yt-dlp's output (stdout+stderr merged) so
+    # that, if it exits with a non-zero code, we have the actual "ERROR: ..."
+    # text to classify into a user-facing message — not just the exit code.
+    # Bounded so a very chatty/long-running download can't grow this
+    # unboundedly in memory.
+    output_lines = deque(maxlen=200)
+
     try:
-        for line in process.stdout:
+        while True:
             if on_cancel_check():
                 process.terminate()
                 try:
@@ -217,6 +236,18 @@ def _run_download(cmd, on_progress, on_cancel_check, cancel_message):
                     process.kill()
                 raise DownloadCancelled(cancel_message)
 
+            try:
+                line = line_queue.get(timeout=_CANCEL_POLL_INTERVAL)
+            except queue.Empty:
+                # No output in the last _CANCEL_POLL_INTERVAL seconds — loop
+                # back around to the on_cancel_check() at the top rather
+                # than blocking further.
+                continue
+
+            if line is None:
+                break  # reader thread hit EOF — yt-dlp closed stdout
+
+            output_lines.append(line)
             parsed = _parse_progress_line(line)
             if parsed:
                 on_progress(*parsed)
@@ -226,18 +257,16 @@ def _run_download(cmd, on_progress, on_cancel_check, cancel_message):
 
     process.wait()
     if process.returncode != 0:
-        raise RuntimeError(f"yt-dlp exited with code {process.returncode}")
+        raise YtDlpProcessError(process.returncode, "".join(output_lines))
 
 
 # ---------------------------------------------------------------------------
-# FFmpeg merge progress parsing + cancellation
+# FFmpeg merge progress + cancellation
 # ---------------------------------------------------------------------------
-# ffmpeg is run with `-progress pipe:1`, which makes it print machine-
-# readable "key=value" lines to stdout as it works (one full batch per
-# update, terminated by a "progress=continue"/"progress=end" line) instead
-# of the human-oriented stats it normally writes to stderr. We read that
-# stream the same way _run_download reads yt-dlp's --newline output: line
-# by line, checking on_cancel_check() as we go.
+# ffmpeg outputs progress as "key=value" lines via -progress pipe:1.
+# Each update ends with "progress=continue"/"progress=end". We read the
+# stream line by line like _run_download and check on_cancel_check() for
+# cancellation during the process.
 
 def _parse_ffmpeg_time(value: str):
     """Parse an ffmpeg HH:MM:SS(.ffffff) timestamp into seconds, or None."""
@@ -284,29 +313,22 @@ def _enqueue_lines(pipe, line_queue):
 
 def _run_ffmpeg_merge(cmd, total_duration, on_merge_progress, on_cancel_check, cancel_message):
     """
-    Run the ffmpeg merge command, parsing its `-progress pipe:1` output to
-    report merge progress via on_merge_progress(percent, elapsed_seconds,
-    total_seconds, eta) — a distinct callback from on_progress, since merge
-    progress is measured in seconds-of-media-processed, not downloaded MB,
-    and reusing on_progress's (percent, downloaded_mb, total_mb, eta) shape
-    would mislabel seconds as megabytes in the UI.
+    ffmpeg birleştirmesini çalıştırır ve ilerlemeyi on_merge_progress
+    (percent, elapsed_seconds, total_seconds, eta) üzerinden bildirir.
+    Birleştirme ilerlemesi MB yerine işlenen medya saniyeleriyle ölçüldüğü
+    için on_progress'tan ayrıdır.
 
-    If on_merge_progress is None, progress simply isn't reported, but
-    cancellation still works the same way as during download.
+    on_merge_progress None ise ilerleme bildirilmez, ancak iptal işlemi
+    çalışmaya devam eder. total_duration yoksa percent 0 kalır ve bu,
+    belirsiz bir "birleştiriliyor..." durumunu gösterir.
 
-    total_duration is the video's total length in seconds (e.g. from
-    yt-dlp's info.get("duration")). If it's falsy, percent is always
-    reported as 0 — callers should treat that as an indeterminate
-    "merging..." state rather than a real percentage.
-
-    Cancellation is checked both when a new stdout line arrives AND on a
-    fixed timeout (_CANCEL_POLL_INTERVAL) even if no line arrives — so a
-    stalled/silent ffmpeg process can't block cancellation indefinitely.
+    İptal kontrolü her stdout satırında ve _CANCEL_POLL_INTERVAL aralıklarıyla
+    yapılır; böylece takılan ffmpeg işlemleri de iptal edilebilir.
     """
     process = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
         text=True,
         encoding="utf-8",
         errors="replace",
@@ -319,6 +341,16 @@ def _run_ffmpeg_merge(cmd, total_duration, on_merge_progress, on_cancel_check, c
         target=_enqueue_lines, args=(process.stdout, line_queue), daemon=True
     )
     reader_thread.start()
+
+    # ffmpeg's actual errors (codec, disk, permissions, etc.) go to stderr;
+    # stdout is reserved for `-progress pipe:1` key=value lines.
+    # Capture stderr on a separate thread for error classification.
+    # Cancellation is already handled in the stdout loop.
+    stderr_lines = []
+    stderr_thread = threading.Thread(
+        target=lambda: stderr_lines.extend(process.stderr), daemon=True
+    )
+    stderr_thread.start()
 
     elapsed_seconds = 0.0
     speed = None
@@ -375,8 +407,15 @@ def _run_ffmpeg_merge(cmd, total_duration, on_merge_progress, on_cancel_check, c
             process.stdout.close()
 
     process.wait()
+    # stdout has hit EOF (we broke out above) and the process has exited, so
+    # ffmpeg's stderr pipe is closed too — the stderr thread will already be
+    # at or very near EOF; this join is just to avoid a tiny race reading
+    # stderr_lines immediately after.
+    stderr_thread.join(timeout=2)
+    if process.stderr:
+        process.stderr.close()
     if process.returncode != 0:
-        raise RuntimeError(f"ffmpeg exited with code {process.returncode}")
+        raise FfmpegProcessError(process.returncode, "".join(stderr_lines))
 
 
 # ---------------------------------------------------------------------------
@@ -395,14 +434,13 @@ def download_video(
     on_merge_progress=None,
 ) -> None:
     """
-    Download video+audio separately and merge with ffmpeg.
-    Runs in a background thread. Calls on_done() or on_error(msg) when finished.
+    Download video and audio separately, then merge them with ffmpeg.
+    Runs in the background and calls on_done() or on_error(msg) when finished.
 
-    on_merge_progress(percent, elapsed_seconds, total_seconds, eta), if
-    given, is called during the ffmpeg merge step — separate from
-    on_progress since merge progress is time-based (seconds of media
-    processed), not MB-based like the download progress is.
+    If provided, on_merge_progress(...) reports ffmpeg merge progress.
+    Unlike downloads, merge progress is measured in processed seconds, not MB.
     """
+
     def worker():
         try:
             _worker_impl()
@@ -413,7 +451,7 @@ def download_video(
             # "downloading"/"merging" forever with on_done/on_error never
             # called.
             logger.exception("Unexpected error in download_video worker")
-            on_error(str(e) or lang.get("unexpected_error_message", "Unexpected error"))
+            on_error(classify_generic_exception(e, lang))
 
     def _worker_impl():
         if not os.path.exists(get_ffmpeg_path()):
@@ -430,12 +468,15 @@ def download_video(
         def selector(formats):
             return find_suitable_format(formats, video_height)
 
+        extraction_errors = []
         info, client, (video_format, audio_format) = find_info_with_compatible_format(
-            exe_path, url, selector
+            exe_path, url, selector, collected_errors=extraction_errors
         )
 
         if not info:
-            on_error(lang["download_video_format_error"])
+            on_error(classify_extraction_failure(
+                extraction_errors, lang, fallback_key="download_video_format_error"
+            ))
             return
 
         logger.info(
@@ -491,8 +532,11 @@ def download_video(
         try:
             _run_download(video_cmd, _video_phase_progress, on_cancel_check, lang["download_canceled_message"])
             _run_download(audio_cmd, _audio_phase_progress, on_cancel_check, lang["download_canceled_message"])
-        except (DownloadCancelled, RuntimeError) as e:
+        except DownloadCancelled as e:
             on_error(str(e))
+            return
+        except YtDlpProcessError as e:
+            on_error(classify_ytdlp_error(e.output, e.returncode, lang))
             return
 
         # Locate downloaded temp files
@@ -541,9 +585,15 @@ def download_video(
                     pass
             on_error(str(e))
             return
-        except RuntimeError as e:
-            on_error(f"FFmpeg merge failed ({e}). "
-                     "Temporary files were removed.")
+        except FfmpegProcessError as e:
+            # Same reasoning as the cancellation branch above: ffmpeg may
+            # have written a partial, unplayable file before erroring out.
+            if os.path.exists(output_path):
+                try:
+                    os.remove(output_path)
+                except OSError:
+                    pass
+            on_error(classify_ffmpeg_error(e.output, e.returncode, lang))
             return
         finally:
             # Always clean up the video/audio temp files, regardless of
@@ -581,7 +631,7 @@ def download_audio(
             _worker_impl()
         except Exception as e:
             logger.exception("Unexpected error in download_audio worker")
-            on_error(str(e) or lang.get("unexpected_error_message", "Unexpected error"))
+            on_error(classify_generic_exception(e, lang))
 
     def _worker_impl():
         if not os.path.exists(get_ffmpeg_path()):
@@ -593,12 +643,15 @@ def download_audio(
         def selector(formats):
             return find_suitable_audio_format(formats)
 
+        extraction_errors = []
         info, client, (chosen_audio,) = find_info_with_compatible_format(
-            exe_path, url, selector
+            exe_path, url, selector, collected_errors=extraction_errors
         )
 
         if not info or not chosen_audio:
-            on_error(lang["download_video_format_error"])
+            on_error(classify_extraction_failure(
+                extraction_errors, lang, fallback_key="download_video_format_error"
+            ))
             return
 
         logger.info(
@@ -632,8 +685,11 @@ def download_audio(
 
         try:
             _run_download(cmd, on_progress, on_cancel_check, lang["download_canceled_message"])
-        except (DownloadCancelled, RuntimeError) as e:
+        except DownloadCancelled as e:
             on_error(str(e))
+            return
+        except YtDlpProcessError as e:
+            on_error(classify_ytdlp_error(e.output, e.returncode, lang))
             return
 
         try:
