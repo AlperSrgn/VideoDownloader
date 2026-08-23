@@ -21,7 +21,7 @@ Based on [yt-dlp](https://github.com/yt-dlp/yt-dlp).
 
 ## Download VideoDownloaderSetup.exe
 
-### [![İNDİR](https://github.com/user-attachments/assets/8d8adf06-7013-4017-8434-51984f624e3b)](https://github.com/AlperSrgn/VideoDownloader/releases/download/v3.0.5/VideoDownloaderSetup.exe)
+### [![İNDİR](https://github.com/user-attachments/assets/8d8adf06-7013-4017-8434-51984f624e3b)](https://github.com/AlperSrgn/VideoDownloader/releases/download/v3.0.6/VideoDownloaderSetup.exe)
 
 <br>
 
@@ -79,6 +79,7 @@ The project must be built using the **virtual environment's** Python and PyInsta
 | ------------------ | ------------------------------------------------------------------------------------------- |
 | `main.py`           | UI layer — builds and manages all interface components, including the download queue        |
 | `downloader.py`     | Download logic — runs `yt-dlp.exe` as a subprocess, format selection, ffmpeg merge, audio download |
+| `error_classifier.py` | Turns raw `yt-dlp`/`ffmpeg` errors (exit codes, process output) into clear, localized, user-facing messages |
 | `ytdlp_manager.py`  | Manages the standalone `yt-dlp.exe` binary (nightly channel) — downloads it on first run and self-updates it once per app session |
 | `utils.py`          | File helpers — filename sanitization, ffmpeg path, icon copy, URL cleaning                   |
 | `settings.py`       | Config — reads and writes settings to `AppData\Local\VideoDownloader\config.json`            |
