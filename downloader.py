@@ -38,18 +38,12 @@ RESOLUTION_MAP = {
     "4K": 2160,
 }
 
-# Fixed weights (must sum to 100) for combining the three sub-phases of a
-# video download — video download, audio download, ffmpeg merge — into a
-# single overall percentage, so the UI can drive one progress bar across
-# all three instead of resetting it to 0 at the start of each phase.
-#
-# Previously computed dynamically from each format's filesize, but many
-# DASH/adaptive video formats don't report a filesize, which could zero out
-# a phase's weight entirely (percent stuck at 0.0%) and, separately,
-# yt-dlp's own size estimate for fragmented downloads fluctuates as it
-# downloads more fragments, making the displayed total look unstable.
-# Fixed weights avoid both: simple and predictable, at the cost of not
-# reflecting actual per-download size ratios.
+# Fixed weights combine video download, audio download,
+# and ffmpeg merge into one progress bar.
+# Previously, weights were calculated dynamically from file sizes.
+# However, some DASH/adaptive formats don’t report a filesize, causing progress to get stuck at 0%,
+# while fragmented downloads could make the total estimate fluctuate.
+# Fixed weights make progress simpler and more stable, at the cost of not reflecting actual file-size ratios.
 VIDEO_PHASE_WEIGHT = 75
 AUDIO_PHASE_WEIGHT = 15
 MERGE_PHASE_WEIGHT = 10
@@ -68,18 +62,13 @@ cancel_download = False
 
 def _select_original_audio(audio_formats: list):
     """
-    Pick the *original* audio track rather than an auto-dubbed one.
+    Selects the *original* audio track instead of an auto-dubbed one.
 
-    Many YouTube videos now expose several audio-only formats — one per
-    language (original + auto-dubbed tracks such as Arabic, English,
-    Turkish, etc.). yt-dlp tags each of these with:
-      - "language": a language code (e.g. "en", "ar", "tr")
-      - "language_preference": a signed int where the original/default
-        track gets the highest value (commonly 10) and dubbed tracks get
-        a lower one (often -1 or 0).
+    yt-dlp tags audio formats with language and language_preference.
+    The original track usually has the highest language_preference value.
 
-    This selects the subset of formats with the highest language_preference
-    (i.e. the original track), then breaks ties by bitrate.
+    First, formats with the highest language_preference are selected;
+    ties are then resolved by bitrate.
     """
     if not audio_formats:
         return None
@@ -148,14 +137,11 @@ def find_suitable_format(formats: list, video_height: int):
 
 def find_suitable_audio_format(formats: list):
     """
-    Return (audio_format,) for the original audio track — a 1-tuple so this
-    plugs directly into find_info_with_compatible_format the same way
-    find_suitable_format's (video_format, audio_format) does.
+    Returns the original audio track as (audio_format,) so it can be passed
+    directly to find_info_with_compatible_format.
 
-    Returns (None,) if this player client's formats have no usable
-    (url-bearing) audio-only track — the caller (find_info_with_compatible_
-    format) will then move on and retry with the next client, exactly like
-    the video path already does.
+    Returns (None,) if no usable audio track is available, allowing the next
+    client to be tried.
     """
     audio_formats = [
         f for f in formats
@@ -198,9 +184,8 @@ def _parse_progress_line(line: str):
 
 def _run_download(cmd, on_progress, on_cancel_check, cancel_message):
     """
-    Runs the yt-dlp.exe download, sends progress to on_progress, and stops
-    when on_cancel_check() returns True.
-    Cancellation is checked periodically even when no output is received.
+    Runs the yt-dlp.exe download, reports progress, and stops if cancelled.
+    Cancellation is checked periodically even without output.
     """
     process = subprocess.Popen(
         cmd,
@@ -219,11 +204,9 @@ def _run_download(cmd, on_progress, on_cancel_check, cancel_message):
     )
     reader_thread.start()
 
-    # Keep the last N lines of yt-dlp's output (stdout+stderr merged) so
-    # that, if it exits with a non-zero code, we have the actual "ERROR: ..."
-    # text to classify into a user-facing message — not just the exit code.
-    # Bounded so a very chatty/long-running download can't grow this
-    # unboundedly in memory.
+    # Keep the last N lines of yt-dlp's output to capture the actual
+    # "ERROR: ..." message when it fails.
+    # Limit the output to prevent unbounded memory usage.
     output_lines = deque(maxlen=200)
 
     try:
@@ -263,10 +246,8 @@ def _run_download(cmd, on_progress, on_cancel_check, cancel_message):
 # ---------------------------------------------------------------------------
 # FFmpeg merge progress + cancellation
 # ---------------------------------------------------------------------------
-# ffmpeg outputs progress as "key=value" lines via -progress pipe:1.
-# Each update ends with "progress=continue"/"progress=end". We read the
-# stream line by line like _run_download and check on_cancel_check() for
-# cancellation during the process.
+# ffmpeg reports progress as "key=value" lines.
+# We read each line to track progress and check for cancellation.
 
 def _parse_ffmpeg_time(value: str):
     """Parse an ffmpeg HH:MM:SS(.ffffff) timestamp into seconds, or None."""
@@ -288,22 +269,15 @@ def _format_duration(seconds: float) -> str:
     return f"{minutes:02d}:{secs:02d}"
 
 
-# How often we re-check on_cancel_check() while waiting for ffmpeg's next
-# stdout line. This is a *ceiling* on cancel latency, not the normal case —
-# lines from `-progress pipe:1` normally arrive faster than this on their
-# own, so in practice cancellation reacts to whichever comes first: a new
-# line, or this timeout. That means even if ffmpeg were to stall and stop
-# producing output entirely (stuck I/O, etc.), cancellation still can't be
-# blocked for more than this long.
+# Determines how often cancellation is checked while ffmpeg is waiting.
+# Cancellation won't be delayed beyond this interval, even without new output.
 _CANCEL_POLL_INTERVAL = 0.2  # seconds
 
 
 def _enqueue_lines(pipe, line_queue):
-    """Runs in a background thread: pushes each line from `pipe` onto
-    `line_queue`, then pushes None as an end-of-stream sentinel. This is
-    what lets the main loop use queue.get(timeout=...) — a blocking
-    pipe.readline() has no timeout on its own, and on Windows, pipes can't
-    be used with select()."""
+    """Runs in the background, pushing `pipe` lines to `line_queue` and adding
+    None at the end. This allows the main loop to use a timeout; `readline()`
+    has no timeout support, and Windows pipes can't be used with `select()`."""
     try:
         for line in pipe:
             line_queue.put(line)
@@ -313,17 +287,13 @@ def _enqueue_lines(pipe, line_queue):
 
 def _run_ffmpeg_merge(cmd, total_duration, on_merge_progress, on_cancel_check, cancel_message):
     """
-    ffmpeg birleştirmesini çalıştırır ve ilerlemeyi on_merge_progress
-    (percent, elapsed_seconds, total_seconds, eta) üzerinden bildirir.
-    Birleştirme ilerlemesi MB yerine işlenen medya saniyeleriyle ölçüldüğü
-    için on_progress'tan ayrıdır.
+    Runs the ffmpeg merge and reports progress through on_merge_progress.
+    Progress is based on media seconds rather than MB.
 
-    on_merge_progress None ise ilerleme bildirilmez, ancak iptal işlemi
-    çalışmaya devam eder. total_duration yoksa percent 0 kalır ve bu,
-    belirsiz bir "birleştiriliyor..." durumunu gösterir.
+    If on_merge_progress is None, progress is not reported, but cancellation
+    still works. If total_duration is unavailable, percent stays at 0.
 
-    İptal kontrolü her stdout satırında ve _CANCEL_POLL_INTERVAL aralıklarıyla
-    yapılır; böylece takılan ffmpeg işlemleri de iptal edilebilir.
+    Cancellation is checked on stdout lines and at regular intervals.
     """
     process = subprocess.Popen(
         cmd,
@@ -407,10 +377,8 @@ def _run_ffmpeg_merge(cmd, total_duration, on_merge_progress, on_cancel_check, c
             process.stdout.close()
 
     process.wait()
-    # stdout has hit EOF (we broke out above) and the process has exited, so
-    # ffmpeg's stderr pipe is closed too — the stderr thread will already be
-    # at or very near EOF; this join is just to avoid a tiny race reading
-    # stderr_lines immediately after.
+    # Since stdout and the process have ended, stderr is also closed.
+    # This join prevents a possible race before reading stderr_lines.
     stderr_thread.join(timeout=2)
     if process.stderr:
         process.stderr.close()
@@ -434,22 +402,16 @@ def download_video(
     on_merge_progress=None,
 ) -> None:
     """
-    Download video and audio separately, then merge them with ffmpeg.
-    Runs in the background and calls on_done() or on_error(msg) when finished.
-
-    If provided, on_merge_progress(...) reports ffmpeg merge progress.
-    Unlike downloads, merge progress is measured in processed seconds, not MB.
+    Downloads video and audio separately, then merges them with ffmpeg.
+    Calls on_done() or on_error(msg) when finished.
+    Merge progress is reported based on processed seconds.
     """
 
     def worker():
         try:
             _worker_impl()
         except Exception as e:
-            # Safety net: any unexpected exception (e.g. ffmpeg/yt-dlp
-            # missing, permissions, disk full) would otherwise kill this
-            # background thread silently, leaving the UI stuck showing
-            # "downloading"/"merging" forever with on_done/on_error never
-            # called.
+            # Safety net: # Unexpected errors can stop the thread and leave the UI stuck.
             logger.exception("Unexpected error in download_video worker")
             on_error(classify_generic_exception(e, lang))
 
@@ -490,11 +452,8 @@ def download_video(
         title = info.get("title", "video")
         safe_title = sanitize_filename(title)
 
-        # Temp files use a per-download UUID rather than safe_title. This
-        # guarantees uniqueness even if the same video is queued/downloaded
-        # more than once, and it means find_glob_file's pattern can only
-        # ever match *this* download's own temp file — never a stale
-        # leftover from a previous failed run.
+        # Temp files use a UUID, so even repeated downloads of the same video
+        # only match the current download's file.
         temp_id = uuid.uuid4().hex
         temp_base = os.path.join(save_location, f".ytdlp_tmp_{temp_id}")
 
@@ -515,13 +474,8 @@ def download_video(
             url,
         ]
 
-        # Rescale each phase's own 0-100 progress into its slice of the
-        # overall bar (see *_PHASE_WEIGHT above), so on_progress/
-        # on_merge_progress — and therefore the UI's single progress bar —
-        # always reflect the whole video+audio+merge job, not just whichever
-        # sub-step happens to be running. downloaded_mb/total_mb/eta are
-        # passed through unchanged since those are still meaningful as
-        # "this phase's own numbers."
+        # Scales each phase's progress by *_PHASE_WEIGHT for the overall bar.
+        # downloaded_mb/total_mb/eta remain unchanged as phase-specific values.
         def _video_phase_progress(percent, downloaded_mb, total_mb, eta):
             on_progress(VIDEO_PHASE_WEIGHT * (percent / 100), downloaded_mb, total_mb, eta)
 
@@ -596,9 +550,7 @@ def download_video(
             on_error(classify_ffmpeg_error(e.output, e.returncode, lang))
             return
         finally:
-            # Always clean up the video/audio temp files, regardless of
-            # whether the merge succeeded, failed, or was cancelled — we
-            # don't keep them around for inspection.
+            # Always clean up temporary video/audio files, regardless of merge result.
             for path in [video_path, audio_path]:
                 if os.path.exists(path):
                     try:
@@ -610,7 +562,6 @@ def download_video(
         on_done()
 
     threading.Thread(target=worker, daemon=True).start()
-
 
 # ---------------------------------------------------------------------------
 # Audio-only download
@@ -665,10 +616,8 @@ def download_audio(
         output_filename = unique_filename(save_location, f"{safe_title}.mp3")
         output_path = os.path.join(save_location, output_filename)
 
-        # Same reasoning as download_video: use a per-download UUID for the
-        # temp download template so find_glob_file can't accidentally match
-        # a pre-existing file (e.g. an older download with the same title)
-        # that happens to already sit in save_location.
+        # Same as download_video: use a UUID for the temp file so find_glob_file
+        # doesn't accidentally match an old file.
         temp_id = uuid.uuid4().hex
         output_template = os.path.join(save_location, f".ytdlp_tmp_{temp_id}")
 

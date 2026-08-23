@@ -63,7 +63,7 @@ The project must be built using the **virtual environment's** Python and PyInsta
 
 **Step 2 — Build the exe:**
 
-`$ pyinstaller --onefile --noconsole --add-binary "C:\Users\alper\PycharmProjects\VideoDownloader\.venv\Lib\site-packages\imageio_ffmpeg\binaries\ffmpeg-win-x86_64-v7.1.exe;." --add-data "notificationIcon.ico;." --add-data "previewIcon.ico;." --add-data "appIcon.ico;." --add-data "languages.py;." --add-data "settings.py;." --add-data "utils.py;." --add-data "downloader.py;." --add-data "ytdlp_manager.py;." --hidden-import=plyer.platforms.win.notification main.py`
+`$ pyinstaller --onefile --noconsole --add-binary "C:\Users\alper\PycharmProjects\VideoDownloader\.venv\Lib\site-packages\imageio_ffmpeg\binaries\ffmpeg-win-x86_64-v7.1.exe;." --add-data "notificationIcon.ico;." --add-data "previewIcon.ico;." --add-data "appIcon.ico;." --hidden-import=plyer.platforms.win.notification main.py`
 
 <br>
 

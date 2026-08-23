@@ -17,7 +17,7 @@ from settings import load_setting, save_setting
 from utils import clean_playlist_url, copy_icons, get_icon_path
 
 # Convert to exe file
-# pyinstaller --onefile --noconsole --add-binary "C:\Users\alper\PycharmProjects\VideoDownloader\.venv\Lib\site-packages\imageio_ffmpeg\binaries\ffmpeg-win-x86_64-v7.1.exe;." --add-data "notificationIcon.ico;." --add-data "previewIcon.ico;." --add-data "appIcon.ico;." --add-data "languages.py;." --add-data "settings.py;." --add-data "utils.py;." --add-data "downloader.py;." --add-data "ytdlp_manager.py;." --hidden-import=plyer.platforms.win.notification main.py
+# pyinstaller --onefile --noconsole --add-binary "C:\Users\alper\PycharmProjects\VideoDownloader\.venv\Lib\site-packages\imageio_ffmpeg\binaries\ffmpeg-win-x86_64-v7.1.exe;." --add-data "notificationIcon.ico;." --add-data "previewIcon.ico;." --add-data "appIcon.ico;." --hidden-import=plyer.platforms.win.notification main.py
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -42,28 +42,23 @@ APP_ICON = get_icon_path("appIcon.ico")
 # yt-dlp version (async)
 # ---------------------------------------------------------------------------
 def fetch_ytdlp_version(callback, on_status=None):
-    """
-    Runs ensure_ytdlp (download-on-first-run / self-update) in the
-    background, then reports the resolved version via `callback`.
+    """Runs ensure_ytdlp (first-run download / self-update) in the background
+    and reports the version via `callback`.
 
-    If given, `on_status(stage, percent)` is invoked as ensure_ytdlp
-    progresses — see ytdlp_manager.ensure_ytdlp for the stage values. This
-    lets the UI show something better than a blank window while yt-dlp.exe
-    is being fetched for the first time.
+    If provided, `on_status(stage, percent)` is called during progress.
+    This lets the UI show status while yt-dlp.exe is being downloaded.
     """
     def worker():
         try:
             from settings import get_appdata_path
             from ytdlp_manager import ensure_ytdlp, get_ytdlp_version
-            # ensure_ytdlp downloads yt-dlp.exe on first run and otherwise
-            # asks it to self-update — this is also where the "auto update"
-            # actually happens, once per app launch.
+            # ensure_ytdlp downloads on first run and updates on later launches.
+            # The auto-update runs once each time the app starts.
             exe_path = ensure_ytdlp(get_appdata_path(), on_status=on_status)
             callback(f"yt-dlp v{get_ytdlp_version(exe_path)}")
         except Exception:
             callback("yt-dlp version unavailable")
     threading.Thread(target=worker, daemon=True).start()
-
 
 
 # ---------------------------------------------------------------------------
@@ -152,29 +147,23 @@ sidebar_open = False
 SIDEBAR_WIDTH = 250
 sidebar_x = -SIDEBAR_WIDTH
 
-# Text color used for the dynamically-created queue item rows — kept in
-# sync with the active theme by toggle_theme(), since these labels are
-# built on the fly in render_queue_list() rather than created once upfront.
+# Text color for dynamic queue rows; updated when the theme changes.
 queue_item_text_color = THEMES["light"]["queue_item_label"]["text_color"]
 
-# Download queue — items waiting to start. The item currently downloading
-# has already been popped out of this queue (see current_queue_item).
+# Download queue — items waiting to start.
 download_queue = deque()
 current_queue_item = None  # {"id": int, "url": str} or None when idle
 _queue_id_counter = itertools.count(1)
 
-# Where finished downloads are written. Defaults to the user's Downloads
-# folder on first run, but is user-changeable via the sidebar and persisted
-# to config.json so it's remembered across app restarts.
+# Folder where completed downloads are saved.
+# Can be changed by the user and is saved to config.json.
 DEFAULT_SAVE_LOCATION = os.path.join(os.path.expanduser("~"), "Downloads")
 save_location = load_setting("save_location", DEFAULT_SAVE_LOCATION)
 if not os.path.isdir(save_location):
-    # Saved folder may have been moved/deleted (e.g. an external drive) —
-    # fall back rather than silently failing every download.
+    # Fall back if the folder was moved or deleted.
     save_location = DEFAULT_SAVE_LOCATION
-# Always persist the resolved value, so "save_location" shows up in
-# config.json from the very first run instead of only appearing after the
-# user explicitly picks a folder.
+
+# Save the resolved location to config.json.
 save_setting("save_location", save_location)
 
 
@@ -216,15 +205,13 @@ def _update_progress_ui(percent: float, downloaded_mb: float, total_mb: float, e
 
 
 def on_merge_progress(percent: float, elapsed_seconds: float, total_seconds: float, eta: str):
-    """Separate from on_progress: merge progress is time-based (seconds of
-    media processed by ffmpeg), not MB-based, so it gets its own label
-    format instead of misleadingly reusing the "X / Y MB" one. percent is 0
-    for the whole merge if total_seconds is unknown (indeterminate state) —
-    the progress bar still moves via the pulsing done by ffmpeg's periodic
-    updates, it just won't reach 100% until ffmpeg actually finishes.
+    """Separate from on_progress: merge progress is based on
+    media time processed by ffmpeg, not MB. So it uses a separate label format instead of "X / Y MB".
 
-    Also called from the background thread — same root.after() marshaling
-    as on_progress.
+    If total_seconds is unknown, percent stays at 0 and
+    the progress bar won't reach 100% until ffmpeg finishes.
+
+    Called from the background thread and uses root.after().
     """
     root.after(0, lambda: _update_merge_progress_ui(percent, eta))
 
@@ -292,10 +279,8 @@ def _handle_error(msg: str):
 # ---------------------------------------------------------------------------
 # Quality selection helpers
 # ---------------------------------------------------------------------------
-# The dropdown shows language-flavored labels ("1080p ᴴᴰ", "Ses"/"Audio"),
-# but each queue item needs to remember its OWN pick as a stable, language-
-# independent key ("720p", "1080p", "2K", "4K", "audio") so that switching
-# the UI language later doesn't break already-queued items.
+# The dropdown shows language-specific labels, but each queue item stores
+# its selection as a language-independent key, so it stays valid if the language changes.
 RESOLUTION_UI_MAP = {
     "720p":       "720p",
     "1080p ᴴᴰ":  "1080p",
@@ -430,9 +415,8 @@ def process_next_in_queue():
 
     url = current_queue_item["url"]
     quality_key = current_queue_item["quality_key"]
-    # Uses the current global save_location (see "Save location" state /
-    # sidebar setting) — whatever the user has it set to when this item
-    # actually starts downloading.
+    # Uses the current global save_location;
+    # saves to the location selected when the download starts.
 
     set_widgets_state("disabled")
     download_button.configure(state="disabled")
@@ -587,17 +571,8 @@ def url_changed(*_):
 # Misc UI callbacks
 # ---------------------------------------------------------------------------
 def show_entry_context_menu(event, entry: ctk.CTkEntry):
-    """Right-click Cut/Copy/Paste/Select All menu for a CTkEntry.
-
-    Plain tkinter/CTk Entry widgets don't get an OS-provided right-click
-    menu on Windows the way native controls do, so without this, users who
-    don't know the Ctrl+V shortcut have no way to paste a link in.
-
-    CTkEntry is a wrapper around a real tkinter.Entry stored at
-    entry._entry — only a handful of methods (get/insert/delete/
-    select_range/...) are forwarded onto the wrapper itself, event_generate
-    is not one of them, so Cut/Copy/Paste virtual events must be fired on
-    entry._entry directly or they're silently swallowed by the wrapper.
+    """
+    Right-click Cut/Copy/Paste/Select All menu for CTkEntry.
     """
     real_entry = entry._entry
     menu = Menu(
@@ -746,24 +721,21 @@ queue_list_frame = ctk.CTkScrollableFrame(frame, width=440, height=90, fg_color=
 queue_list_frame.grid(row=3, column=0, columnspan=4, padx=10, pady=(5, 10), sticky="ew")
 queue_list_frame.grid_remove()
 
-# Bottom action panel: pinned to the bottom of the window with place(), so
-# it never gets pushed off-screen no matter how tall the queue list above
-# grows. Everything inside it (buttons, progress bar/label) uses normal
-# pack() among themselves, same as before.
+# Bottom action panel: fixed to the bottom with place().
+# Its contents use pack() among themselves.
 bottom_panel = ctk.CTkFrame(root, fg_color="transparent")
 bottom_panel.place(relx=0.5, rely=1.0, anchor="s", y=-15)
 
-# yt-dlp preparation banner — shown while yt-dlp.exe is being downloaded on
-# first run (or, more briefly, while it's checking for updates). Hidden the
-# rest of the time. See on_ytdlp_status().
+# yt-dlp status message — shown on first run or during update checks.
+# Hidden otherwise. See on_ytdlp_status().
 ytdlp_status_label = ctk.CTkLabel(
     bottom_panel, text="", font=("Helvetica", 14, "italic"), text_color="#888888",
 )
 ytdlp_status_label.pack(pady=(0, 5))
 ytdlp_status_label.pack_forget()
 
-# Action buttons row: "İndir" (always visible) + "➕ Sıraya Ekle"
-# (only shown once a download is already running, per process_next_in_queue)
+# Action buttons: "İndir" is always visible,
+# "➕ Sıraya Ekle" is shown only while downloading.
 action_buttons_frame = ctk.CTkFrame(bottom_panel, fg_color="transparent")
 action_buttons_frame.pack(pady=(0, 10))
 
@@ -999,9 +971,8 @@ yt_dlp_version_label.place(relx=1.0, rely=1.0, anchor="se", x=-10, y=-5)
 
 def on_ytdlp_status(stage: str, percent):
     """Called (possibly from a background thread) as ensure_ytdlp progresses.
-    Shows a small banner above the download button while yt-dlp.exe is being
-    fetched for the first time, and keeps the download button locked until
-    it's actually ready to be used."""
+    Shows a status message while yt-dlp.exe is being prepared
+    and locks the download button until it's ready."""
     def apply():
         lang = current_language or LANGUAGES.get("Tr", {})
 
