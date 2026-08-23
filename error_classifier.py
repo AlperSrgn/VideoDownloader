@@ -25,6 +25,13 @@ class DownloadCancelled(Exception):
     pass
 
 
+class DownloadStalled(Exception):
+    """Raised when yt-dlp produces no output for the specified timeout.
+    This usually happens when it gets stuck in a local computation loop
+    instead of downloading. Without this guard, the app may hang indefinitely."""
+    pass
+
+
 class YtDlpProcessError(Exception):
     """yt-dlp.exe exited with a non-zero code. Carries the raw captured
     output (stdout+stderr merged) so the caller can classify *why* it

@@ -4,6 +4,7 @@ import re
 import subprocess
 import threading
 import queue
+import time
 import uuid
 from collections import deque
 
@@ -21,6 +22,7 @@ from ytdlp_manager import (
 )
 from error_classifier import (
     DownloadCancelled,
+    DownloadStalled,
     YtDlpProcessError,
     FfmpegProcessError,
     classify_ytdlp_error,
@@ -50,6 +52,12 @@ MERGE_PHASE_WEIGHT = 10
 
 
 _NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+
+# If yt-dlp produces absolutely no output for this long, we treat it as
+# stuck (e.g. an infinite loop while solving YouTube's nsig challenge for a
+# specific video — CPU stays high while disk/network usage stays at zero)
+# rather than waiting forever, and kill the process.
+_STALL_TIMEOUT = 60  # seconds
 
 # Shared cancel flag — set to True from UI to abort an active download
 cancel_download = False
@@ -182,10 +190,17 @@ def _parse_progress_line(line: str):
     return percent, downloaded_mb, total_mb, eta
 
 
-def _run_download(cmd, on_progress, on_cancel_check, cancel_message):
+def _run_download(cmd, on_progress, on_cancel_check, cancel_message, stall_message=None):
     """
     Runs the yt-dlp.exe download, reports progress, and stops if cancelled.
     Cancellation is checked periodically even without output.
+
+    Also guards against yt-dlp getting stuck in a local infinite loop for a
+    specific video (e.g. while solving YouTube's nsig challenge) — in that
+    case yt-dlp never prints another line and never exits, so without this
+    check the app would hang forever with no feedback. If no output is
+    received for _STALL_TIMEOUT seconds, the process is killed and
+    DownloadStalled is raised instead.
     """
     process = subprocess.Popen(
         cmd,
@@ -208,6 +223,7 @@ def _run_download(cmd, on_progress, on_cancel_check, cancel_message):
     # "ERROR: ..." message when it fails.
     # Limit the output to prevent unbounded memory usage.
     output_lines = deque(maxlen=200)
+    last_output_time = time.monotonic()
 
     try:
         while True:
@@ -219,17 +235,30 @@ def _run_download(cmd, on_progress, on_cancel_check, cancel_message):
                     process.kill()
                 raise DownloadCancelled(cancel_message)
 
+            if time.monotonic() - last_output_time > _STALL_TIMEOUT:
+                logger.warning(
+                    "yt-dlp produced no output for %ss — treating as stalled "
+                    "and killing the process. cmd=%s", _STALL_TIMEOUT, cmd,
+                )
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                raise DownloadStalled(stall_message)
+
             try:
                 line = line_queue.get(timeout=_CANCEL_POLL_INTERVAL)
             except queue.Empty:
                 # No output in the last _CANCEL_POLL_INTERVAL seconds — loop
-                # back around to the on_cancel_check() at the top rather
-                # than blocking further.
+                # back around to the checks above rather than blocking
+                # further.
                 continue
 
             if line is None:
                 break  # reader thread hit EOF — yt-dlp closed stdout
 
+            last_output_time = time.monotonic()
             output_lines.append(line)
             parsed = _parse_progress_line(line)
             if parsed:
@@ -484,9 +513,18 @@ def download_video(
             on_progress(overall, downloaded_mb, total_mb, eta)
 
         try:
-            _run_download(video_cmd, _video_phase_progress, on_cancel_check, lang["download_canceled_message"])
-            _run_download(audio_cmd, _audio_phase_progress, on_cancel_check, lang["download_canceled_message"])
+            _run_download(
+                video_cmd, _video_phase_progress, on_cancel_check,
+                lang["download_canceled_message"], lang["error_download_stalled"],
+            )
+            _run_download(
+                audio_cmd, _audio_phase_progress, on_cancel_check,
+                lang["download_canceled_message"], lang["error_download_stalled"],
+            )
         except DownloadCancelled as e:
+            on_error(str(e))
+            return
+        except DownloadStalled as e:
             on_error(str(e))
             return
         except YtDlpProcessError as e:
@@ -633,8 +671,14 @@ def download_audio(
         ]
 
         try:
-            _run_download(cmd, on_progress, on_cancel_check, lang["download_canceled_message"])
+            _run_download(
+                cmd, on_progress, on_cancel_check,
+                lang["download_canceled_message"], lang["error_download_stalled"],
+            )
         except DownloadCancelled as e:
+            on_error(str(e))
+            return
+        except DownloadStalled as e:
             on_error(str(e))
             return
         except YtDlpProcessError as e:

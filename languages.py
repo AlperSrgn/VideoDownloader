@@ -66,6 +66,9 @@ LANGUAGES = {
         "error_disk_full": "Disk alanı yetersiz.\n\nLütfen yer açıp tekrar deneyin.",
         "error_permission": "Dosyaya yazma izni yok.\n\nİndirme konumunun yazma izinlerini kontrol edin.",
         "error_unknown_ytdlp": "İndirme sırasında bilinmeyen bir hata oluştu.",
+        "error_download_stalled": "İndirme askıda kaldı ve durduruldu.\n\n"
+                                  "Bu videoyla ilgili yt-dlp bir sorunla karşılaşmış olabilir. "
+                                  "Lütfen tekrar deneyin veya farklı bir video ile test edin.",
 
     },
     "En": {
@@ -138,6 +141,9 @@ LANGUAGES = {
         "error_disk_full": "Not enough disk space.\n\nFree up some space and try again.",
         "error_permission": "Permission denied while writing the file.\n\nCheck the write permissions of the download location.",
         "error_unknown_ytdlp": "An unknown error occurred during download.",
+        "error_download_stalled": "The download got stuck and was stopped.\n\n"
+                                  "yt-dlp may have run into an issue with this video. "
+                                  "Please try again, or test with a different video.",
 
     }
 }
