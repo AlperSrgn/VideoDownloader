@@ -1,98 +1,187 @@
-# VIDEO DOWNLOADER
+# Video Downloader
 
-Download videos from websites. Provides the following features:
+A Windows desktop application for downloading videos and audio from supported websites.
 
-- Download videos up to 4K resolution [ 2160P(4K), 1440P(2K), 1080P, 720P ]
-- Download the audio of the video as MP3
-- **Choose your download location** — pick any folder from the sidebar; the app remembers it between sessions
-- **Download queue** — queue up multiple links, each with its own quality/format, and let them download one after another. You can keep adding more links while a download is already in progress
-- Dark mode feature
-- System notification support with preview
-- Download videos by URL
-- Automatically selects the best video format based on your quality preference
-- Automatically handles SABR-protected YouTube videos by trying multiple clients
-- Uses a standalone `yt-dlp.exe` that downloads and self-updates in the background (on the **nightly** channel, for faster fixes to YouTube-side breakage), so the app can keep up with YouTube changes without waiting on an app update
+Video Downloader uses a standalone `yt-dlp.exe` backend for downloads and FFmpeg for media processing. The application can automatically update its yt-dlp binary in the background so it can keep up with changes on supported websites.
+
+## Features
+
+- Download videos in up to **4K**:
+  - 2160p (4K)
+  - 1440p (2K)
+  - 1080p
+  - 720p
+- Download video audio as **MP3**
+- **Choose your download location** — select any folder from the sidebar; the app remembers it between sessions
+- **Download queue** — add multiple URLs with different quality/format settings and download them sequentially
+- Add new downloads to the queue while another download is in progress
+- **Dark mode**
+- **System notifications** with notification preview
+- Download videos directly from their URLs
+- Automatically selects the best available format according to the selected quality
+- Uses a standalone `yt-dlp.exe` that downloads on first launch and self-updates once per app run on the **nightly** channel
 
 Based on [yt-dlp](https://github.com/yt-dlp/yt-dlp).
 
 ---
 
-# INSTALLATION
+# Installation
 
-## Download VideoDownloaderSetup.exe
+## For Users
 
-### [![İNDİR](https://github.com/user-attachments/assets/8d8adf06-7013-4017-8434-51984f624e3b)](https://github.com/AlperSrgn/VideoDownloader/releases/download/v3.0.6/VideoDownloaderSetup.exe)
+### 1. Download the Installer
 
-<br>
+Download the latest `VideoDownloaderSetup.exe` from the project's GitHub Releases page.
 
-**Note:** Video Downloader comes bundled with FFmpeg which is used for merging video and audio streams. When you download it as a setup file, you do not need to take any action.
-You can complete the installation process by running the setup file.
+[![Download](https://github.com/user-attachments/assets/8d8adf06-7013-4017-8434-51984f624e3b)](https://github.com/AlperSrgn/VideoDownloader/releases/download/v3.1.0/VideoDownloaderSetup.exe)
 
-> ⚠️ **Windows SmartScreen warning:** When you run the installer, Windows may show a blue **"Windows protected your PC"** screen. This is expected and **not a sign of malware** — it happens because the exe isn't signed with a paid code-signing certificate, which Microsoft uses as a trust signal regardless of what the app actually does. The project is fully open source, so you're welcome to review the code yourself before running it. To continue: click **"More info"**, then **"Run anyway"**.
+### 2. Run the Installer
+
+Video Downloader includes FFmpeg, which is used when video and audio streams need to be merged.
+
+No additional FFmpeg installation is required when using the setup installer.
+
+> ### ⚠️ Windows SmartScreen Warning
 >
-> Your antivirus may also flag or scan `yt-dlp.exe` the first time the app downloads it — this is the same story: it's an unsigned executable that gets fetched at runtime (see [Project Structure](#project-structure) below), not malicious behavior. It's downloaded directly from the official [yt-dlp nightly builds GitHub releases](https://github.com/yt-dlp/yt-dlp-nightly-builds/releases) (the same yt-dlp project, just its more frequently-updated nightly channel).
+> Windows may display a blue **"Windows protected your PC"** warning when you run the installer.
+>
+> This can happen because the executable is not signed with a paid code-signing certificate. The project is open source, and its source code is available for review.
+>
+> If you trust the project and downloaded the installer from the official release page:
+>
+> 1. Click **More info**
+> 2. Click **Run anyway**
+>
+> ### Antivirus / yt-dlp Warning
+>
+> On its first launch, the application downloads the standalone `yt-dlp.exe` binary.
+>
+> Because this executable is downloaded at runtime and is not digitally signed by the application developer, some antivirus software may inspect or flag it.
+>
+> The binary is downloaded from the official [yt-dlp nightly releases](https://github.com/yt-dlp/yt-dlp-nightly-builds/releases).
 
 ---
 
-## Install in IDE
+# Development Setup
 
-If you want to install into the IDE with the `git clone` command from Github, you need to install [imageio-ffmpeg](https://github.com/imageio/imageio-ffmpeg) from the terminal after installation.
+This section is for developers who want to clone the repository, run the project from source, or build the application themselves.
 
-**Install using:**
+## Requirements
 
-`$ pip install imageio-ffmpeg`
+- Windows
+- Python
+- A Python virtual environment
+- `imageio-ffmpeg`
+- Internet access on first launch so the application can download `yt-dlp.exe`
 
-After running this command, the _imageio-ffmpeg_ installation will be completed.  
-<br><br>
+## Clone the Repository
 
-**Note:** If you have a problem with the directory where _imageio-ffmpeg_ is installed, edit the `get_ffmpeg_path()` function in **utils.py** according to your own _imageio-ffmpeg_ file path:
+```bash
+git clone https://github.com/AlperSrgn/VideoDownloader.git
+```
 
-`$ return os.path.join(project_dir, ".venv", "Lib", "site-packages", "imageio_ffmpeg", "binaries", "ffmpeg-win-x86_64-v7.1.exe")`
+Create and activate a virtual environment using your preferred method.
 
-**Note:** This app no longer depends on the `yt-dlp` Python package. Instead, `ytdlp_manager.py` downloads the official standalone `yt-dlp.exe` (nightly channel) into `%LOCALAPPDATA%\VideoDownloader` on first launch and asks it to self-update (staying on the nightly channel) once per app run — so there's nothing to `pip install` for yt-dlp itself, but the app does need internet access on first launch to fetch it.
+## Install FFmpeg Dependency
+
+Install `imageio-ffmpeg` from the virtual environment:
+
+```bash
+pip install imageio-ffmpeg
+```
+
+If the project cannot find the FFmpeg binary because your environment uses a different installation path, update the `get_ffmpeg_path()` function in `utils.py`.
+
+The current project expects the FFmpeg binary under a path similar to:
+
+```text
+.venv\Lib\site-packages\imageio_ffmpeg\binaries\ffmpeg-win-x86_64-v7.1.exe
+```
+
+## yt-dlp
+
+The application **does not use the `yt-dlp` Python package**.
+
+Instead, `ytdlp_manager.py` downloads the official standalone `yt-dlp.exe` from the nightly channel into:
+
+```text
+%LOCALAPPDATA%\VideoDownloader
+```
+
+The application checks for updates once per app run.
+
+Therefore, there is no separate `pip install` step for yt-dlp.
+
+> **Internet access is required on first launch** so the application can download the standalone yt-dlp binary.
 
 ---
 
-## Convert to Exe
+# Build the Executable
 
-The project must be built using the **virtual environment's** Python and PyInstaller to ensure the correct versions of all packages are bundled.
+The project is built with PyInstaller.
 
-**Step 1 — Install PyInstaller into the virtual environment:**
+## 1. Install PyInstaller
 
-`$ C:\Users\alper\PycharmProjects\VideoDownloader\.venv\Scripts\pip.exe install pyinstaller`
+Install PyInstaller into the project's virtual environment:
 
-**Step 2 — Build the exe:**
+```bash
+pip install pyinstaller
+```
 
-`$ pyinstaller --onefile --noconsole --add-binary "C:\Users\alper\PycharmProjects\VideoDownloader\.venv\Lib\site-packages\imageio_ffmpeg\binaries\ffmpeg-win-x86_64-v7.1.exe;." --add-data "notificationIcon.ico;." --add-data "previewIcon.ico;." --add-data "appIcon.ico;." --hidden-import=plyer.platforms.win.notification main.py`
+If you prefer to call the virtual environment directly on Windows:
 
-<br>
+```bash
+C:\path\to\project\.venv\Scripts\pip.exe install pyinstaller
+```
 
-> ⚠️ **Important:** Always use the virtual environment's `python.exe` and `pip.exe` directly (as shown above) instead of the global `python` or `pip` commands, to make sure the exe is built with the correct versions of all packages.
+## 2. Build
 
-> ⚠️ **Important:** Don't forget to replace the _imageio-ffmpeg_ and the _pyinstaller_ file path in the PyInstaller command with your own path!
+The current build command is:
+
+```bash
+pyinstaller --onefile --noconsole --add-binary "C:\path\to\.venv\Lib\site-packages\imageio_ffmpeg\binaries\ffmpeg-win-x86_64-v7.1.exe;." --add-data "notificationIcon.ico;." --add-data "previewIcon.ico;." --add-data "appIcon.ico;." --hidden-import=plyer.platforms.win.notification main.py
+```
+
+Replace the paths with the paths used by your own environment.
+
+> **🚨 Important:** Build the application using the Python and PyInstaller installation from the project's virtual environment. This helps ensure that the expected package versions and dependencies are included in the executable.
+
+> **🚨 Important:** The FFmpeg and PyInstaller paths in the example above are placeholders. Update them for your local environment before running the command.
 
 ---
 
-## Project Structure
+# Project Structure
 
-| File               | Description                                                                                |
-| ------------------ | ------------------------------------------------------------------------------------------- |
-| `main.py`           | UI layer — builds and manages all interface components, including the download queue        |
-| `downloader.py`     | Download logic — runs `yt-dlp.exe` as a subprocess, format selection, ffmpeg merge, audio download |
-| `error_classifier.py` | Turns raw `yt-dlp`/`ffmpeg` errors (exit codes, process output) into clear, localized, user-facing messages |
-| `ytdlp_manager.py`  | Manages the standalone `yt-dlp.exe` binary (nightly channel) — downloads it on first run and self-updates it once per app session |
-| `utils.py`          | File helpers — filename sanitization, ffmpeg path, icon copy, URL cleaning                   |
-| `settings.py`       | Config — reads and writes settings to `AppData\Local\VideoDownloader\config.json`            |
-| `languages.py`      | Language strings for Turkish and English                                                     |
+| File | Description |
+| --- | --- |
+| `main.py` | UI layer — builds and manages the interface, including the download queue |
+| `downloader.py` | Download logic — runs `yt-dlp.exe` as a subprocess, handles format selection, FFmpeg merging, and audio downloads |
+| `error_classifier.py` | Converts raw `yt-dlp` / FFmpeg errors and process results into clear, localized, user-facing messages |
+| `ytdlp_manager.py` | Manages the standalone `yt-dlp.exe` binary, including first-run download and per-session updates |
+| `utils.py` | General file helpers — filename sanitization, FFmpeg path handling, icon copying, and URL cleaning |
+| `settings.py` | Configuration — reads and writes application settings to `AppData\Local\VideoDownloader\config.json` |
+| `languages.py` | Localization strings for Turkish and English |
 
 ---
 
-# SCREENSHOTS
+# Screenshots
 
-![light](https://github.com/user-attachments/assets/6c79828f-1b69-4c82-8855-b9cd7806790b)
+![Light mode](https://github.com/user-attachments/assets/6c79828f-1b69-4c82-8855-b9cd7806790b)
 
-![dark](https://github.com/user-attachments/assets/ae49438b-c9c5-45a4-a945-3aa16c7eb6b5)
 
-![sidebar](https://github.com/user-attachments/assets/ea224b48-ee9b-4e57-885b-144dd9548aff)
+![Dark mode](https://github.com/user-attachments/assets/ae49438b-c9c5-45a4-a945-3aa16c7eb6b5)
 
-![cancel](https://github.com/user-attachments/assets/a6ecdc98-0427-4e31-be08-a724378a4f02)
+
+![Sidebar](https://github.com/user-attachments/assets/ea224b48-ee9b-4e57-885b-144dd9548aff)
+
+
+![Cancel download](https://github.com/user-attachments/assets/a6ecdc98-0427-4e31-be08-a724378a4f02)
+
+---
+
+# Notes
+
+- The application requires internet access to download the standalone yt-dlp binary when it is not already available.
+- yt-dlp is updated through its **nightly** channel to receive fixes for website-side changes more quickly.
+- Download and format support ultimately depends on the current capabilities of yt-dlp and the target website.
+- The installer already includes FFmpeg, so end users do not need to install FFmpeg separately.
