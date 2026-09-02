@@ -31,9 +31,13 @@ Based on [yt-dlp](https://github.com/yt-dlp/yt-dlp).
 
 ### 1. Download the Installer
 
-Download the latest `VideoDownloaderSetup.exe` from the project's GitHub Releases page.
+Click the button below to download the latest version of `VideoDownloaderSetup.exe`.
 
-[![Download](https://github.com/user-attachments/assets/8d8adf06-7013-4017-8434-51984f624e3b)](https://github.com/AlperSrgn/VideoDownloader/releases/download/v3.1.0/VideoDownloaderSetup.exe)
+[![CLICK HERE TO DOWNLOAD](https://github.com/user-attachments/assets/4e1d1739-ab90-4fdc-8645-133902ad6ea6)](https://github.com/AlperSrgn/VideoDownloader/releases/download/v3.1.0/VideoDownloaderSetup.exe)
+
+To view previous releases and older versions, visit the [**Releases page**](https://github.com/AlperSrgn/VideoDownloader/releases).
+
+
 
 ### 2. Run the Installer
 
