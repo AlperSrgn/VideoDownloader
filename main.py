@@ -1068,7 +1068,7 @@ fetch_ytdlp_version(
 if dark_mode_enabled.get():
     toggle_theme()
 
-saved_lang = load_setting("language", "Tr")
+saved_lang = load_setting("language", "En")
 language_var.set(saved_lang)
 change_language(saved_lang)
 
