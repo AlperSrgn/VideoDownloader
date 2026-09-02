@@ -26,9 +26,9 @@ class DownloadCancelled(Exception):
 
 
 class DownloadStalled(Exception):
-    """Raised when yt-dlp produces no output for the specified timeout.
-    This usually happens when it gets stuck in a local computation loop
-    instead of downloading. Without this guard, the app may hang indefinitely."""
+    """Raised when yt-dlp produces no output during the stall timeout.
+    Detects stuck local processing and prevents the app from hanging indefinitely.
+    """
     pass
 
 
@@ -104,26 +104,15 @@ def _match_error_key(text: str):
     return None
 
 
-# yt-dlp prefixes every one of its own error lines with the extractor name
-# and the video/tweet/etc. id, e.g.:
-#   "ERROR: [youtube:truncated_id] 7o28a2W: Incomplete YouTube ID ..."
-#   "ERROR: [twitter] 2090393104142528953: No video could be found in this tweet"
-# That "[extractor] id:" part is meaningless to an end user; the text after
-# it is usually already a perfectly readable sentence on its own. Rather
-# than hand-writing a friendly message for every possible extractor error
-# (there are hundreds of sites/edge-cases), we strip that prefix and use
-# yt-dlp's own wording as the fallback whenever _match_error_key doesn't
-# recognize the case as one of our known categories.
+# yt-dlp prefixes errors with the extractor name and content ID.
+# This is unnecessary for users, so we strip it and use yt-dlp's
+# original message when _match_error_key finds no known error.
 _YTDLP_ERROR_PREFIX_RE = re.compile(r"^error:\s*(?:\[[^\]]+\]\s*[^:]+:\s*)?", re.IGNORECASE)
 
 
 def _extract_ytdlp_reason(output: str) -> str:
-    """Return the first (de-duplicated) human-readable reason found in
-    yt-dlp's raw "ERROR: ..." lines, with the "[extractor] id:" prefix
-    stripped off. Returns "" if no ERROR line is present — e.g. the raw
-    text was a plain traceback, in which case there's nothing readable to
-    surface and the caller should fall back to a generic message instead.
-    """
+    """Return the first unique human-readable reason from yt-dlp "ERROR: ..." lines,
+    stripping the "[extractor] id:" prefix. Returns "" if none is found."""
     if not output:
         return ""
     for raw_line in output.splitlines():
@@ -174,15 +163,9 @@ def classify_ffmpeg_error(output: str, returncode: int, lang: dict) -> str:
 
 
 def classify_extraction_failure(errors: list, lang: dict, fallback_key: str) -> str:
-    """
-    Called when no client can find a usable format.
-
-    Known errors are translated into clear messages, while unknown errors
-    fall back to yt-dlp's original error text.
-
-    If no error is raised but no compatible format is found, `fallback_key`
-    is used for the generic "invalid link or platform protection" message.
-    """
+    """Translate known format errors to clear messages; otherwise use yt-dlp's
+    original error text. If no error is raised, use `fallback_key` for the
+    generic invalid-link/platform-protection message."""
 
     combined = "\n".join(e for e in errors if e)
 
@@ -218,3 +201,59 @@ def classify_generic_exception(exc: Exception, lang: dict) -> str:
     friendly = lang.get("unexpected_error_message", "An unexpected error occurred. Please try again.")
     technical = str(exc) or exc.__class__.__name__
     return _build_error_message(lang, friendly, technical)
+
+
+def _is_network_error(exc: Exception) -> bool:
+    """True if this exception looks like a lack-of-connectivity failure
+    (DNS resolution, connection refused/reset, timeout, etc.) rather than
+    something else."""
+    text = str(exc).lower()
+    return any(p in text for p in (
+        "getaddrinfo failed", "failed to resolve", "name or service not known",
+        "network is unreachable", "connection refused", "urlopen error",
+        "temporary failure in name resolution", "timed out", "connection reset",
+    ))
+
+
+def _short_detail(exc: Exception, max_len: int = 160) -> str:
+    """Short, length-capped exception text for fallback messages, giving users a concrete error to report."""
+    text = str(exc).strip().replace("\n", " ")
+    if len(text) > max_len:
+        text = text[:max_len - 1].rstrip() + "…"
+    return text or exc.__class__.__name__
+
+
+def classify_ytdlp_download_error(exc: Exception, lang: dict) -> str:
+    """Maps a first-run yt-dlp.exe download error to a user-friendly message.
+    Clearly identifies no internet connection; for other errors (permissions, disk, GitHub, antivirus, etc.),
+    shows the actual error. The download button remains disabled until a successful retry.
+    """
+    if _is_network_error(exc):
+        return _build_error_message(
+            lang, lang.get("error_no_internet", "No internet connection."), str(exc)
+        )
+
+    friendly = lang.get(
+        "ytdlp_setup_failed_generic_message",
+        "Couldn't download yt-dlp. Please try again. Error: {error}",
+    )
+    return _build_error_message(lang, friendly.replace("{error}", _short_detail(exc)), str(exc))
+
+
+def classify_ytdlp_update_error(exc: Exception, lang: dict) -> str:
+    """ Show errors from the yt-dlp.exe update check as a localized NOTICE, not a blocking error.
+    Continue using the existing yt-dlp.exe and keep the download button enabled.
+    If there’s no internet, just inform the user; otherwise, include the actual error message.
+    """
+    if _is_network_error(exc):
+        return _build_error_message(
+            lang, lang.get("ytdlp_update_failed_network_message",
+                            "yt-dlp couldn't be updated (no internet). Using the existing version."),
+            str(exc),
+        )
+
+    friendly = lang.get(
+        "ytdlp_update_failed_generic_message",
+        "yt-dlp couldn't be updated. Using the existing version. Error: {error}",
+    )
+    return _build_error_message(lang, friendly.replace("{error}", _short_detail(exc)), str(exc))

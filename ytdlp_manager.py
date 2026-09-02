@@ -19,6 +19,10 @@ YT_DLP_EXE_NAME = "yt-dlp.exe"
 YT_DLP_DOWNLOAD_URL = "https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp.exe"
 YT_DLP_UPDATE_CHANNEL = "nightly"
 
+# Applies a timeout to yt-dlp.exe downloads and reads.
+# Prevents stalled connections from hanging indefinitely.
+_DOWNLOAD_TIMEOUT = 30  # seconds
+
 # Player clients to try, in order, when extracting video info.
 CLIENT_LIST = ["web_mobile", "web", "ios", "android", "tv"]
 
@@ -43,36 +47,49 @@ def get_ytdlp_path(appdata_dir: str) -> str:
 
 
 def download_ytdlp_exe(dest_path: str, on_progress=None) -> None:
-    """Downloads the latest yt-dlp.exe from GitHub. If on_progress is provided,
-    it reports download progress from 0-100%; otherwise, progress is indeterminate."""
+    """Downloads the latest yt-dlp.exe from GitHub.
+    Reports 0-100% progress if on_progress is provided.
+    Uses a timeout to prevent hanging on connection issues.
+    """
     tmp_path = dest_path + ".tmp"
-
-    def _reporthook(block_num, block_size, total_size):
-        if on_progress and total_size > 0:
-            percent = min(100.0, block_num * block_size * 100 / total_size)
-            on_progress(percent)
-
-    urllib.request.urlretrieve(
-        YT_DLP_DOWNLOAD_URL, tmp_path,
-        reporthook=_reporthook if on_progress else None,
-    )
-    os.replace(tmp_path, dest_path)
-    logger.info("yt-dlp.exe downloaded to %s", dest_path)
+    try:
+        with urllib.request.urlopen(YT_DLP_DOWNLOAD_URL, timeout=_DOWNLOAD_TIMEOUT) as response:
+            total_size = int(response.headers.get("Content-Length", 0) or 0)
+            downloaded = 0
+            with open(tmp_path, "wb") as f:
+                while True:
+                    chunk = response.read(65536)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if on_progress and total_size > 0:
+                        on_progress(min(100.0, downloaded * 100 / total_size))
+        os.replace(tmp_path, dest_path)
+        logger.info("yt-dlp.exe downloaded to %s", dest_path)
+    except Exception:
+        # Don't leave a partial/corrupt .tmp file lying around on failure.
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+        raise
 
 
 def ensure_ytdlp(appdata_dir: str, force_check: bool = False, on_status=None) -> str:
     """
-    Ensures yt-dlp.exe exists and is up to date. On failure, uses the existing
-    copy or downloads one if none exists. The update check runs only
-    once per app session; subsequent calls reuse the result.
-    If provided, on_status reports the download status.
-    Returns the path to the executable.
+    Ensures yt-dlp.exe exists and is up to date.
+    On failure, uses the existing copy or downloads a new one if needed.
+    The update check runs once per app session. on_status(stage, detail) reports download progress or errors.
+    Use classify_ytdlp_download_error() / classify_ytdlp_update_error() for localized messages.
+    Returns the executable path.
     """
     global _session_checked, _cached_exe_path
 
-    def _notify(stage, percent=None):
+    def _notify(stage, detail=None):
         if on_status:
-            on_status(stage, percent)
+            on_status(stage, detail)
 
     exe_path = get_ytdlp_path(appdata_dir)
 
@@ -82,6 +99,10 @@ def ensure_ytdlp(appdata_dir: str, force_check: bool = False, on_status=None) ->
             download_ytdlp_exe(exe_path, on_progress=lambda p: _notify("downloading", p))
         except Exception as e:
             logger.error("Could not download yt-dlp.exe: %s", e)
+            # If exe_path is missing, don't cache it or report it as "ready".
+            # Keep _session_checked False so it retries the download later.
+            _notify("error", e)
+            raise YtDlpError(f"Could not download yt-dlp.exe: {e}") from e
         _session_checked = True
         _cached_exe_path = exe_path
         _notify("ready")
@@ -92,6 +113,7 @@ def ensure_ytdlp(appdata_dir: str, force_check: bool = False, on_status=None) ->
         return _cached_exe_path or exe_path
 
     _notify("checking_update")
+    update_failed_exc = None
     try:
         # Official yt-dlp.exe builds know how to update themselves in place.
         # --update-to nightly (instead of plain -U) both updates AND makes
@@ -103,12 +125,29 @@ def ensure_ytdlp(appdata_dir: str, force_check: bool = False, on_status=None) ->
             capture_output=True, text=True, timeout=30,
         )
         logger.debug("yt-dlp self-update output: %s", result.stdout.strip())
+        if result.returncode != 0:
+            # The subprocess ran, but yt-dlp couldn't complete the update.
+            update_failed_exc = RuntimeError(
+                (result.stdout or "").strip() or f"exit code {result.returncode}"
+            )
     except Exception as e:
-        logger.warning("yt-dlp self-update check failed, continuing with existing copy: %s", e)
+        update_failed_exc = e
 
     _session_checked = True
     _cached_exe_path = exe_path
-    _notify("ready")
+
+    if update_failed_exc is not None:
+        # Not fatal — the existing copy of yt-dlp.exe still works, so we
+        # keep the download button enabled and just surface a brief,
+        # classified heads-up instead of blocking anything.
+        logger.warning(
+            "yt-dlp self-update check failed, continuing with existing copy: %s",
+            update_failed_exc,
+        )
+        _notify("update_failed", update_failed_exc)
+    else:
+        _notify("ready")
+
     return exe_path
 
 

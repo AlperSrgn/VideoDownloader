@@ -12,6 +12,7 @@ from plyer import notification
 from tkinter import Menu, filedialog, messagebox
 
 from downloader import download_video, download_audio
+from error_classifier import classify_ytdlp_download_error, classify_ytdlp_update_error
 from languages import LANGUAGES
 from settings import load_setting, save_setting
 from utils import clean_playlist_url, copy_icons, get_icon_path
@@ -538,6 +539,7 @@ def change_language(selected: str):
         clear_queue_button:           "clear_queue_button",
         queue_add_button:             "add_to_queue_button",
         save_location_button:         "choose_folder_button",
+        ytdlp_retry_button:           "retry_button",
     }
     for widget, key in label_map.items():
         widget.configure(text=current_language[key])
@@ -733,6 +735,22 @@ ytdlp_status_label = ctk.CTkLabel(
 )
 ytdlp_status_label.pack(pady=(0, 5))
 ytdlp_status_label.pack_forget()
+
+# Shown only if the first-run yt-dlp.exe download fails (e.g. no internet).
+# Lets the user retry without having to restart the whole app.
+ytdlp_retry_button = ctk.CTkButton(
+    bottom_panel,
+    command=lambda: retry_ytdlp_setup(),
+    width=140,
+    height=32,
+    font=("Helvetica", 13),
+    fg_color="#565656",
+    hover_color="#787878",
+    text_color="#fbfbfb",
+    corner_radius=5,
+)
+ytdlp_retry_button.pack(pady=(0, 5))
+ytdlp_retry_button.pack_forget()
 
 # Action buttons: "İndir" is always visible,
 # "➕ Sıraya Ekle" is shown only while downloading.
@@ -969,30 +987,74 @@ yt_dlp_version_label = ctk.CTkLabel(
 yt_dlp_version_label.place(relx=1.0, rely=1.0, anchor="se", x=-10, y=-5)
 
 
-def on_ytdlp_status(stage: str, percent):
+def on_ytdlp_status(stage: str, detail):
     """Called (possibly from a background thread) as ensure_ytdlp progresses.
     Shows a status message while yt-dlp.exe is being prepared
-    and locks the download button until it's ready."""
+    and locks the download button until it's ready.
+
+    `detail` is a progress percentage (0-100) for stage="downloading", or the
+    exception that caused the failure for stage="error"."""
     def apply():
         lang = current_language or LANGUAGES.get("Tr", {})
 
         if stage == "ready":
             ytdlp_status_label.pack_forget()
+            ytdlp_retry_button.pack_forget()
             if current_queue_item is None:  # don't steal control from an active download
                 download_button.configure(state="normal")
             return
 
+        if stage == "error":
+            # Classify the yt-dlp.exe download error as connectivity or other.
+            # Include the actual error for other cases. Ensure {error} is always filled.
+            message = classify_ytdlp_download_error(
+                detail if isinstance(detail, Exception) else Exception("unknown"), lang
+            )
+            ytdlp_status_label.configure(text=message)
+            ytdlp_status_label.pack(pady=(0, 5), before=action_buttons_frame)
+            ytdlp_retry_button.configure(text=lang["retry_button"])
+            ytdlp_retry_button.pack(pady=(0, 5), before=action_buttons_frame)
+            download_button.configure(state="disabled")
+            return
+
+        if stage == "update_failed":
+            # Self-update failed later (e.g. no internet/GitHub unavailable) — not fatal.
+            # Existing yt-dlp.exe still works; keep download enabled and show a brief notice.
+            message = classify_ytdlp_update_error(
+                detail if isinstance(detail, Exception) else Exception("unknown"), lang
+            )
+            ytdlp_retry_button.pack_forget()
+            ytdlp_status_label.configure(text=message)
+            ytdlp_status_label.pack(pady=(0, 5), before=action_buttons_frame)
+            if current_queue_item is None:
+                download_button.configure(state="normal")
+            root.after(6000, ytdlp_status_label.pack_forget)
+            return
+
         if stage == "checking_update":
             text = lang["ytdlp_checking_message"]
-        elif stage == "downloading" and percent is not None:
-            text = lang["ytdlp_downloading_message"].replace("{percent}", f"{percent:.0f}")
+        elif stage == "downloading" and detail is not None:
+            text = lang["ytdlp_downloading_message"].replace("{percent}", f"{detail:.0f}")
         else:
             text = lang["ytdlp_downloading_indeterminate_message"]
 
+        ytdlp_retry_button.pack_forget()
         ytdlp_status_label.configure(text=text)
         ytdlp_status_label.pack(pady=(0, 5), before=action_buttons_frame)
 
     root.after(0, apply)
+
+
+def retry_ytdlp_setup():
+    """Called from the retry button after a failed first-run yt-dlp.exe
+    download. Simply re-runs the same setup fetch_ytdlp_version already does
+    at startup — ensure_ytdlp will attempt the download again since it was
+    never marked as successfully checked/cached."""
+    ytdlp_retry_button.pack_forget()
+    fetch_ytdlp_version(
+        lambda t: root.after(0, lambda: yt_dlp_version_label.configure(text=t)),
+        on_status=on_ytdlp_status,
+    )
 
 
 fetch_ytdlp_version(
