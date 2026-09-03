@@ -1,13 +1,16 @@
+import io
 import itertools
 import logging
 import os
 import subprocess
 import sys
 import threading
+import urllib.request
 import webbrowser
 from collections import deque
 
 import customtkinter as ctk
+from PIL import Image
 from plyer import notification
 from tkinter import Menu, filedialog, messagebox
 
@@ -111,6 +114,8 @@ THEMES = {
         "queue_header_label":  {"text_color": "#ebebeb"},
         "queue_list_frame":    {"fg_color": "#3d3d3d"},
         "queue_item_label":    {"text_color": "#ebebeb"},
+        "preview_title_label":    {"text_color": "#ebebeb"},
+        "preview_duration_label": {"text_color": "#bbbbbb"},
     },
     "light": {
         "root":                {"fg_color": "#ebebeb"},
@@ -134,6 +139,8 @@ THEMES = {
         "queue_header_label":  {"text_color": "#333333"},
         "queue_list_frame":    {"fg_color": "#f5f5f5"},
         "queue_item_label":    {"text_color": "#333333"},
+        "preview_title_label":    {"text_color": "#333333"},
+        "preview_duration_label": {"text_color": "#666666"},
     },
 }
 
@@ -339,14 +346,48 @@ def render_queue_list():
         row = ctk.CTkFrame(queue_list_frame, fg_color="transparent")
         row.pack(fill="x", pady=2, padx=2)
 
-        display_url = item["url"] if len(item["url"]) <= 60 else item["url"][:57] + "..."
-        label = ctk.CTkLabel(
-            row,
-            text=f"{idx}. [{quality_label(item['quality_key'])}] {display_url}",
-            anchor="w", font=("Helvetica", 12),
-            text_color=queue_item_text_color,
-        )
-        label.pack(side="left", fill="x", expand=True, padx=(5, 5))
+        preview = item.get("preview")
+
+        # Thumbnail — only shown once fetched; the row just starts without
+        # one and gets it added in when apply_queue_item_preview() re-renders.
+        if preview and preview.get("thumb_image"):
+            thumb_label = ctk.CTkLabel(row, text="", image=preview["thumb_image"], width=60, height=34)
+            thumb_label.image = preview["thumb_image"]  # keep a reference so it isn't GC'd
+            thumb_label.pack(side="left", padx=(5, 8))
+
+        text_frame = ctk.CTkFrame(row, fg_color="transparent")
+        text_frame.pack(side="left", fill="x", expand=True)
+
+        if preview:
+            title = preview["title"]
+            display_title = title if len(title) <= 55 else title[:52] + "..."
+            title_label = ctk.CTkLabel(
+                text_frame, text=f"{idx}. {display_title}",
+                anchor="w", font=("Helvetica", 12, "bold"),
+                text_color=queue_item_text_color, justify="left",
+            )
+            title_label.pack(anchor="w", fill="x")
+
+            subtitle = f"[{quality_label(item['quality_key'])}]"
+            if preview.get("duration"):
+                subtitle += f"  {preview['duration']}"
+            subtitle_label = ctk.CTkLabel(
+                text_frame, text=subtitle,
+                anchor="w", font=("Helvetica", 11),
+                text_color=queue_item_text_color,
+            )
+            subtitle_label.pack(anchor="w", fill="x")
+        else:
+            # Preview not fetched yet (or fetch failed/timed out) — same
+            # plain [quality] url line as before, so nothing looks broken.
+            display_url = item["url"] if len(item["url"]) <= 60 else item["url"][:57] + "..."
+            label = ctk.CTkLabel(
+                text_frame,
+                text=f"{idx}. [{quality_label(item['quality_key'])}] {display_url}",
+                anchor="w", font=("Helvetica", 12),
+                text_color=queue_item_text_color,
+            )
+            label.pack(anchor="w", fill="x")
 
         remove_btn = ctk.CTkButton(
             row, text="✕", width=24, height=24,
@@ -354,6 +395,64 @@ def render_queue_list():
             command=lambda item_id=item["id"]: remove_from_queue(item_id),
         )
         remove_btn.pack(side="right", padx=5)
+
+
+def fetch_queue_item_preview(item: dict):
+    """Fetches title/thumbnail/duration for a just-queued item in the
+    background and, once ready, fills it into that same item's "preview"
+    key and redraws the queue list. Mirrors the URL-box preview panel's
+    fetch (schedule_preview_fetch/apply_preview) but keyed by queue item id
+    instead of by "is this still what's in the URL box" — the item may sit
+    in the queue for a while before its turn comes up."""
+    def worker():
+        from settings import get_appdata_path
+        from ytdlp_manager import get_ytdlp_path, fetch_preview_info
+
+        exe_path = get_ytdlp_path(get_appdata_path())
+        if not os.path.exists(exe_path):
+            return  # yt-dlp isn't ready yet — leave the plain url line as-is
+
+        info = fetch_preview_info(exe_path, item["url"])
+        if info is None:
+            return  # invalid link / unsupported site / no network — leave the plain url line
+
+        thumb_bytes = None
+        thumb_url = info.get("thumbnail")
+        if thumb_url:
+            try:
+                with urllib.request.urlopen(thumb_url, timeout=10) as resp:
+                    thumb_bytes = resp.read()
+            except Exception as e:
+                logger.debug("Queue item thumbnail download failed: %s", e)
+
+        root.after(0, lambda: apply_queue_item_preview(item["id"], info, thumb_bytes))
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
+def apply_queue_item_preview(item_id: int, info: dict, thumb_bytes):
+    # The item may have been removed from the queue, cleared, or already
+    # promoted to "currently downloading" (popped off download_queue) while
+    # this fetch was in flight — in any of those cases there's nothing left
+    # to update.
+    target = next((i for i in download_queue if i["id"] == item_id), None)
+    if target is None:
+        return
+
+    thumb_image = None
+    if thumb_bytes:
+        try:
+            image = Image.open(io.BytesIO(thumb_bytes))
+            thumb_image = ctk.CTkImage(light_image=image, dark_image=image, size=(60, 34))
+        except Exception as e:
+            logger.debug("Queue item thumbnail decode failed: %s", e)
+
+    target["preview"] = {
+        "title": info.get("title") or target["url"],
+        "duration": _format_duration(info.get("duration")),
+        "thumb_image": thumb_image,
+    }
+    render_queue_list()
 
 
 def remove_from_queue(item_id: int):
@@ -393,9 +492,11 @@ def add_to_queue():
         return
 
     url = clean_playlist_url(raw_url)
-    download_queue.append({"id": next(_queue_id_counter), "url": url, "quality_key": quality_key})
+    queued_item = {"id": next(_queue_id_counter), "url": url, "quality_key": quality_key, "preview": None}
+    download_queue.append(queued_item)
     url_entry.delete(0, "end")
     render_queue_list()
+    fetch_queue_item_preview(queued_item)
 
     if current_queue_item is None:
         process_next_in_queue()
@@ -485,6 +586,8 @@ def toggle_theme():
         "quality_options_menu": quality_options_menu,
         "queue_header_label":  queue_header_label,
         "queue_list_frame":    queue_list_frame,
+        "preview_title_label":    preview_title_label,
+        "preview_duration_label": preview_duration_label,
     }
 
     for key, widget in widget_map.items():
@@ -567,6 +670,111 @@ def url_changed(*_):
         pass  # playlist_checkbox.grid()  — playlist support pending
     else:
         playlist_checkbox.grid_remove()
+
+    schedule_preview_fetch()
+
+
+# ---------------------------------------------------------------------------
+# URL preview panel: thumbnail + title + duration, shown a short moment
+# after the user pastes/types a link. This is a nicety, not a core flow —
+# any failure (invalid link, unsupported site, no network) just leaves the
+# panel hidden rather than showing an error.
+# ---------------------------------------------------------------------------
+_PREVIEW_DEBOUNCE_MS = 600  # wait for typing/pasting to settle before fetching
+_preview_after_id = None
+
+
+def schedule_preview_fetch():
+    """Debounced trigger: cancels any pending fetch and hides the current
+    preview immediately (it no longer matches what's in the box), then
+    schedules a new fetch only after typing has paused for a moment —
+    otherwise every keystroke would spawn a yt-dlp process."""
+    global _preview_after_id
+
+    if _preview_after_id is not None:
+        root.after_cancel(_preview_after_id)
+        _preview_after_id = None
+
+    preview_frame.grid_remove()
+
+    raw_url = url_var.get().strip()
+    if not raw_url.startswith(("http://", "https://")):
+        return  # same validity bar as add_to_queue() — don't bother yt-dlp with junk
+
+    _preview_after_id = root.after(_PREVIEW_DEBOUNCE_MS, lambda: start_preview_fetch(raw_url))
+
+
+def start_preview_fetch(url: str):
+    # Show something immediately — yt-dlp's process startup + network
+    # round-trip normally takes a couple of seconds, and a blank panel
+    # until then feels like nothing is happening.
+    preview_thumbnail_label.configure(image=None, text="")
+    preview_title_label.configure(text=current_language["preview_loading_message"])
+    preview_duration_label.configure(text="")
+    preview_frame.grid()
+
+    def worker():
+        from settings import get_appdata_path
+        from ytdlp_manager import get_ytdlp_path, fetch_preview_info
+
+        exe_path = get_ytdlp_path(get_appdata_path())
+        if not os.path.exists(exe_path):
+            # yt-dlp isn't ready yet — the URL entry is disabled during this
+            # window (see on_ytdlp_status), so this shouldn't normally be
+            # reachable, but hide the "Loading..." panel rather than leaving
+            # it stuck if it somehow is.
+            root.after(0, lambda: preview_frame.grid_remove())
+            return
+
+        info = fetch_preview_info(exe_path, url)
+        if info is None:
+            return
+
+        thumb_bytes = None
+        thumb_url = info.get("thumbnail")
+        if thumb_url:
+            try:
+                with urllib.request.urlopen(thumb_url, timeout=10) as resp:
+                    thumb_bytes = resp.read()
+            except Exception as e:
+                logger.debug("Preview thumbnail download failed: %s", e)
+
+        root.after(0, lambda: apply_preview(url, info, thumb_bytes))
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
+def apply_preview(request_url: str, info: dict, thumb_bytes: bytes | None):
+    # The URL box may have changed (or been cleared) while this fetch was
+    # in flight — discard a result that no longer matches what's shown.
+    if url_var.get().strip() != request_url:
+        return
+
+    preview_title_label.configure(text=info.get("title") or "")
+    preview_duration_label.configure(text=_format_duration(info.get("duration")))
+
+    if thumb_bytes:
+        try:
+            image = Image.open(io.BytesIO(thumb_bytes))
+            thumb_image = ctk.CTkImage(light_image=image, dark_image=image, size=(120, 68))
+            preview_thumbnail_label.configure(image=thumb_image, text="")
+            preview_thumbnail_label.image = thumb_image  # keep a reference so it isn't GC'd
+        except Exception as e:
+            logger.debug("Preview thumbnail decode failed: %s", e)
+            preview_thumbnail_label.configure(image=None, text="")
+    else:
+        preview_thumbnail_label.configure(image=None, text="")
+
+    preview_frame.grid()
+
+
+def _format_duration(seconds):
+    if not seconds:
+        return ""
+    seconds = int(seconds)
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
 
 
 # ---------------------------------------------------------------------------
@@ -703,6 +911,34 @@ playlist_checkbox = ctk.CTkCheckBox(
 #playlist_checkbox.grid(row=1, column=3, sticky="w", padx=10, pady=5)
 #playlist_checkbox.grid_remove()
 
+# URL preview panel (shares row 1 with the playlist checkbox above): a
+# thumbnail + title + duration shown a moment after a valid link is
+# pasted/typed. Hidden by default — see schedule_preview_fetch() and
+# apply_preview() above, which fill these widgets in and grid()/grid_remove()
+# this frame.
+preview_frame = ctk.CTkFrame(frame, fg_color="transparent")
+preview_frame.grid(row=1, column=0, columnspan=4, padx=10, pady=5, sticky="w")
+preview_frame.grid_remove()
+
+preview_thumbnail_label = ctk.CTkLabel(preview_frame, text="", width=120, height=68)
+preview_thumbnail_label.pack(side="left", padx=(0, 10))
+
+preview_text_frame = ctk.CTkFrame(preview_frame, fg_color="transparent")
+preview_text_frame.pack(side="left", fill="both", expand=True)
+
+preview_title_label = ctk.CTkLabel(
+    preview_text_frame, text="",
+    font=ctk.CTkFont(size=13, weight="bold"),
+    text_color="#333333", anchor="w", justify="left", wraplength=380,
+)
+preview_title_label.pack(anchor="w")
+
+preview_duration_label = ctk.CTkLabel(
+    preview_text_frame, text="",
+    font=ctk.CTkFont(size=12), text_color="#666666", anchor="w",
+)
+preview_duration_label.pack(anchor="w")
+
 # Queue header + clear button (row 2, hidden until something is queued)
 queue_header_label = ctk.CTkLabel(frame, text="", font=ctk.CTkFont(size=13, weight="bold"))
 queue_header_label.grid(row=2, column=0, columnspan=2, padx=10, pady=(10, 0), sticky="w")
@@ -719,7 +955,7 @@ clear_queue_button.grid(row=2, column=2, columnspan=2, padx=10, pady=(10, 0), st
 clear_queue_button.grid_remove()
 
 # Queue list (waiting items only — the active download shows in the progress area)
-queue_list_frame = ctk.CTkScrollableFrame(frame, width=440, height=90, fg_color="#f5f5f5")
+queue_list_frame = ctk.CTkScrollableFrame(frame, width=440, height=160, fg_color="#f5f5f5")
 queue_list_frame.grid(row=3, column=0, columnspan=4, padx=10, pady=(5, 10), sticky="ew")
 queue_list_frame.grid_remove()
 
@@ -989,8 +1225,11 @@ yt_dlp_version_label.place(relx=1.0, rely=1.0, anchor="se", x=-10, y=-5)
 
 def on_ytdlp_status(stage: str, detail):
     """Called (possibly from a background thread) as ensure_ytdlp progresses.
-    Shows a status message while yt-dlp.exe is being prepared
-    and locks the download button until it's ready.
+    Shows a status message while yt-dlp.exe is being prepared and locks
+    both the download button AND the URL entry until it's ready — pasting
+    a link while yt-dlp.exe doesn't exist yet would otherwise start a
+    preview fetch that can only fail, leaving the preview panel stuck on
+    "Loading..." forever.
 
     `detail` is a progress percentage (0-100) for stage="downloading", or the
     exception that caused the failure for stage="error"."""
@@ -1000,13 +1239,20 @@ def on_ytdlp_status(stage: str, detail):
         if stage == "ready":
             ytdlp_status_label.pack_forget()
             ytdlp_retry_button.pack_forget()
+            url_entry.configure(state="normal")
             if current_queue_item is None:  # don't steal control from an active download
                 download_button.configure(state="normal")
             return
 
         if stage == "error":
-            # Classify the yt-dlp.exe download error as connectivity or other.
-            # Include the actual error for other cases. Ensure {error} is always filled.
+            # First-run download of yt-dlp.exe failed. Classify the actual
+            # exception (no internet vs. everything else) instead of always
+            # assuming it's a connectivity problem — for "everything else"
+            # the raw error is included so the user has something concrete
+            # to report. Route even a non-Exception detail (shouldn't
+            # normally happen) through the same classifier, so the {error}
+            # placeholder in the generic message always gets filled in
+            # rather than showing up literally.
             message = classify_ytdlp_download_error(
                 detail if isinstance(detail, Exception) else Exception("unknown"), lang
             )
@@ -1015,26 +1261,43 @@ def on_ytdlp_status(stage: str, detail):
             ytdlp_retry_button.configure(text=lang["retry_button"])
             ytdlp_retry_button.pack(pady=(0, 5), before=action_buttons_frame)
             download_button.configure(state="disabled")
+            url_entry.configure(state="disabled")
             return
 
         if stage == "update_failed":
-            # Self-update failed later (e.g. no internet/GitHub unavailable) — not fatal.
-            # Existing yt-dlp.exe still works; keep download enabled and show a brief notice.
+            # Self-update check failed on a later launch (e.g. no internet
+            # this time, or GitHub briefly unavailable) — NOT fatal, since
+            # the existing yt-dlp.exe copy still works fine. So the download
+            # button (and the URL entry) stay enabled; we just show a brief,
+            # classified heads-up rather than blocking anything, and hide it
+            # again after a few seconds.
             message = classify_ytdlp_update_error(
                 detail if isinstance(detail, Exception) else Exception("unknown"), lang
             )
             ytdlp_retry_button.pack_forget()
             ytdlp_status_label.configure(text=message)
             ytdlp_status_label.pack(pady=(0, 5), before=action_buttons_frame)
+            url_entry.configure(state="normal")
             if current_queue_item is None:
                 download_button.configure(state="normal")
             root.after(6000, ytdlp_status_label.pack_forget)
             return
 
         if stage == "checking_update":
+            # exe already exists and works (this only runs on 2nd+ launch)
+            # — no need to lock anything, just show the status text.
             text = lang["ytdlp_checking_message"]
-        elif stage == "downloading" and detail is not None:
-            text = lang["ytdlp_downloading_message"].replace("{percent}", f"{detail:.0f}")
+            url_entry.configure(state="normal")
+        elif stage == "downloading":
+            # First run: exe doesn't exist yet. Lock the URL entry too, so a
+            # pasted link can't kick off a preview fetch that's doomed to
+            # fail silently and leave "Loading..." stuck on screen.
+            text = (
+                lang["ytdlp_downloading_message"].replace("{percent}", f"{detail:.0f}")
+                if detail is not None
+                else lang["ytdlp_downloading_indeterminate_message"]
+            )
+            url_entry.configure(state="disabled")
         else:
             text = lang["ytdlp_downloading_indeterminate_message"]
 
@@ -1068,7 +1331,7 @@ fetch_ytdlp_version(
 if dark_mode_enabled.get():
     toggle_theme()
 
-saved_lang = load_setting("language", "En")
+saved_lang = load_setting("language", "Tr")
 language_var.set(saved_lang)
 change_language(saved_lang)
 
