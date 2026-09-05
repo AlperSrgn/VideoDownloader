@@ -26,12 +26,14 @@ from utils import clean_playlist_url, copy_icons, get_icon_path
 # Convert to exe file
 # pyinstaller --onefile --noconsole --add-binary "C:\Users\alper\PycharmProjects\VideoDownloader\.venv\Lib\site-packages\imageio_ffmpeg\binaries\ffmpeg-win-x86_64-v7.1.exe;." --add-data "notificationIcon.ico;." --add-data "previewIcon.ico;." --add-data "appIcon.ico;." --hidden-import=plyer.platforms.win.notification main.py
 
+
+
 # ---------------------------------------------------------------------------
 # App version & "Check for Updates"
 # ---------------------------------------------------------------------------
 # Bump this on every release — must match the Inno Setup AppVersion so the
 # comparison against GitHub's latest release tag is meaningful.
-APP_VERSION = "3.2.0"
+APP_VERSION = "3.2.1"
 
 GITHUB_REPO = "AlperSrgn/VideoDownloader"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
@@ -68,12 +70,14 @@ def check_for_updates():
 
             latest_tag = data.get("tag_name", "")
             assets = data.get("assets", [])
-            # Prefer the installer .exe asset; fall back to the release page
-            # itself if the release has no attached binary for some reason.
+            # Only trust an actual .exe asset — never fall back to the
+            # release page URL, since that's an HTML page, not a binary,
+            # and would fail (or worse, be executed as garbage) if used
+            # as the "installer" to download and run.
             installer_url = next(
                 (a["browser_download_url"] for a in assets
                  if a.get("name", "").lower().endswith(".exe")),
-                data.get("html_url"),
+                None,
             )
             root.after(0, lambda: _on_update_check_done(latest_tag, installer_url))
         except Exception as e:
@@ -86,7 +90,7 @@ def check_for_updates():
 def _on_update_check_done(latest_tag: str, installer_url: str):
     check_updates_button.configure(state="normal")
 
-    if not latest_tag or not installer_url:
+    if not latest_tag:
         _on_update_check_failed()
         return
 
@@ -100,6 +104,19 @@ def _on_update_check_done(latest_tag: str, installer_url: str):
             current_language["update_check_title"],
             current_language["already_latest_message"].replace("{version}", APP_VERSION),
         )
+        return
+
+    if not installer_url:
+        # A newer tag exists on GitHub, but it has no .exe asset attached
+        # (e.g. the release was published without uploading the installer).
+        # Offer the release page instead of failing silently or, worse,
+        # trying to download/run something that isn't a real installer.
+        wants_browser = messagebox.askyesno(
+            current_language["update_available_title"],
+            current_language["update_no_installer_message"].replace("{version}", latest_tag),
+        )
+        if wants_browser:
+            webbrowser.open(f"https://github.com/{GITHUB_REPO}/releases/tag/{latest_tag}")
         return
 
     wants_update = messagebox.askyesno(
@@ -137,6 +154,21 @@ def _download_and_run_installer(installer_url: str):
                     if not chunk:
                         break
                     f.write(chunk)
+
+            # Sanity check before executing anything: a valid Windows PE
+            # binary starts with the "MZ" signature and Inno Setup
+            # installers are never a few KB. Without this check, a bad
+            # download (e.g. an HTML error page saved with a .exe name)
+            # would get handed straight to subprocess.Popen().
+            if not _looks_like_valid_installer(installer_path):
+                try:
+                    os.remove(installer_path)
+                except OSError:
+                    pass
+                root.after(0, _on_update_check_failed)
+                root.after(0, ytdlp_status_label.pack_forget)
+                return
+
             root.after(0, lambda: _launch_installer_and_exit(installer_path))
         except Exception as e:
             logger.debug("Installer download failed: %s", e)
@@ -144,6 +176,20 @@ def _download_and_run_installer(installer_url: str):
             root.after(0, ytdlp_status_label.pack_forget)
 
     threading.Thread(target=worker, daemon=True).start()
+
+
+def _looks_like_valid_installer(path: str, min_size_bytes: int = 500_000) -> bool:
+    """Cheap sanity check: real Windows executables start with the "MZ"
+    signature and Inno Setup installers are always well over 500 KB. This
+    catches e.g. an HTML error/redirect page that got saved with a .exe
+    name, before we ever try to run it."""
+    try:
+        if os.path.getsize(path) < min_size_bytes:
+            return False
+        with open(path, "rb") as f:
+            return f.read(2) == b"MZ"
+    except OSError:
+        return False
 
 
 def _launch_installer_and_exit(installer_path: str):

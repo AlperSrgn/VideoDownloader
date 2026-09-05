@@ -82,6 +82,7 @@ LANGUAGES = {
         "already_latest_message": "En son sürümü kullanıyorsunuz ({version}).",
         "update_available_title": "Güncelleme Mevcut",
         "update_available_message": "Yeni bir sürüm ({version}) mevcut. Şimdi güncellensin mi?",
+        "update_no_installer_message": "Yeni bir sürüm ({version}) mevcut ancak indirilebilir bir kurulum dosyası bulunamadı.\n\nGitHub'daki sürüm sayfası tarayıcıda açılsın mı?",
         "update_check_failed_message": "Güncellemeler kontrol edilemedi.\n\nLütfen internet bağlantınızı kontrol edip tekrar deneyin.",
         "update_downloading_message": "Güncelleme indiriliyor...",
 
@@ -172,6 +173,7 @@ LANGUAGES = {
         "already_latest_message": "You already have the latest version ({version}).",
         "update_available_title": "Update Available",
         "update_available_message": "A new version ({version}) is available. Update now?",
+        "update_no_installer_message": "A new version ({version}) is available, but no downloadable installer was found.\n\nOpen the release page on GitHub in your browser?",
         "update_check_failed_message": "Could not check for updates.\n\nPlease check your internet connection and try again.",
         "update_downloading_message": "Downloading update...",
 
