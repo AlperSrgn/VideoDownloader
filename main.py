@@ -399,12 +399,8 @@ def render_queue_list():
 
 
 def fetch_queue_item_preview(item: dict):
-    """Fetches title/thumbnail/duration for a just-queued item in the
-    background and, once ready, fills it into that same item's "preview"
-    key and redraws the queue list. Mirrors the URL-box preview panel's
-    fetch (schedule_preview_fetch/apply_preview) but keyed by queue item id
-    instead of by "is this still what's in the URL box" — the item may sit
-    in the queue for a while before its turn comes up."""
+    """Fetches preview info in the background and updates the queued item.
+    Uses the item ID, so it can update while waiting in the queue."""
     def worker():
         from settings import get_appdata_path
         from ytdlp_manager import get_ytdlp_path, fetch_preview_info
@@ -727,10 +723,13 @@ def schedule_preview_fetch():
     _preview_after_id = root.after(_PREVIEW_DEBOUNCE_MS, lambda: start_preview_fetch(raw_url))
 
 
-def start_preview_fetch(url: str):
-    # Show something immediately — yt-dlp's process startup + network
-    # round-trip normally takes a couple of seconds, and a blank panel
-    # until then feels like nothing is happening.
+def start_preview_fetch(box_url: str):
+    # Keep the original URL to detect box changes during fetch.
+    # yt-dlp uses the cleaned URL with playlist params stripped, matching
+    # add_to_queue(), so only the single video is resolved.
+    lookup_url = clean_playlist_url(box_url)
+
+    # Show immediate feedback; yt-dlp startup and network requests can take a few seconds.
     preview_thumbnail_label.configure(image=_BLANK_THUMBNAIL, text="")
     preview_title_label.configure(text=current_language["preview_loading_message"])
     preview_duration_label.configure(text="")
@@ -742,14 +741,11 @@ def start_preview_fetch(url: str):
 
         exe_path = get_ytdlp_path(get_appdata_path())
         if not os.path.exists(exe_path):
-            # yt-dlp isn't ready yet — the URL entry is disabled during this
-            # window (see on_ytdlp_status), so this shouldn't normally be
-            # reachable, but hide the "Loading..." panel rather than leaving
-            # it stuck if it somehow is.
+            # yt-dlp isn't ready; the URL field is disabled. Still, don't leave "Loading..." stuck.
             root.after(0, lambda: preview_frame.grid_remove())
             return
 
-        info = fetch_preview_info(exe_path, url)
+        info = fetch_preview_info(exe_path, lookup_url)
         if info is None:
             return
 
@@ -762,7 +758,7 @@ def start_preview_fetch(url: str):
             except Exception as e:
                 logger.debug("Preview thumbnail download failed: %s", e)
 
-        root.after(0, lambda: apply_preview(url, info, thumb_bytes))
+        root.after(0, lambda: apply_preview(box_url, info, thumb_bytes))
 
     threading.Thread(target=worker, daemon=True).start()
 
@@ -934,21 +930,15 @@ playlist_checkbox = ctk.CTkCheckBox(
 #playlist_checkbox.grid(row=1, column=3, sticky="w", padx=10, pady=5)
 #playlist_checkbox.grid_remove()
 
-# URL preview panel (shares row 1 with the playlist checkbox above): a
-# thumbnail + title + duration shown a moment after a valid link is
-# pasted/typed. Hidden by default — see schedule_preview_fetch() and
-# apply_preview() above, which fill these widgets in and grid()/grid_remove()
-# this frame.
+# URL preview: thumbnail + title + duration.
+# Hidden by default; schedule_preview_fetch() and apply_preview()
+# fill and show/hide this frame.
 preview_frame = ctk.CTkFrame(frame, fg_color="transparent")
 preview_frame.grid(row=1, column=0, columnspan=4, padx=10, pady=5, sticky="w")
 preview_frame.grid_remove()
 
-# CTkLabel.configure(image=None) is a no-op in CustomTkinter (see
-# _update_image() in ctk_label.py — neither branch runs when the new image
-# is None), so it can NOT be used to clear a previously-shown thumbnail; the
-# old pixels just stay on screen. A fully transparent placeholder image is
-# used instead everywhere we need to show "no thumbnail" — it's a real
-# CTkImage, so CustomTkinter actually redraws over the old one.
+# configure(image=None) cannot clear a CTkLabel image.
+# Use a transparent CTkImage to properly replace the old thumbnail.
 _BLANK_THUMBNAIL = ctk.CTkImage(
     light_image=Image.new("RGBA", (120, 68), (0, 0, 0, 0)),
     dark_image=Image.new("RGBA", (120, 68), (0, 0, 0, 0)),
@@ -1259,15 +1249,12 @@ yt_dlp_version_label.place(relx=1.0, rely=1.0, anchor="se", x=-10, y=-5)
 
 
 def on_ytdlp_status(stage: str, detail):
-    """Called (possibly from a background thread) as ensure_ytdlp progresses.
-    Shows a status message while yt-dlp.exe is being prepared and locks
-    both the download button AND the URL entry until it's ready — pasting
-    a link while yt-dlp.exe doesn't exist yet would otherwise start a
-    preview fetch that can only fail, leaving the preview panel stuck on
-    "Loading..." forever.
+    """Called during ensure_ytdlp to update preparation status.
+    Locks the download button and URL entry until yt-dlp.exe is ready, preventing
+    failed preview fetches and a stuck "Loading..." state.
 
-    `detail` is a progress percentage (0-100) for stage="downloading", or the
-    exception that caused the failure for stage="error"."""
+    detail is the download percentage (0-100) or the failure exception.
+    """
     def apply():
         lang = current_language or LANGUAGES.get("Tr", {})
 
@@ -1280,14 +1267,8 @@ def on_ytdlp_status(stage: str, detail):
             return
 
         if stage == "error":
-            # First-run download of yt-dlp.exe failed. Classify the actual
-            # exception (no internet vs. everything else) instead of always
-            # assuming it's a connectivity problem — for "everything else"
-            # the raw error is included so the user has something concrete
-            # to report. Route even a non-Exception detail (shouldn't
-            # normally happen) through the same classifier, so the {error}
-            # placeholder in the generic message always gets filled in
-            # rather than showing up literally.
+            # Classifies yt-dlp.exe download errors as connection or other errors,
+            # showing the raw error message for non-connection failures.
             message = classify_ytdlp_download_error(
                 detail if isinstance(detail, Exception) else Exception("unknown"), lang
             )
@@ -1300,12 +1281,9 @@ def on_ytdlp_status(stage: str, detail):
             return
 
         if stage == "update_failed":
-            # Self-update check failed on a later launch (e.g. no internet
-            # this time, or GitHub briefly unavailable) — NOT fatal, since
-            # the existing yt-dlp.exe copy still works fine. So the download
-            # button (and the URL entry) stay enabled; we just show a brief,
-            # classified heads-up rather than blocking anything, and hide it
-            # again after a few seconds.
+            # Self-update check failed on a later launch, but this is not fatal because
+            # the existing yt-dlp.exe still works. Keep download/URL controls enabled,
+            # show a brief classified warning, then hide it after a few seconds.
             message = classify_ytdlp_update_error(
                 detail if isinstance(detail, Exception) else Exception("unknown"), lang
             )
@@ -1366,7 +1344,7 @@ fetch_ytdlp_version(
 if dark_mode_enabled.get():
     toggle_theme()
 
-saved_lang = load_setting("language", "Tr")
+saved_lang = load_setting("language", "En")
 language_var.set(saved_lang)
 change_language(saved_lang)
 
