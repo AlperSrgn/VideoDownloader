@@ -687,7 +687,11 @@ def url_changed(*_):
     else:
         playlist_checkbox.grid_remove()
 
-    schedule_preview_fetch()
+    # NOTE: The preview feature in the URL field has been temporarily disabled
+    # because in some cases it could cause the application to crash or become
+    # unresponsive. The preview in the Queue (fetch_queue_item_preview) is not
+    # affected by this change and uses a separate mechanism.
+    # schedule_preview_fetch()
 
 
 # ---------------------------------------------------------------------------
