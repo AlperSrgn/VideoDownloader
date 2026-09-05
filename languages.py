@@ -76,6 +76,15 @@ LANGUAGES = {
                                   "Bu videoyla ilgili yt-dlp bir sorunla karşılaşmış olabilir. "
                                   "Lütfen tekrar deneyin veya farklı bir video ile test edin.",
 
+        # Güncelleme kontrolü
+        "check_updates_button": "🔄 Güncellemeleri Kontrol Et",
+        "update_check_title": "Güncelleme Kontrolü",
+        "already_latest_message": "En son sürümü kullanıyorsunuz ({version}).",
+        "update_available_title": "Güncelleme Mevcut",
+        "update_available_message": "Yeni bir sürüm ({version}) mevcut. Şimdi güncellensin mi?",
+        "update_check_failed_message": "Güncellemeler kontrol edilemedi.\n\nLütfen internet bağlantınızı kontrol edip tekrar deneyin.",
+        "update_downloading_message": "Güncelleme indiriliyor...",
+
     },
     "En": {
         "download": "⬇ Download",
@@ -156,6 +165,15 @@ LANGUAGES = {
         "error_download_stalled": "The download got stuck and was stopped.\n\n"
                                   "yt-dlp may have run into an issue with this video. "
                                   "Please try again, or test with a different video.",
+
+        # Update check
+        "check_updates_button": "🔄 Check for Updates",
+        "update_check_title": "Check for Updates",
+        "already_latest_message": "You already have the latest version ({version}).",
+        "update_available_title": "Update Available",
+        "update_available_message": "A new version ({version}) is available. Update now?",
+        "update_check_failed_message": "Could not check for updates.\n\nPlease check your internet connection and try again.",
+        "update_downloading_message": "Downloading update...",
 
     }
 }

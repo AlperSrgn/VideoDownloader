@@ -1,10 +1,12 @@
 import io
 import itertools
+import json
 import logging
 import re
 import os
 import subprocess
 import sys
+import tempfile
 import threading
 import urllib.request
 import webbrowser
@@ -23,6 +25,132 @@ from utils import clean_playlist_url, copy_icons, get_icon_path
 
 # Convert to exe file
 # pyinstaller --onefile --noconsole --add-binary "C:\Users\alper\PycharmProjects\VideoDownloader\.venv\Lib\site-packages\imageio_ffmpeg\binaries\ffmpeg-win-x86_64-v7.1.exe;." --add-data "notificationIcon.ico;." --add-data "previewIcon.ico;." --add-data "appIcon.ico;." --hidden-import=plyer.platforms.win.notification main.py
+
+# ---------------------------------------------------------------------------
+# App version & "Check for Updates"
+# ---------------------------------------------------------------------------
+# Bump this on every release — must match the Inno Setup AppVersion so the
+# comparison against GitHub's latest release tag is meaningful.
+APP_VERSION = "3.2.0"
+
+GITHUB_REPO = "AlperSrgn/VideoDownloader"
+GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+
+
+def _parse_version(v: str):
+    """'v3.2.0' / '3.2.0' -> (3, 2, 0) so versions compare numerically
+    instead of as strings (e.g. '3.10.0' > '3.9.0')."""
+    v = v.strip().lstrip("vV")
+    parts = []
+    for p in v.split("."):
+        m = re.match(r"\d+", p)
+        parts.append(int(m.group()) if m else 0)
+    return tuple(parts)
+
+
+def check_for_updates():
+    """Triggered by the sidebar's 'Check for Updates' button. Hits the
+    GitHub releases API in the background so the UI never freezes, then
+    reports back on the main thread via root.after()."""
+    check_updates_button.configure(state="disabled")
+
+    def worker():
+        try:
+            req = urllib.request.Request(
+                GITHUB_LATEST_RELEASE_API,
+                headers={
+                    "Accept": "application/vnd.github+json",
+                    "User-Agent": "VideoDownloader-UpdateCheck",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+
+            latest_tag = data.get("tag_name", "")
+            assets = data.get("assets", [])
+            # Prefer the installer .exe asset; fall back to the release page
+            # itself if the release has no attached binary for some reason.
+            installer_url = next(
+                (a["browser_download_url"] for a in assets
+                 if a.get("name", "").lower().endswith(".exe")),
+                data.get("html_url"),
+            )
+            root.after(0, lambda: _on_update_check_done(latest_tag, installer_url))
+        except Exception as e:
+            logger.debug("Update check failed: %s", e)
+            root.after(0, _on_update_check_failed)
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
+def _on_update_check_done(latest_tag: str, installer_url: str):
+    check_updates_button.configure(state="normal")
+
+    if not latest_tag or not installer_url:
+        _on_update_check_failed()
+        return
+
+    try:
+        is_newer = _parse_version(latest_tag) > _parse_version(APP_VERSION)
+    except Exception:
+        is_newer = latest_tag.lstrip("vV") != APP_VERSION
+
+    if not is_newer:
+        messagebox.showinfo(
+            current_language["update_check_title"],
+            current_language["already_latest_message"].replace("{version}", APP_VERSION),
+        )
+        return
+
+    wants_update = messagebox.askyesno(
+        current_language["update_available_title"],
+        current_language["update_available_message"].replace("{version}", latest_tag),
+    )
+    if wants_update:
+        _download_and_run_installer(installer_url)
+
+
+def _on_update_check_failed():
+    check_updates_button.configure(state="normal")
+    messagebox.showerror(
+        current_language["error_title"],
+        current_language["update_check_failed_message"],
+    )
+
+
+def _download_and_run_installer(installer_url: str):
+    """Downloads the installer .exe to a temp folder, then launches it and
+    closes the app — the same Inno Setup installer already overwrites the
+    existing install in place, matching the manual update flow that was
+    already tested."""
+    check_updates_button.configure(state="disabled")
+    ytdlp_status_label.configure(text=current_language["update_downloading_message"])
+    ytdlp_status_label.pack(pady=(0, 5), before=action_buttons_frame)
+
+    def worker():
+        try:
+            installer_path = os.path.join(tempfile.gettempdir(), "VideoDownloaderSetup_update.exe")
+            req = urllib.request.Request(installer_url, headers={"User-Agent": "VideoDownloader-UpdateCheck"})
+            with urllib.request.urlopen(req, timeout=30) as resp, open(installer_path, "wb") as f:
+                while True:
+                    chunk = resp.read(1024 * 256)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+            root.after(0, lambda: _launch_installer_and_exit(installer_path))
+        except Exception as e:
+            logger.debug("Installer download failed: %s", e)
+            root.after(0, _on_update_check_failed)
+            root.after(0, ytdlp_status_label.pack_forget)
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
+def _launch_installer_and_exit(installer_path: str):
+    subprocess.Popen([installer_path])
+    root.destroy()
+    sys.exit()
+
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -659,6 +787,7 @@ def change_language(selected: str):
         queue_add_button:             "add_to_queue_button",
         save_location_button:         "choose_folder_button",
         ytdlp_retry_button:           "retry_button",
+        check_updates_button:         "check_updates_button",
     }
     for widget, key in label_map.items():
         widget.configure(text=current_language[key])
@@ -687,10 +816,10 @@ def url_changed(*_):
     else:
         playlist_checkbox.grid_remove()
 
-    # NOTE: The preview feature in the URL field has been temporarily disabled
-    # because in some cases it could cause the application to crash or become
-    # unresponsive. The preview in the Queue (fetch_queue_item_preview) is not
-    # affected by this change and uses a separate mechanism.
+    # NOTE: URL alanındaki önizleme özelliği bazı durumlarda uygulamanın
+    # çökmesine/yanıt vermemesine neden olduğu için geçici olarak devre
+    # dışı bırakıldı. Queue'daki önizleme (fetch_queue_item_preview) bu
+    # değişiklikten etkilenmez, ayrı bir mekanizma kullanır.
     # schedule_preview_fetch()
 
 
@@ -882,7 +1011,7 @@ def preview_notification():
 # Build UI
 # ---------------------------------------------------------------------------
 root = ctk.CTk()
-root.title("Video Downloader")
+root.title(f"Video Downloader v{APP_VERSION}")
 root.geometry("800x600")
 root.iconbitmap(APP_ICON)
 
@@ -1217,6 +1346,18 @@ save_location_value_label = ctk.CTkLabel(
 )
 save_location_value_label.pack(anchor="w", pady=(2, 10), padx=10, fill="x")
 update_save_location_label()
+
+# Check for Updates button
+check_updates_button = ctk.CTkButton(
+    sidebar_content,
+    command=check_for_updates,
+    font=("Helvetica", 13),
+    fg_color="#4c6a8c",
+    hover_color="#3b556f",
+    text_color="#fbfbfb",
+    height=30,
+)
+check_updates_button.pack(anchor="w", pady=(0, 10), padx=10, fill="x")
 
 # Preview notification button
 preview_notification_button = ctk.CTkButton(
