@@ -170,7 +170,7 @@ pyinstaller --onefile --noconsole --add-binary "C:\path\to\.venv\Lib\site-packag
 
 ![Dark mode](https://github.com/user-attachments/assets/ae49438b-c9c5-45a4-a945-3aa16c7eb6b5)
 
-![Sidebar](https://github.com/user-attachments/assets/ea224b48-ee9b-4e57-885b-144dd9548aff)
+![Sidebar](https://github.com/user-attachments/assets/2d569a0a-c3ce-4087-84a7-88996baf44b9)
 
 
 
