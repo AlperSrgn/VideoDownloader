@@ -1,6 +1,7 @@
 import io
 import itertools
 import logging
+import re
 import os
 import subprocess
 import sys
@@ -467,6 +468,18 @@ def clear_queue():
     render_queue_list()
 
 
+# Known YouTube page types that list many videos rather than one: search
+# results, channel pages, bare playlist pages, hashtag pages. This app only
+# supports single-video download — handing one of these to yt-dlp makes it
+# try to extract EVERY entry (full webpage + format lookup per video),
+# which can take many minutes with zero incremental feedback and looks
+# exactly like the app has frozen. Checked upfront (in both the preview
+# fetch and add_to_queue) so yt-dlp is never even touched with them.
+_YOUTUBE_LISTING_URL_PATTERN = re.compile(
+    r"youtube\.com/(?:results\?|channel/|c/|@|playlist\?|hashtag/)", re.IGNORECASE
+)
+
+
 def add_to_queue():
     raw_url = url_entry.get().strip()
     if not raw_url:
@@ -480,6 +493,13 @@ def add_to_queue():
         messagebox.showwarning(
             current_language["warning_title"],
             current_language["invalid_url_warning"],
+        )
+        return
+
+    if _YOUTUBE_LISTING_URL_PATTERN.search(raw_url):
+        messagebox.showwarning(
+            current_language["warning_title"],
+            current_language["not_a_video_url_warning"],
         )
         return
 
@@ -700,6 +720,9 @@ def schedule_preview_fetch():
     raw_url = url_var.get().strip()
     if not raw_url.startswith(("http://", "https://")):
         return  # same validity bar as add_to_queue() — don't bother yt-dlp with junk
+
+    if _YOUTUBE_LISTING_URL_PATTERN.search(raw_url):
+        return  # search-results/channel/playlist page — see add_to_queue() for why
 
     _preview_after_id = root.after(_PREVIEW_DEBOUNCE_MS, lambda: start_preview_fetch(raw_url))
 
