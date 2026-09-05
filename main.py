@@ -708,7 +708,7 @@ def start_preview_fetch(url: str):
     # Show something immediately — yt-dlp's process startup + network
     # round-trip normally takes a couple of seconds, and a blank panel
     # until then feels like nothing is happening.
-    preview_thumbnail_label.configure(image=None, text="")
+    preview_thumbnail_label.configure(image=_BLANK_THUMBNAIL, text="")
     preview_title_label.configure(text=current_language["preview_loading_message"])
     preview_duration_label.configure(text="")
     preview_frame.grid()
@@ -761,9 +761,9 @@ def apply_preview(request_url: str, info: dict, thumb_bytes: bytes | None):
             preview_thumbnail_label.image = thumb_image  # keep a reference so it isn't GC'd
         except Exception as e:
             logger.debug("Preview thumbnail decode failed: %s", e)
-            preview_thumbnail_label.configure(image=None, text="")
+            preview_thumbnail_label.configure(image=_BLANK_THUMBNAIL, text="")
     else:
-        preview_thumbnail_label.configure(image=None, text="")
+        preview_thumbnail_label.configure(image=_BLANK_THUMBNAIL, text="")
 
     preview_frame.grid()
 
@@ -920,7 +920,19 @@ preview_frame = ctk.CTkFrame(frame, fg_color="transparent")
 preview_frame.grid(row=1, column=0, columnspan=4, padx=10, pady=5, sticky="w")
 preview_frame.grid_remove()
 
-preview_thumbnail_label = ctk.CTkLabel(preview_frame, text="", width=120, height=68)
+# CTkLabel.configure(image=None) is a no-op in CustomTkinter (see
+# _update_image() in ctk_label.py — neither branch runs when the new image
+# is None), so it can NOT be used to clear a previously-shown thumbnail; the
+# old pixels just stay on screen. A fully transparent placeholder image is
+# used instead everywhere we need to show "no thumbnail" — it's a real
+# CTkImage, so CustomTkinter actually redraws over the old one.
+_BLANK_THUMBNAIL = ctk.CTkImage(
+    light_image=Image.new("RGBA", (120, 68), (0, 0, 0, 0)),
+    dark_image=Image.new("RGBA", (120, 68), (0, 0, 0, 0)),
+    size=(120, 68),
+)
+
+preview_thumbnail_label = ctk.CTkLabel(preview_frame, text="", image=_BLANK_THUMBNAIL, width=120, height=68)
 preview_thumbnail_label.pack(side="left", padx=(0, 10))
 
 preview_text_frame = ctk.CTkFrame(preview_frame, fg_color="transparent")
