@@ -17,6 +17,7 @@ actual download/merge process handling.
 import errno
 import logging
 import re
+import socket
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +71,38 @@ def _build_error_message(lang: dict, friendly_text: str, technical_detail: str =
     return friendly_text
 
 
+_CONNECTIVITY_CHECK_TIMEOUT = 3  # seconds
+
+def _has_internet_connection() -> bool:
+    """Quick check to distinguish DNS-resolution failures:
+    A mistyped/nonexistent domain (e.g. "a.com") can produce the same
+    "getaddrinfo failed" error as an offline machine, so the error text alone
+    isn't enough.
+    Connects directly to Google's DNS server by IP (8.8.8.8:53), avoiding DNS
+    lookup. If offline, it fails almost instantly, adding negligible delay.
+    """
+    try:
+        socket.create_connection(("8.8.8.8", 53), timeout=_CONNECTIVITY_CHECK_TIMEOUT).close()
+        return True
+    except OSError:
+        return False
+
+
+# DNS-resolution failures need the live check above before they can be
+# classified — see _has_internet_connection(). Other network errors
+# (refused/timed-out connections, "network unreachable") are kept
+# separate: these come back from a host that DID resolve, so they're
+# reliable "no internet / connection problem" signals on their own.
+_DNS_FAILURE_PATTERNS = (
+    "getaddrinfo failed", "failed to resolve", "name or service not known",
+    "temporary failure in name resolution",
+)
+_OTHER_NETWORK_ERROR_PATTERNS = (
+    "network is unreachable", "connection refused",
+    "urlopen error", "connection timed out",
+)
+
+
 def _match_error_key(text: str):
     """Return the lang-dict key that best describes this raw yt-dlp/ffmpeg
     error text (lowercased), or None if nothing matches. Shared by every
@@ -79,11 +112,11 @@ def _match_error_key(text: str):
     if not text:
         return None
 
-    if any(p in text for p in (
-        "getaddrinfo failed", "failed to resolve", "name or service not known",
-        "network is unreachable", "connection refused", "urlopen error",
-        "temporary failure in name resolution", "connection timed out",
-    )):
+    if any(p in text for p in _DNS_FAILURE_PATTERNS):
+        if _has_internet_connection():
+            return "error_unsupported_url"
+        return "error_no_internet"
+    if any(p in text for p in _OTHER_NETWORK_ERROR_PATTERNS):
         return "error_no_internet"
     if "sign in to confirm your age" in text or "age-restricted" in text:
         return "error_age_restricted"
@@ -95,6 +128,8 @@ def _match_error_key(text: str):
     if ("video unavailable" in text or "no longer available" in text
             or "content isn't available" in text or "404" in text):
         return "error_video_not_found"
+    if "unsupported url" in text:
+        return "error_unsupported_url"
     if "requested format is not available" in text or "no video formats found" in text:
         return "error_format_not_found"
     if "no space left on device" in text:

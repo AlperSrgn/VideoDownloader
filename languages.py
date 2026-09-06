@@ -64,6 +64,7 @@ LANGUAGES = {
         # Hata sınıflandırma
         "error_no_internet": "İnternet bağlantısı yok.\n\nLütfen bağlantınızı kontrol edip tekrar deneyin.",
         "error_video_not_found": "Video bulunamadı.\n\nBağlantı yanlış olabilir veya video kaldırılmış olabilir.",
+        "error_unsupported_url": "Bu bağlantı desteklenen bir video sitesine ait değil.\n\nLütfen desteklenen bir platformdan tek bir video bağlantısı girin.",
         "error_video_private": "Bu video gizli (private).\n\nGizli videolar indirilemez.",
         "error_age_restricted": "Bu video için yaş doğrulaması gerekiyor.\n\nYaş kısıtlaması olan videolar bu uygulamayla indirilemez.",
         "error_access_blocked": "YouTube bu isteği engelledi (bot koruması ya da çok sık istek).\n\nBir süre bekleyip tekrar deneyin.",
@@ -155,6 +156,7 @@ LANGUAGES = {
         # Error classification
         "error_no_internet": "No internet connection.\n\nPlease check your connection and try again.",
         "error_video_not_found": "Video not found.\n\nThe link may be wrong, or the video may have been removed.",
+        "error_unsupported_url": "This link isn't from a supported video site.\n\nPlease enter a link to a single video from a supported platform.",
         "error_video_private": "This video is private.\n\nPrivate videos can't be downloaded.",
         "error_age_restricted": "This video requires age verification.\n\nAge-restricted videos can't be downloaded with this app.",
         "error_access_blocked": "YouTube blocked this request (bot protection or rate limiting).\n\nWait a while and try again.",

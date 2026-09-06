@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import urllib.parse
 import urllib.request
 import webbrowser
 from collections import deque
@@ -33,7 +34,7 @@ from utils import clean_playlist_url, copy_icons, get_icon_path
 # ---------------------------------------------------------------------------
 # Bump this on every release — must match the Inno Setup AppVersion so the
 # comparison against GitHub's latest release tag is meaningful.
-APP_VERSION = "3.2.1"
+APP_VERSION = "3.2.2"
 
 GITHUB_REPO = "AlperSrgn/VideoDownloader"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
@@ -649,27 +650,51 @@ _YOUTUBE_LISTING_URL_PATTERN = re.compile(
     r"youtube\.com/(?:results\?|channel/|c/|@|playlist\?|hashtag/)", re.IGNORECASE
 )
 
+# Basic domain-shape check (labels separated by dots, no spaces/invalid
+# chars) — catches things like "http://asdf" (no host) or a pasted string
+# with a typo that still happens to start with "http://".
+_HOSTNAME_PATTERN = re.compile(
+    r"^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?"
+    r"(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$"
+)
+
+
+def validate_video_url(raw_url: str) -> str | None:
+    """Shared URL validation for add_to_queue() and preview.
+    Returns None if valid, otherwise the language key for the warning.
+
+    Only checks URL structure (scheme/host/listing patterns);
+    does not verify reachability or yt-dlp support.
+    """
+
+    if not raw_url:
+        return "empty_url_warning"
+
+    if any(ch.isspace() for ch in raw_url):
+        return "invalid_url_warning"
+
+    parsed = urllib.parse.urlparse(raw_url)
+
+    if parsed.scheme not in ("http", "https"):
+        return "invalid_url_warning"
+
+    hostname = parsed.hostname or ""
+    if not hostname or not _HOSTNAME_PATTERN.match(hostname):
+        return "invalid_url_warning"
+
+    if _YOUTUBE_LISTING_URL_PATTERN.search(raw_url):
+        return "not_a_video_url_warning"
+
+    return None
+
 
 def add_to_queue():
     raw_url = url_entry.get().strip()
-    if not raw_url:
+    error_key = validate_video_url(raw_url)
+    if error_key:
         messagebox.showwarning(
             current_language["warning_title"],
-            current_language["empty_url_warning"],
-        )
-        return
-
-    if not raw_url.startswith(("http://", "https://")):
-        messagebox.showwarning(
-            current_language["warning_title"],
-            current_language["invalid_url_warning"],
-        )
-        return
-
-    if _YOUTUBE_LISTING_URL_PATTERN.search(raw_url):
-        messagebox.showwarning(
-            current_language["warning_title"],
-            current_language["not_a_video_url_warning"],
+            current_language[error_key],
         )
         return
 
@@ -862,10 +887,9 @@ def url_changed(*_):
     else:
         playlist_checkbox.grid_remove()
 
-    # NOTE: URL alanındaki önizleme özelliği bazı durumlarda uygulamanın
-    # çökmesine/yanıt vermemesine neden olduğu için geçici olarak devre
-    # dışı bırakıldı. Queue'daki önizleme (fetch_queue_item_preview) bu
-    # değişiklikten etkilenmez, ayrı bir mekanizma kullanır.
+    # NOTE: Preview in the URL field is temporarily disabled as it may
+    # cause the app to freeze or crash in some cases. Queue previews
+    # (fetch_queue_item_preview) are unaffected and use a separate mechanism.
     # schedule_preview_fetch()
 
 
@@ -893,11 +917,8 @@ def schedule_preview_fetch():
     preview_frame.grid_remove()
 
     raw_url = url_var.get().strip()
-    if not raw_url.startswith(("http://", "https://")):
+    if validate_video_url(raw_url) is not None:
         return  # same validity bar as add_to_queue() — don't bother yt-dlp with junk
-
-    if _YOUTUBE_LISTING_URL_PATTERN.search(raw_url):
-        return  # search-results/channel/playlist page — see add_to_queue() for why
 
     _preview_after_id = root.after(_PREVIEW_DEBOUNCE_MS, lambda: start_preview_fetch(raw_url))
 
