@@ -460,7 +460,7 @@ def download_video(
             return find_suitable_format(formats, video_height)
 
         extraction_errors = []
-        info, client, (video_format, audio_format) = find_info_with_compatible_format(
+        info, client, result = find_info_with_compatible_format(
             exe_path, url, selector, collected_errors=extraction_errors
         )
 
@@ -469,6 +469,8 @@ def download_video(
                 extraction_errors, lang, fallback_key="download_video_format_error"
             ))
             return
+
+        video_format, audio_format = result
 
         logger.info(
             "Selected client=%s video_format=%s (vcodec=%s, tbr=%s) "
@@ -633,15 +635,17 @@ def download_audio(
             return find_suitable_audio_format(formats)
 
         extraction_errors = []
-        info, client, (chosen_audio,) = find_info_with_compatible_format(
+        info, client, result = find_info_with_compatible_format(
             exe_path, url, selector, collected_errors=extraction_errors
         )
 
-        if not info or not chosen_audio:
+        if not info:
             on_error(classify_extraction_failure(
                 extraction_errors, lang, fallback_key="download_video_format_error"
             ))
             return
+
+        (chosen_audio,) = result
 
         logger.info(
             "Selected client=%s audio_format=%s (acodec=%s, abr=%s, language=%s)",

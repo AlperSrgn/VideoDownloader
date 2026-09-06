@@ -260,7 +260,7 @@ def fetch_preview_info(exe_path: str, url: str) -> dict | None:
 def find_info_with_compatible_format(exe_path: str, url: str, format_selector, collected_errors=None):
     """
     Tries each client in CLIENT_LIST until format_selector(formats) succeeds.
-    Returns (info, client, result) on success, or (None, None, (None, None)) if all clients fail.
+    Returns (info, client, result) on success, or (None, None, None) if all clients fail.
     If collected_errors is provided,
     it stores each YtDlpError message so the caller can identify the actual failure reason
     instead of showing a generic “no compatible format” error.
@@ -286,4 +286,4 @@ def find_info_with_compatible_format(exe_path: str, url: str, format_selector, c
             client, len(formats),
         )
 
-    return None, None, (None, None)
+    return None, None, None
