@@ -7,9 +7,9 @@
 [![Windows](https://img.shields.io/badge/Windows-10%2B-0078D4?style=for-the-badge&logo=windows)](https://github.com/AlperSrgn/VideoDownloader)
 [![Download](https://img.shields.io/badge/Download-Latest%20Version-brightgreen?style=for-the-badge)](https://github.com/AlperSrgn/VideoDownloader#installation)
 
-A simple and fast Windows desktop application powered by yt-dlp for downloading videos and audio from supported websites.
+A simple and fast **Windows desktop application** for downloading videos and audio from supported websites.
 
-Video Downloader uses `yt-dlp.exe` for downloads and FFmpeg for media processing, with automatic yt-dlp updates.
+>🪟 **Windows 10+ only** — macOS is not currently supported.
 
 # Features
 
@@ -23,11 +23,10 @@ Video Downloader uses `yt-dlp.exe` for downloads and FFmpeg for media processing
 - 📥 **Download queue** — add multiple URLs with different quality/format settings and download them sequentially
 - 🌙 **Dark mode**
 - 🔔 **System notifications** with notification preview
-- 🔗 Download videos directly from their URLs
-- 🎯 Automatically selects the best available format according to the selected quality
-- 🔄 Automatically keeps `yt-dlp` up to date
+- 🎯 **Automatically selects the best available format** according to the selected quality
+- 🔄 **Automatically keeps `yt-dlp` up to date**
 
-Built with [yt-dlp](https://github.com/yt-dlp/yt-dlp) and FFmpeg.
+Built with [yt-dlp](https://github.com/yt-dlp/yt-dlp) and [FFmpeg](https://github.com/imageio/imageio-ffmpeg).
 
 ---
 
