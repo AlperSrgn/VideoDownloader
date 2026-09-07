@@ -34,7 +34,7 @@ from utils import clean_playlist_url, copy_icons, get_icon_path
 # ---------------------------------------------------------------------------
 # Bump this on every release — must match the Inno Setup AppVersion so the
 # comparison against GitHub's latest release tag is meaningful.
-APP_VERSION = "3.2.2"
+APP_VERSION = "3.2.3"
 
 GITHUB_REPO = "AlperSrgn/VideoDownloader"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
@@ -194,7 +194,11 @@ def _looks_like_valid_installer(path: str, min_size_bytes: int = 500_000) -> boo
 
 
 def _launch_installer_and_exit(installer_path: str):
-    subprocess.Popen([installer_path])
+    clean_env = {
+        k: v for k, v in os.environ.items()
+        if not k.startswith("_PYI_") and k != "_MEIPASS2"
+    }
+    subprocess.Popen([installer_path], env=clean_env)
     root.destroy()
     sys.exit()
 
