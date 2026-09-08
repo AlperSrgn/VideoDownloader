@@ -51,11 +51,23 @@ def _parse_version(v: str):
     return tuple(parts)
 
 
+def _set_update_lock(state: str):
+    """Disable/enable the buttons that must stay locked while checking for
+    or installing an update. download_button only re-enables if nothing
+    else (e.g. an active download) still needs it disabled."""
+    check_updates_button.configure(state=state)
+    uninstall_button.configure(state=state)
+    if state == "disabled":
+        download_button.configure(state="disabled")
+    elif current_queue_item is None:
+        download_button.configure(state="normal")
+
+
 def check_for_updates():
     """Triggered by the sidebar's 'Check for Updates' button. Hits the
     GitHub releases API in the background so the UI never freezes, then
     reports back on the main thread via root.after()."""
-    check_updates_button.configure(state="disabled")
+    _set_update_lock("disabled")
 
     def worker():
         try:
@@ -89,7 +101,7 @@ def check_for_updates():
 
 
 def _on_update_check_done(latest_tag: str, installer_url: str):
-    check_updates_button.configure(state="normal")
+    _set_update_lock("normal")
 
     if not latest_tag:
         _on_update_check_failed()
@@ -129,7 +141,7 @@ def _on_update_check_done(latest_tag: str, installer_url: str):
 
 
 def _on_update_check_failed():
-    check_updates_button.configure(state="normal")
+    _set_update_lock("normal")
     messagebox.showerror(
         current_language["error_title"],
         current_language["update_check_failed_message"],
@@ -141,7 +153,7 @@ def _download_and_run_installer(installer_url: str):
     closes the app — the same Inno Setup installer already overwrites the
     existing install in place, matching the manual update flow that was
     already tested."""
-    check_updates_button.configure(state="disabled")
+    _set_update_lock("disabled")
     ytdlp_status_label.configure(text=current_language["update_downloading_message"])
     ytdlp_status_label.pack(pady=(0, 5), before=action_buttons_frame)
 
@@ -359,7 +371,7 @@ save_setting("save_location", save_location)
 # UI helpers
 # ---------------------------------------------------------------------------
 def set_widgets_state(state: str):
-    for w in [uninstall_button]:
+    for w in [uninstall_button, check_updates_button]:
         w.configure(state=state)
 
 
