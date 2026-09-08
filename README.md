@@ -9,7 +9,7 @@
 
 A simple and fast **Windows desktop application** for downloading videos and audio from supported websites.
 
->🪟 **Windows 10+ only** — macOS is not currently supported.
+>🪟 **Windows 10+ only** — macOS and Linux are not currently supported.
 
 # Features
 
