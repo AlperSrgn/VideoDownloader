@@ -34,7 +34,7 @@ from utils import clean_playlist_url, copy_icons, get_icon_path
 # ---------------------------------------------------------------------------
 # Bump this on every release — must match the Inno Setup AppVersion so the
 # comparison against GitHub's latest release tag is meaningful.
-APP_VERSION = "3.2.3"
+APP_VERSION = "3.2.4"
 
 GITHUB_REPO = "AlperSrgn/VideoDownloader"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
@@ -1130,7 +1130,7 @@ url_entry.grid(row=0, column=3, padx=10, pady=5)
 url_entry.bind("<Button-3>", lambda e: show_entry_context_menu(e, url_entry))
 
 # Playlist checkbox (hidden until list= detected)
-frame.grid_rowconfigure(1, minsize=50)
+frame.grid_rowconfigure(1, minsize=0)
 playlist_checkbox_var = ctk.BooleanVar()
 playlist_checkbox = ctk.CTkCheckBox(
     frame,
@@ -1182,7 +1182,7 @@ preview_duration_label.pack(anchor="w")
 
 # Queue header + clear button (row 2, hidden until something is queued)
 queue_header_label = ctk.CTkLabel(frame, text="", font=ctk.CTkFont(size=13, weight="bold"))
-queue_header_label.grid(row=2, column=0, columnspan=2, padx=10, pady=(10, 0), sticky="w")
+queue_header_label.grid(row=2, column=0, columnspan=2, padx=10, pady=(4, 0), sticky="w")
 queue_header_label.grid_remove()
 
 clear_queue_button = ctk.CTkButton(
@@ -1192,12 +1192,12 @@ clear_queue_button = ctk.CTkButton(
     font=("Helvetica", 11),
     fg_color="#ebebeb", hover_color="#dddddd", text_color="#d9534f",
 )
-clear_queue_button.grid(row=2, column=2, columnspan=2, padx=10, pady=(10, 0), sticky="e")
+clear_queue_button.grid(row=2, column=2, columnspan=2, padx=10, pady=(1, 0), sticky="e")
 clear_queue_button.grid_remove()
 
 # Queue list (waiting items only — the active download shows in the progress area)
 queue_list_frame = ctk.CTkScrollableFrame(frame, width=440, height=160, fg_color="#f5f5f5")
-queue_list_frame.grid(row=3, column=0, columnspan=4, padx=10, pady=(5, 10), sticky="ew")
+queue_list_frame.grid(row=3, column=0, columnspan=4, padx=10, pady=(2, 10), sticky="ew")
 queue_list_frame.grid_remove()
 
 # Bottom action panel: fixed to the bottom with place().
