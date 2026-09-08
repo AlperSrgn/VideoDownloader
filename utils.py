@@ -16,24 +16,46 @@ logger = logging.getLogger(__name__)
 # Icons
 # ---------------------------------------------------------------------------
 
+ICONS_SUBDIR = "icons"
+
+
+def _icons_dir() -> str:
+    path = os.path.join(get_appdata_path(), ICONS_SUBDIR)
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
 def copy_icons() -> None:
-    """Copy icon files to AppData folder on first run."""
-    dst_dir = get_appdata_path()
-    src_dir = os.path.dirname(os.path.abspath(__file__))
+    """Copies icons to AppData/icons on first run and migrates icons from the old location.
+    """
+    dst_dir = _icons_dir()
+    src_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons")
+    old_dir = get_appdata_path()
     icons = ["notificationIcon.ico", "previewIcon.ico", "appIcon.ico"]
 
     for icon in icons:
         dst = os.path.join(dst_dir, icon)
+        if os.path.exists(dst):
+            continue
+
+        old_path = os.path.join(old_dir, icon)
+        try:
+            if os.path.exists(old_path):
+                shutil.move(old_path, dst)
+                continue
+        except Exception as e:
+            logger.error("Icon migration error (%s): %s", icon, e)
+
         src = os.path.join(src_dir, icon)
         try:
-            if not os.path.exists(dst) and os.path.exists(src):
+            if os.path.exists(src):
                 shutil.copy2(src, dst)
         except Exception as e:
             logger.error("Icon copy error (%s): %s", icon, e)
 
 
 def get_icon_path(name: str) -> str:
-    return os.path.join(get_appdata_path(), name)
+    return os.path.join(_icons_dir(), name)
 
 
 # ---------------------------------------------------------------------------
