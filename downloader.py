@@ -174,6 +174,20 @@ _PROGRESS_RE = re.compile(
 _UNIT_TO_MB = {"B": 1 / (1024 * 1024), "KiB": 1 / 1024, "MiB": 1, "GiB": 1024}
 
 
+def _known_size_mb(fmt: dict):
+    """Real size (in MB) from yt-dlp's format metadata, if it has one.
+
+    Prefers the exact 'filesize'; falls back to 'filesize_approx' (yt-dlp's
+    own one-time estimate from bitrate * duration, which is stable — unlike
+    the live per-fragment estimate --newline prints during the download).
+    Returns None if neither is present (e.g. some DASH formats).
+    """
+    size_bytes = fmt.get("filesize") or fmt.get("filesize_approx")
+    if not size_bytes:
+        return None
+    return size_bytes / (1024 * 1024)
+
+
 def _parse_progress_line(line: str):
     """Return (percent, downloaded_mb, total_mb, eta) or None if not a progress line."""
     match = _PROGRESS_RE.search(line)
@@ -190,10 +204,16 @@ def _parse_progress_line(line: str):
     return percent, downloaded_mb, total_mb, eta
 
 
-def _run_download(cmd, on_progress, on_cancel_check, cancel_message, stall_message=None):
+def _run_download(cmd, on_progress, on_cancel_check, cancel_message, stall_message=None,
+                   known_total_mb=None):
     """
     Runs the yt-dlp.exe download, reports progress, and stops if cancelled.
     Cancellation is checked periodically even without output.
+
+    Known_total_mb: Pass the real file size when available to keep the total fixed.
+    Without it, yt-dlp may re-estimate fragmented downloads on each fragment,
+    causing the displayed total to jump. If unavailable, use a non-decreasing
+    estimate so the total never shrinks due to estimation fluctuations.
 
     Also guards against yt-dlp getting stuck in a local infinite loop for a
     specific video (e.g. while solving YouTube's nsig challenge) — in that
@@ -224,6 +244,11 @@ def _run_download(cmd, on_progress, on_cancel_check, cancel_message, stall_messa
     # Limit the output to prevent unbounded memory usage.
     output_lines = deque(maxlen=200)
     last_output_time = time.monotonic()
+
+    # Tracks the total size reported to on_progress.
+    # Starts with known_total_mb if available, otherwise yt-dlp's estimate;
+    # only increases, so it never goes backwards..
+    stable_total_mb = known_total_mb
 
     try:
         while True:
@@ -262,7 +287,24 @@ def _run_download(cmd, on_progress, on_cancel_check, cancel_message, stall_messa
             output_lines.append(line)
             parsed = _parse_progress_line(line)
             if parsed:
-                on_progress(*parsed)
+                percent, downloaded_mb, parsed_total_mb, eta = parsed
+
+                if known_total_mb is not None:
+                    # We already trust the format's real filesize — ignore
+                    # yt-dlp's per-fragment re-estimate entirely.
+                    effective_total_mb = known_total_mb
+                elif parsed_total_mb and (
+                    stable_total_mb is None or parsed_total_mb > stable_total_mb
+                ):
+                    stable_total_mb = parsed_total_mb
+                    effective_total_mb = stable_total_mb
+                else:
+                    effective_total_mb = stable_total_mb or parsed_total_mb
+
+                if effective_total_mb:
+                    downloaded_mb = effective_total_mb * (percent / 100)
+
+                on_progress(percent, downloaded_mb, effective_total_mb, eta)
     finally:
         if process.stdout:
             process.stdout.close()
@@ -518,10 +560,12 @@ def download_video(
             _run_download(
                 video_cmd, _video_phase_progress, on_cancel_check,
                 lang["download_canceled_message"], lang["error_download_stalled"],
+                known_total_mb=_known_size_mb(video_format),
             )
             _run_download(
                 audio_cmd, _audio_phase_progress, on_cancel_check,
                 lang["download_canceled_message"], lang["error_download_stalled"],
+                known_total_mb=_known_size_mb(audio_format),
             )
         except DownloadCancelled as e:
             on_error(str(e))
@@ -678,6 +722,7 @@ def download_audio(
             _run_download(
                 cmd, on_progress, on_cancel_check,
                 lang["download_canceled_message"], lang["error_download_stalled"],
+                known_total_mb=_known_size_mb(chosen_audio),
             )
         except DownloadCancelled as e:
             on_error(str(e))
