@@ -1,11 +1,12 @@
 # Video Downloader
 
-[![Release](https://img.shields.io/github/v/release/AlperSrgn/VideoDownloader?style=for-the-badge&color=blue)](https://github.com/AlperSrgn/VideoDownloader/releases)
-[![Downloads](https://img.shields.io/github/downloads/AlperSrgn/VideoDownloader/total?style=for-the-badge&color=green)](https://github.com/AlperSrgn/VideoDownloader/releases)
-[![Screenshots](https://img.shields.io/badge/Screenshots-View-yellow?style=for-the-badge)](https://github.com/AlperSrgn/VideoDownloader#screenshots)
-[![License](https://img.shields.io/github/license/AlperSrgn/VideoDownloader?style=for-the-badge&color=purple)](https://github.com/AlperSrgn/VideoDownloader/blob/master/LICENSE)
-[![Windows](https://img.shields.io/badge/Windows-10%2B-0078D4?style=for-the-badge&logo=windows)](https://github.com/AlperSrgn/VideoDownloader)
-[![Download](https://img.shields.io/badge/Download-Latest%20Version-brightgreen?style=for-the-badge)](https://github.com/AlperSrgn/VideoDownloader#installation)
+[![Release](https://img.shields.io/github/v/release/AlperSrgn/VideoDownloader?color=blue)](https://github.com/AlperSrgn/VideoDownloader/releases)
+[![Downloads](https://img.shields.io/github/downloads/AlperSrgn/VideoDownloader/total?color=green)](https://github.com/AlperSrgn/VideoDownloader/releases)
+[![Screenshots](https://img.shields.io/badge/Screenshots-View-yellow)](https://github.com/AlperSrgn/VideoDownloader#screenshots)
+[![License](https://img.shields.io/github/license/AlperSrgn/VideoDownloader?color=purple)](https://github.com/AlperSrgn/VideoDownloader/blob/master/LICENSE)
+[![Windows](https://img.shields.io/badge/Windows-10%2B-0078D4?logo=windows)](https://github.com/AlperSrgn/VideoDownloader)
+[![Download](https://img.shields.io/badge/Download-Latest%20Version-brightgreen)](https://github.com/AlperSrgn/VideoDownloader#installation)
+
 
 A simple and fast **Windows desktop application** for downloading videos and audio from supported websites.
 
