@@ -245,10 +245,19 @@ def _run_download(cmd, on_progress, on_cancel_check, cancel_message, stall_messa
     output_lines = deque(maxlen=200)
     last_output_time = time.monotonic()
 
-    # Tracks the total size reported to on_progress.
-    # Starts with known_total_mb if available, otherwise yt-dlp's estimate;
-    # only increases, so it never goes backwards..
+    # Tracks the total size reported to on_progress. Starts with known_total_mb
+    # if available; otherwise uses yt-dlp's estimate and only allows it to grow.
+    # This prevents the displayed value from decreasing.
     stable_total_mb = known_total_mb
+
+    # yt-dlp calculates the percentage using its fluctuating total size estimate for
+    # fragmented formats, so small fluctuations may occur. We smooth out small
+    # drops to prevent the downloaded size from appearing to move backwards.
+    # We don't lock the percentage completely, since yt-dlp may initially report
+    # an incorrectly high percentage. Large drops are treated as yt-dlp correcting
+    # its estimate rather than as noise.
+    max_percent_seen = 0.0
+    _PERCENT_JITTER_TOLERANCE = 5.0  # percentage points
 
     try:
         while True:
@@ -288,6 +297,18 @@ def _run_download(cmd, on_progress, on_cancel_check, cancel_message, stall_messa
             parsed = _parse_progress_line(line)
             if parsed:
                 percent, downloaded_mb, parsed_total_mb, eta = parsed
+
+                # Absorb small dips (jitter) by holding at the highest value
+                # seen so far; but a big drop means the earlier high reading
+                # was itself the bad one (e.g. a wrong initial estimate), so
+                # let the new, presumably-correct value through and reset the
+                # ceiling to it.
+                if percent >= max_percent_seen:
+                    max_percent_seen = percent
+                elif percent >= max_percent_seen - _PERCENT_JITTER_TOLERANCE:
+                    percent = max_percent_seen
+                else:
+                    max_percent_seen = percent
 
                 if known_total_mb is not None:
                     # We already trust the format's real filesize — ignore
