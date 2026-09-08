@@ -138,7 +138,7 @@ pip install pyinstaller
 Run the following command:
 
 ```bash
-pyinstaller --onefile --noconsole --add-binary "C:\path\to\.venv\Lib\site-packages\imageio_ffmpeg\binaries\ffmpeg-win-x86_64-v7.1.exe;." --add-data "notificationIcon.ico;." --add-data "previewIcon.ico;." --add-data "appIcon.ico;." --hidden-import=plyer.platforms.win.notification main.py
+pyinstaller --onefile --noconsole --add-binary "C:\path\to\.venv\Lib\site-packages\imageio_ffmpeg\binaries\ffmpeg-win-x86_64-v7.1.exe;." --add-data "icons\notificationIcon.ico;icons" --add-data "icons\previewIcon.ico;icons" --add-data "icons\appIcon.ico;icons" --hidden-import=plyer.platforms.win.notification main.py
 ```
 
 > **🚨 Important**
