@@ -1130,7 +1130,7 @@ url_entry.grid(row=0, column=3, padx=10, pady=5)
 url_entry.bind("<Button-3>", lambda e: show_entry_context_menu(e, url_entry))
 
 # Playlist checkbox (hidden until list= detected)
-frame.grid_rowconfigure(1, minsize=0)
+frame.grid_rowconfigure(1, minsize=20)
 playlist_checkbox_var = ctk.BooleanVar()
 playlist_checkbox = ctk.CTkCheckBox(
     frame,
