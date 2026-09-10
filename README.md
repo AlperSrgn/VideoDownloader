@@ -180,5 +180,6 @@ pyinstaller --onefile --noconsole --add-binary "C:\path\to\.venv\Lib\site-packag
 
 - The application requires internet access to download the standalone yt-dlp binary when it is not already available.
 - yt-dlp is updated through its **nightly** channel to receive fixes for website-side changes more quickly.
+- The application does not currently support login, so age-restricted and members-only videos cannot be downloaded.
 - Download and format support ultimately depends on the current capabilities of yt-dlp and the target website.
 - The installer already includes FFmpeg, so end users do not need to install FFmpeg separately.
