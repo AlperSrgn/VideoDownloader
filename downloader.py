@@ -16,6 +16,7 @@ from utils import (
     update_file_timestamp,
     find_glob_file,
 )
+from quality_options import RESOLUTION_MAP
 from ytdlp_manager import (
     ensure_ytdlp,
     find_info_with_compatible_format,
@@ -32,13 +33,6 @@ from error_classifier import (
 )
 
 logger = logging.getLogger(__name__)
-
-RESOLUTION_MAP = {
-    "720p": 720,
-    "1080p": 1080,
-    "2K": 1440,
-    "4K": 2160,
-}
 
 # Fixed weights combine video download, audio download,
 # and ffmpeg merge into one progress bar.
@@ -688,11 +682,16 @@ def download_audio(
     lang: dict,
     on_merge_progress=None,
 ) -> None:
-    """Download audio as MP3 in a background thread.
+    """Download audio only as mp3. Runs in a background thread.
 
-    Downloads the raw audio first,
-    then explicitly converts it with ffmpeg so conversion progress can be reported via on_merge_progress.
-    This avoids yt-dlp's hidden post-processing, which made the progress bar appear stuck at 100%.
+    Downloads the raw audio track first, then converts it to mp3 with our
+    own ffmpeg call (using -progress pipe:1, same as the video merge step).
+    We used to let yt-dlp's -x/--audio-format postprocessor do this
+    conversion internally — but that runs invisibly after the [download]
+    100% line, so the progress bar looked stuck at 100% while the
+    conversion actually happened. Splitting it into an explicit ffmpeg
+    step lets us report that phase's progress via on_merge_progress,
+    same as download_video does for merging.
     """
     def worker():
         try:

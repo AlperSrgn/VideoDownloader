@@ -19,6 +19,11 @@ from plyer import notification
 from tkinter import Menu, filedialog, messagebox
 
 from downloader import download_video, download_audio
+from quality_options import (
+    DROPDOWN_QUALITY_ORDER,
+    QUALITY_OPTION_BY_KEY,
+    QUALITY_KEY_TO_FORMAT_TAG,
+)
 from error_classifier import classify_ytdlp_download_error, classify_ytdlp_update_error
 from languages import LANGUAGES
 from settings import load_setting, save_setting
@@ -481,34 +486,45 @@ def _handle_error(msg: str):
 # ---------------------------------------------------------------------------
 # The dropdown shows language-specific labels, but each queue item stores
 # its selection as a language-independent key, so it stays valid if the language changes.
-RESOLUTION_UI_MAP = {
-    "720p":       "720p",
-    "1080p ᴴᴰ":  "1080p",
-    "1440p ²ᴷ":  "2K",
-    "2160p ⁴ᴷ":  "4K",
-}
-QUALITY_KEY_TO_LANG_FIELD = {
-    "720p": "720p",
-    "1080p": "1080p",
-    "2K": "1440p",
-    "4K": "2160p",
-    "audio": "audio",
-}
+# The quality list itself (order, resolution, format tag) lives in
+# quality_options.py — add new options there, not here.
+
+# Maps the exact composed dropdown text (label + format tag) back to its
+# quality key. Rebuilt every time the dropdown is (re)populated in
+# change_language(), since the label text changes with the language.
+DROPDOWN_DISPLAY_TO_KEY = {}
 
 
 def resolve_quality_key(selection: str):
     """Turn the dropdown's current display text into a stable quality key,
     or None if it doesn't match anything (shouldn't normally happen)."""
-    if selection == current_language.get("audio"):
-        return "audio"
-    return RESOLUTION_UI_MAP.get(selection)
+    return DROPDOWN_DISPLAY_TO_KEY.get(selection)
 
 
 def quality_label(quality_key: str) -> str:
     """Turn a stored quality key back into a label in the current language,
-    for display in the queue list."""
-    lang_field = QUALITY_KEY_TO_LANG_FIELD.get(quality_key)
-    return current_language.get(lang_field, quality_key) if lang_field else quality_key
+    for display in the queue list.
+
+    Most options have a fixed `label` (same text in every language); a few
+    (like "audio") have a `lang_field` instead and are looked up from the
+    current language dict — see quality_options.py.
+    """
+    opt = QUALITY_OPTION_BY_KEY.get(quality_key)
+    if not opt:
+        return quality_key
+    if "label" in opt:
+        return opt["label"]
+    return current_language.get(opt.get("lang_field"), quality_key)
+
+
+def quality_dropdown_text(quality_key: str) -> str:
+    """Label plus its format tag (mp4/mp3), as shown in the dropdown itself.
+    Note: CTkOptionMenu has no real right-aligned column — this just appends
+    the tag after the label with some spacing, it won't line up into a
+    perfect right edge across rows of different lengths."""
+    label = quality_label(quality_key)
+    tag = QUALITY_KEY_TO_FORMAT_TAG.get(quality_key, "")
+    return f"{label}    {tag}" if tag else label
 
 
 # ---------------------------------------------------------------------------
@@ -884,13 +900,9 @@ def change_language(selected: str):
 
     url_entry.configure(placeholder_text=current_language["link_placeholder"])
 
-    dropdown_options = [
-        current_language["2160p"],
-        current_language["1440p"],
-        current_language["1080p"],
-        current_language["720p"],
-        current_language["audio"],
-    ]
+    dropdown_options = [quality_dropdown_text(key) for key in DROPDOWN_QUALITY_ORDER]
+    DROPDOWN_DISPLAY_TO_KEY.clear()
+    DROPDOWN_DISPLAY_TO_KEY.update(zip(dropdown_options, DROPDOWN_QUALITY_ORDER))
     quality_options_menu.configure(values=dropdown_options)
     save_setting("language", selected)
 
@@ -1576,6 +1588,7 @@ if dark_mode_enabled.get():
 saved_lang = load_setting("language", "En")
 language_var.set(saved_lang)
 change_language(saved_lang)
+option_var.set(quality_dropdown_text("1080p"))  # keep the default selection in sync with the tagged dropdown text
 
 # ---------------------------------------------------------------------------
 root.mainloop()
