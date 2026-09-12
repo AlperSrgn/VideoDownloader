@@ -7,6 +7,8 @@ import sys
 import time
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
+import imageio_ffmpeg
+
 from settings import get_appdata_path
 
 logger = logging.getLogger(__name__)
@@ -63,14 +65,21 @@ def get_icon_path(name: str) -> str:
 # ---------------------------------------------------------------------------
 
 def get_ffmpeg_path() -> str:
-    """Return the correct ffmpeg binary path for both dev and packaged modes."""
+    """Return the correct ffmpeg binary path for both dev and packaged modes.
+
+    Dev mode: asks imageio_ffmpeg for its bundled binary directly, instead
+    of assuming the venv folder is named ".venv" and hardcoding the exact
+    ffmpeg build version (e.g. "v7.1") — both of which broke as soon as
+    either changed. This also means build.py and this function always
+    agree on which binary to use, since both go through the same call.
+
+    Packaged mode: matches "ffmpeg*.exe" inside the PyInstaller bundle by
+    pattern rather than an exact filename, so an imageio_ffmpeg update that
+    bumps the bundled ffmpeg version doesn't silently break the frozen exe.
+    """
     if getattr(sys, "frozen", False):
-        return os.path.join(sys._MEIPASS, "ffmpeg-win-x86_64-v7.1.exe")
-    project_dir = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(
-        project_dir, ".venv", "Lib", "site-packages",
-        "imageio_ffmpeg", "binaries", "ffmpeg-win-x86_64-v7.1.exe"
-    )
+        return find_glob_file(os.path.join(sys._MEIPASS, "ffmpeg*.exe"))
+    return imageio_ffmpeg.get_ffmpeg_exe()
 
 
 # ---------------------------------------------------------------------------
