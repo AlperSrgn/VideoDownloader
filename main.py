@@ -771,6 +771,7 @@ def process_next_in_queue():
             on_done=lambda: on_download_done("audio_download_complete_message"),
             on_error=on_download_error,
             lang=current_language,
+            on_merge_progress=on_merge_progress,
         )
     else:
         download_video(

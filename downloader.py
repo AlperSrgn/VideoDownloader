@@ -50,6 +50,12 @@ VIDEO_PHASE_WEIGHT = 75
 AUDIO_PHASE_WEIGHT = 15
 MERGE_PHASE_WEIGHT = 10
 
+# Audio-only flow: download the raw audio track, then convert it to mp3
+# ourselves (see download_audio) so the conversion step reports progress
+# instead of running invisibly inside yt-dlp's own postprocessor.
+AUDIO_DOWNLOAD_WEIGHT = 85
+AUDIO_CONVERT_WEIGHT = 15
+
 
 _NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
@@ -680,8 +686,14 @@ def download_audio(
     on_done,
     on_error,
     lang: dict,
+    on_merge_progress=None,
 ) -> None:
-    """Download audio only as mp3. Runs in a background thread."""
+    """Download audio as MP3 in a background thread.
+
+    Downloads the raw audio first,
+    then explicitly converts it with ffmpeg so conversion progress can be reported via on_merge_progress.
+    This avoids yt-dlp's hidden post-processing, which made the progress bar appear stuck at 100%.
+    """
     def worker():
         try:
             _worker_impl()
@@ -728,20 +740,24 @@ def download_audio(
         temp_id = uuid.uuid4().hex
         output_template = os.path.join(save_location, f".ytdlp_tmp_{temp_id}")
 
+        # Download the raw audio track only — no -x/--audio-format here.
+        # The mp3 conversion is done ourselves below so its progress can be
+        # reported instead of running invisibly inside yt-dlp.
         cmd = [
             exe_path,
             "-f", chosen_audio["format_id"],
             "--extractor-args", f"youtube:player_client={client}",
-            "-x", "--audio-format", "mp3",
-            "--ffmpeg-location", get_ffmpeg_path(),
             "--newline", "--no-warnings",
             "-o", f"{output_template}.%(ext)s",
             url,
         ]
 
+        def _download_phase_progress(percent, downloaded_mb, total_mb, eta):
+            on_progress(AUDIO_DOWNLOAD_WEIGHT * (percent / 100), downloaded_mb, total_mb, eta)
+
         try:
             _run_download(
-                cmd, on_progress, on_cancel_check,
+                cmd, _download_phase_progress, on_cancel_check,
                 lang["download_canceled_message"], lang["error_download_stalled"],
                 known_total_mb=_known_size_mb(chosen_audio),
             )
@@ -756,13 +772,58 @@ def download_audio(
             return
 
         try:
-            final_path = find_glob_file(f"{output_template}.mp3")
+            raw_audio_path = find_glob_file(f"{output_template}.*")
         except FileNotFoundError as e:
             on_error(str(e))
             return
 
-        if os.path.abspath(final_path) != os.path.abspath(output_path):
-            os.replace(final_path, output_path)
+        ffmpeg_cmd = [
+            get_ffmpeg_path(), "-y",
+            "-i", raw_audio_path,
+            "-vn",
+            "-c:a", "libmp3lame",
+            "-q:a", "2",
+            "-progress", "pipe:1",
+            "-nostats",
+            output_path,
+        ]
+
+        def _convert_phase_progress(percent, elapsed_seconds, total_seconds, eta):
+            overall = AUDIO_DOWNLOAD_WEIGHT + AUDIO_CONVERT_WEIGHT * (percent / 100)
+            on_merge_progress(overall, elapsed_seconds, total_seconds, eta)
+
+        try:
+            _run_ffmpeg_merge(
+                ffmpeg_cmd,
+                info.get("duration"),
+                _convert_phase_progress if on_merge_progress else None,
+                on_cancel_check,
+                lang["download_canceled_message"],
+            )
+        except DownloadCancelled as e:
+            # Same reasoning as download_video: ffmpeg may have written a
+            # partial, unplayable file before being killed.
+            if os.path.exists(output_path):
+                try:
+                    os.remove(output_path)
+                except OSError:
+                    pass
+            on_error(str(e))
+            return
+        except FfmpegProcessError as e:
+            if os.path.exists(output_path):
+                try:
+                    os.remove(output_path)
+                except OSError:
+                    pass
+            on_error(classify_ffmpeg_error(e.output, e.returncode, lang))
+            return
+        finally:
+            if os.path.exists(raw_audio_path):
+                try:
+                    os.remove(raw_audio_path)
+                except Exception:
+                    pass
 
         update_file_timestamp(output_path)
         on_done()
