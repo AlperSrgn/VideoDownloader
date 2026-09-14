@@ -10,7 +10,7 @@
 
 A simple and fast **Windows desktop application** for downloading videos and audio from supported websites.
 
->🪟 **Windows 10+ only** — macOS and Linux are not currently supported.
+> 🪟 **Currently available for Windows 10 and later.**
 
 # Features
 
@@ -49,24 +49,22 @@ Video Downloader includes FFmpeg, which is used when video and audio streams nee
 
 No additional FFmpeg installation is required when using the setup installer.
 
->  ### ⚠️ Windows SmartScreen
+> #### ⚠️ Windows SmartScreen
 >
 > Windows may display a **"Windows protected your PC"** warning because the installer is not digitally signed.
 >
-> If you downloaded the installer from this repository's official Releases page:
+> If you downloaded the installer from an **official download link provided in this repository**, you can safely proceed:
 >
 > 1. Click **More info**
 > 2. Click **Run anyway**
 >
-> ### ℹ️ About the yt-dlp Download
+> #### ℹ️ About the yt-dlp Download
 >
 > On first launch, Video Downloader downloads the official standalone `yt-dlp.exe` binary.
 >
 > The binary is downloaded directly from the [official yt-dlp nightly releases](https://github.com/yt-dlp/yt-dlp-nightly-builds/releases).
 >
->
-> Because the binary is downloaded at runtime, some antivirus software may inspect it when it is first downloaded.
-
+> Some antivirus software may inspect the binary when it is first downloaded.
 ---
 
 ## For Developers
@@ -96,14 +94,7 @@ Install `imageio-ffmpeg` from the virtual environment:
 pip install imageio-ffmpeg
 ```
 
-If the project cannot find the FFmpeg binary because your environment uses a different installation path, update the `get_ffmpeg_path()` function in `utils.py`.
-
-The current project expects the FFmpeg binary under a path similar to:
-
-```text
-.venv\Lib\site-packages\imageio_ffmpeg\binaries\ffmpeg-win-x86_64-v7.1.exe
-```
-
+The application automatically locates the FFmpeg binary using `imageio_ffmpeg.get_ffmpeg_exe()`. No manual FFmpeg path configuration is required.
 ### yt-dlp
 
 Video Downloader uses the official standalone `yt-dlp.exe` binary instead of the `yt-dlp` Python package.
@@ -136,15 +127,13 @@ pip install pyinstaller
 
 #### 2. Build
 
-Run the following command:
+Run:
 
 ```bash
-pyinstaller --onefile --noconsole --add-binary "C:\path\to\.venv\Lib\site-packages\imageio_ffmpeg\binaries\ffmpeg-win-x86_64-v7.1.exe;." --add-data "icons\notificationIcon.ico;icons" --add-data "icons\previewIcon.ico;icons" --add-data "icons\appIcon.ico;icons" --hidden-import=plyer.platforms.win.notification main.py
+python build.py
 ```
 
-> **🚨 Important**
->
-> The FFmpeg path in the command is a placeholder. Replace it with the correct path from your local virtual environment before running the command.
+The build script handles the PyInstaller build process and automatically resolves the local FFmpeg binary path through imageio_ffmpeg. No manual path configuration is required.
 
 ---
 
@@ -154,12 +143,13 @@ pyinstaller --onefile --noconsole --add-binary "C:\path\to\.venv\Lib\site-packag
 | --------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | `main.py`             | UI layer — builds and manages the interface, including the download queue                                         |
 | `downloader.py`       | Download logic — runs `yt-dlp.exe` as a subprocess, handles format selection, FFmpeg merging, and audio downloads |
+| `quality_options.py`  | Centralizes available quality and format options, including resolutions, container formats, and dropdown labels   |
 | `error_classifier.py` | Converts raw `yt-dlp` / FFmpeg errors and process results into clear, localized, user-facing messages             |
 | `ytdlp_manager.py`    | Manages the standalone `yt-dlp.exe` binary, including first-run download and per-session updates                  |
 | `utils.py`            | General file helpers — filename sanitization, FFmpeg path handling, icon copying, and URL cleaning                |
 | `settings.py`         | Configuration — reads and writes application settings to `AppData\Local\VideoDownloader\config.json`              |
-| `languages.py`        | Localization strings for Turkish and English                                                                      |
-
+| `build.py`            | Builds the Windows executable with PyInstaller and automatically resolves the local FFmpeg binary path            |
+| `languages.py`        | Localization strings and language support for the application                                                     |
 ---
 
 # Screenshots
