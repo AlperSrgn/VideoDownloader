@@ -1359,7 +1359,7 @@ light_dark = ctk.CTkButton(
 light_dark.place(relx=0.0, rely=1.0, anchor="sw", x=10, y=-10)
 
 # Language selector
-language_options = ["Tr", "En"]
+language_options = ["En", "Es", "Tr"]
 language_var = ctk.StringVar(value=language_options[0])
 language_menu = ctk.CTkOptionMenu(
     sidebar_content,
