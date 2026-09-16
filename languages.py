@@ -2,11 +2,10 @@ LANGUAGES = {
     "Tr": {
         "download": "⬇ İndir",
         "cancel": "❌ İptal Et",
-        "link_placeholder": "Video bağlantısını buraya yapıştırın",
         "kalite": "Kalite",
         "system_notification_checkbox": "İşlem tamamlandığında bildir",
         "start_in_dark_mode_checkbox": "Koyu modda başlat\t",
-        "preview_notification_button":"🔔",
+        "preview_notification_button": "🔔",
         "download_canceled_message": "İndirme iptal edildi",
         "operation_completed_message": "İşlem tamamlandı!",
         "error_title": "Hata",
@@ -85,11 +84,10 @@ LANGUAGES = {
     "En": {
         "download": "⬇ Download",
         "cancel": "❌ Cancel",
-        "link_placeholder": "Paste video link here",
         "kalite": "Quality",
-        "system_notification_checkbox" : "Notify on completion",
+        "system_notification_checkbox": "Notify on completion",
         "start_in_dark_mode_checkbox": "Start in dark mode \t\t",
-        "preview_notification_button":"🔔",
+        "preview_notification_button": "🔔",
         "download_canceled_message": "Download cancelled",
         "operation_completed_message": "Download completed!",
         "error_title": "Error",
@@ -115,11 +113,11 @@ LANGUAGES = {
             "Please ensure the link is valid and accessible."
         ),
         "ffmpeg_not_found_error": (
-                   "FFmpeg was not found, download could not start.\n\n"
-                   "If you cloned this project from GitHub, run this in a terminal:\n"
-                   "pip install imageio-ffmpeg\n\n"
-                  "Then restart the application."
-              ),
+            "FFmpeg was not found, download could not start.\n\n"
+            "If you cloned this project from GitHub, run this in a terminal:\n"
+            "pip install imageio-ffmpeg\n\n"
+            "Then restart the application."
+        ),
         "unexpected_error_message": "An unexpected error occurred. Please try again.",
         "uninstall_app_title": "Uninstall Application",
         "uninstall_app_message": "This will remove the application from your computer.\nDo you want to continue?",
@@ -171,7 +169,6 @@ LANGUAGES = {
     "Es": {
         "download": "⬇ Descargar",
         "cancel": "❌ Cancelar",
-        "link_placeholder": "Pega aquí el enlace del video",
         "kalite": "Calidad",
         "system_notification_checkbox": "Notificar al completar",
         "start_in_dark_mode_checkbox": "Iniciar en modo oscuro\t",
@@ -252,6 +249,257 @@ LANGUAGES = {
         "update_no_installer_message": "Hay una nueva versión ({version}) disponible, pero no se encontró un instalador descargable.\n\n¿Quieres abrir la página de la versión en GitHub en tu navegador?",
         "update_check_failed_message": "No se pudieron comprobar las actualizaciones.\n\nComprueba tu conexión a Internet e inténtalo de nuevo.",
         "update_downloading_message": "Descargando actualización...",
-    }
+    },
+    "De": {
+        "download": "⬇ Herunterladen",
+        "cancel": "❌ Abbrechen",
+        "kalite": "Qualität",
+        "system_notification_checkbox": "Nach Abschluss benachrichtigen",
+        "start_in_dark_mode_checkbox": "Im dunklen Modus starten",
+        "preview_notification_button": "🔔",
+        "download_canceled_message": "Download abgebrochen",
+        "operation_completed_message": "Download abgeschlossen!",
+        "error_title": "Fehler",
+        "warning_title": "Warnung",
+        "empty_url_warning": "Bitte geben Sie einen Videolink ein!",
+        "invalid_url_warning": "Bitte geben Sie eine gültige URL ein",
+        "not_a_video_url_warning": "Dies ist kein Videolink (möglicherweise eine Suchergebnisseite, ein Kanal oder eine Playlist).\n\nBitte geben Sie den Link zu einem einzelnen Video ein.",
+        "quality_error_message": "Bitte wählen Sie eine Qualität aus",
+        "preview_info_title": "Vorschau",
+        "preview_loading_message": "Wird geladen...",
+        "system_notification_message": "Dies ist eine Testbenachrichtigung.",
+        "download_complete_message": "Video erfolgreich heruntergeladen.",
+        "audio_download_complete_message": "Audiodatei erfolgreich heruntergeladen.",
+        "download_starting_message": "Download wird gestartet...",
+        "operation_in_progress_message": "Download läuft, bitte warten...",
+        "merging_message": "Video wird verarbeitet...",
+        "download_canceling_message": "Download wird abgebrochen...",
+        "playlist_checkbox_text": "Playlist herunterladen",
+        "file_not_found_error": "Die Datei 'unins000.exe' wurde nicht gefunden. Die Anwendung ist möglicherweise nicht installiert oder die Datei wurde gelöscht.",
+        "uninstall_button": "Entfernen",
+        "download_video_format_error": (
+            "Der Inhalt konnte aufgrund eines ungültigen Links oder von Plattformbeschränkungen nicht heruntergeladen werden.\n\n"
+            "Bitte stellen Sie sicher, dass der Link gültig und erreichbar ist."
+        ),
+        "ffmpeg_not_found_error": (
+            "FFmpeg wurde nicht gefunden und der Download konnte nicht gestartet werden.\n\n"
+            "Wenn Sie dieses Projekt von GitHub geklont haben, führen Sie diesen Befehl in einem Terminal aus:\n"
+            "pip install imageio-ffmpeg\n\n"
+            "Starten Sie anschließend die Anwendung neu."
+        ),
+        "unexpected_error_message": "Ein unerwarteter Fehler ist aufgetreten. Bitte versuchen Sie es erneut.",
+        "uninstall_app_title": "Anwendung deinstallieren",
+        "uninstall_app_message": "Die Anwendung wird von Ihrem Computer entfernt.\nMöchten Sie fortfahren?",
+        "audio": "Audio",
+        "queue_remaining_label": "Verbleibend in der Warteschlange",
+        "queue_title_label": "Warteschlange",
+        "clear_queue_button": "Warteschlange leeren",
+        "add_to_queue_button": "➕ Zur Warteschlange hinzufügen",
+        "ytdlp_downloading_message": "yt-dlp wird vorbereitet... %{percent}",
+        "ytdlp_downloading_indeterminate_message": "yt-dlp wird vorbereitet...",
+        "ytdlp_checking_message": "Nach Updates wird gesucht...",
+        "ytdlp_setup_failed_generic_message": "yt-dlp konnte nicht heruntergeladen werden.\n\nBitte versuchen Sie es erneut. Wenn das Problem weiterhin besteht, melden Sie es mit diesem Fehler:\n{error}",
+        "retry_button": "🔄 Erneut versuchen",
+        "ytdlp_update_failed_network_message": "yt-dlp konnte nicht aktualisiert werden (keine Internetverbindung).\n\nDie vorhandene Version wird verwendet.",
+        "ytdlp_update_failed_generic_message": "yt-dlp konnte nicht aktualisiert werden.\n\nDie vorhandene Version wird verwendet. Fehler: {error}",
+        "choose_folder_button": "📁 Download-Speicherort auswählen",
+        "cut_label": "Ausschneiden",
+        "copy_label": "Kopieren",
+        "paste_label": "Einfügen",
+        "select_all_label": "Alles auswählen",
 
+        # Fehlerklassifizierung
+        "error_no_internet": "Keine Internetverbindung.\n\nBitte überprüfen Sie Ihre Verbindung und versuchen Sie es erneut.",
+        "error_video_not_found": "Video nicht gefunden.\n\nDer Link ist möglicherweise falsch oder das Video wurde entfernt.",
+        "error_unsupported_url": "Dieser Link gehört nicht zu einer unterstützten Videoseite.\n\nBitte geben Sie den Link zu einem einzelnen Video von einer unterstützten Plattform ein.",
+        "error_video_private": "Dieses Video ist privat.\n\nPrivate Videos können nicht heruntergeladen werden.",
+        "error_age_restricted": "Für dieses Video ist eine Altersverifizierung erforderlich.\n\nVideos mit Altersbeschränkung können mit dieser App nicht heruntergeladen werden.",
+        "error_access_blocked": "YouTube hat diese Anfrage blockiert (Bot-Schutz oder zu viele Anfragen).\n\nWarten Sie eine Weile und versuchen Sie es erneut.",
+        "error_format_not_found": "Für dieses Video wurde kein geeignetes Format gefunden.",
+        "error_ffmpeg_generic": "Beim Zusammenführen von Video und Audio ist ein Fehler aufgetreten.",
+        "error_disk_full": "Nicht genügend Speicherplatz.\n\nGeben Sie Speicherplatz frei und versuchen Sie es erneut.",
+        "error_permission": "Keine Berechtigung zum Schreiben der Datei.\n\nÜberprüfen Sie die Schreibberechtigungen des Download-Speicherorts.",
+        "error_unknown_ytdlp": "Beim Download ist ein unbekannter Fehler aufgetreten.",
+        "error_download_stalled": "Der Download ist hängen geblieben und wurde gestoppt.\n\n"
+                                  "yt-dlp ist möglicherweise bei diesem Video auf ein Problem gestoßen. "
+                                  "Bitte versuchen Sie es erneut oder testen Sie ein anderes Video.",
+
+        # Update-Prüfung
+        "check_updates_button": "🔄 Nach Updates suchen",
+        "update_check_title": "Nach Updates suchen",
+        "already_latest_message": "Sie verwenden bereits die neueste Version ({version}).",
+        "update_available_title": "Update verfügbar",
+        "update_available_message": "Eine neue Version ({version}) ist verfügbar. Jetzt aktualisieren?",
+        "update_no_installer_message": "Eine neue Version ({version}) ist verfügbar, aber es wurde kein herunterladbarer Installer gefunden.\n\nSoll die Release-Seite auf GitHub in Ihrem Browser geöffnet werden?",
+        "update_check_failed_message": "Updates konnten nicht überprüft werden.\n\nBitte überprüfen Sie Ihre Internetverbindung und versuchen Sie es erneut.",
+        "update_downloading_message": "Update wird heruntergeladen...",
+    },
+    "It": {
+        "download": "⬇ Scarica",
+        "cancel": "❌ Annulla",
+        "kalite": "Qualità",
+        "system_notification_checkbox": "Notifica al termine",
+        "start_in_dark_mode_checkbox": "Avvia in modalità scura\t",
+        "preview_notification_button": "🔔",
+        "download_canceled_message": "Download annullato",
+        "operation_completed_message": "Download completato!",
+        "error_title": "Errore",
+        "warning_title": "Avviso",
+        "empty_url_warning": "Inserisci un link video!",
+        "invalid_url_warning": "Inserisci un URL valido",
+        "not_a_video_url_warning": "Questo non è un link video (potrebbe essere una pagina di risultati di ricerca, un canale o una playlist).\n\nInserisci il link di un singolo video.",
+        "quality_error_message": "Seleziona una qualità",
+        "preview_info_title": "Anteprima",
+        "preview_loading_message": "Caricamento...",
+        "system_notification_message": "Questa è una notifica di prova.",
+        "download_complete_message": "Video scaricato correttamente.",
+        "audio_download_complete_message": "File audio scaricato correttamente.",
+        "download_starting_message": "Avvio del download...",
+        "operation_in_progress_message": "Download in corso, attendi...",
+        "merging_message": "Elaborazione del video...",
+        "download_canceling_message": "Annullamento del download...",
+        "playlist_checkbox_text": "Scarica playlist",
+        "file_not_found_error": "Il file 'unins000.exe' non è stato trovato. L'applicazione potrebbe non essere installata oppure il file potrebbe essere stato eliminato.",
+        "uninstall_button": "Disinstalla",
+        "download_video_format_error": (
+            "Impossibile scaricare il contenuto a causa di un link non valido o delle protezioni della piattaforma.\n\n"
+            "Assicurati che il link sia valido e accessibile."
+        ),
+        "ffmpeg_not_found_error": (
+            "FFmpeg non è stato trovato e il download non può essere avviato.\n\n"
+            "Se hai clonato questo progetto da GitHub, esegui questo comando in un terminale:\n"
+            "pip install imageio-ffmpeg\n\n"
+            "Quindi riavvia l'applicazione."
+        ),
+        "unexpected_error_message": "Si è verificato un errore imprevisto. Riprova.",
+        "uninstall_app_title": "Disinstalla applicazione",
+        "uninstall_app_message": "L'applicazione verrà rimossa dal computer.\nVuoi continuare?",
+        "audio": "Audio",
+        "queue_remaining_label": "Rimanenti nella coda",
+        "queue_title_label": "Coda",
+        "clear_queue_button": "Svuota coda",
+        "add_to_queue_button": "➕ Aggiungi alla coda",
+        "ytdlp_downloading_message": "Preparazione di yt-dlp... %{percent}",
+        "ytdlp_downloading_indeterminate_message": "Preparazione di yt-dlp...",
+        "ytdlp_checking_message": "Ricerca di aggiornamenti...",
+        "ytdlp_setup_failed_generic_message": "Impossibile scaricare yt-dlp.\n\nRiprova. Se il problema persiste, segnalalo con questo errore:\n{error}",
+        "retry_button": "🔄 Riprova",
+        "ytdlp_update_failed_network_message": "Impossibile aggiornare yt-dlp (nessuna connessione Internet).\n\nVerrà utilizzata la versione esistente.",
+        "ytdlp_update_failed_generic_message": "Impossibile aggiornare yt-dlp.\n\nVerrà utilizzata la versione esistente. Errore: {error}",
+        "choose_folder_button": "📁 Scegli posizione di download",
+        "cut_label": "Taglia",
+        "copy_label": "Copia",
+        "paste_label": "Incolla",
+        "select_all_label": "Seleziona tutto",
+
+        # Classificazione degli errori
+        "error_no_internet": "Nessuna connessione Internet.\n\nControlla la connessione e riprova.",
+        "error_video_not_found": "Video non trovato.\n\nIl link potrebbe essere errato oppure il video potrebbe essere stato rimosso.",
+        "error_unsupported_url": "Questo link non appartiene a un sito video supportato.\n\nInserisci il link di un singolo video da una piattaforma supportata.",
+        "error_video_private": "Questo video è privato.\n\nI video privati non possono essere scaricati.",
+        "error_age_restricted": "Questo video richiede la verifica dell'età.\n\nI video con restrizioni di età non possono essere scaricati con questa app.",
+        "error_access_blocked": "YouTube ha bloccato questa richiesta (protezione anti-bot o troppe richieste).\n\nAttendi un po' e riprova.",
+        "error_format_not_found": "Non è stato trovato un formato adatto per questo video.",
+        "error_ffmpeg_generic": "Si è verificato un errore durante l'unione del video e dell'audio.",
+        "error_disk_full": "Spazio su disco insufficiente.\n\nLibera spazio e riprova.",
+        "error_permission": "Nessun permesso per scrivere il file.\n\nControlla i permessi di scrittura della posizione di download.",
+        "error_unknown_ytdlp": "Si è verificato un errore sconosciuto durante il download.",
+        "error_download_stalled": "Il download si è bloccato ed è stato interrotto.\n\n"
+                                  "yt-dlp potrebbe aver riscontrato un problema con questo video. "
+                                  "Riprova oppure prova con un altro video.",
+
+        # Controllo degli aggiornamenti
+        "check_updates_button": "🔄 Cerca aggiornamenti",
+        "update_check_title": "Controllo aggiornamenti",
+        "already_latest_message": "Stai già utilizzando l'ultima versione ({version}).",
+        "update_available_title": "Aggiornamento disponibile",
+        "update_available_message": "È disponibile una nuova versione ({version}). Aggiornare ora?",
+        "update_no_installer_message": "È disponibile una nuova versione ({version}), ma non è stato trovato alcun programma di installazione scaricabile.\n\nVuoi aprire la pagina della release su GitHub nel browser?",
+        "update_check_failed_message": "Impossibile verificare la presenza di aggiornamenti.\n\nControlla la connessione Internet e riprova.",
+        "update_downloading_message": "Download dell'aggiornamento...",
+    },
+    "Fr": {
+        "download": "⬇ Télécharger",
+        "cancel": "❌ Annuler",
+        "kalite": "Qualité",
+        "system_notification_checkbox": "Notifier à la fin",
+        "start_in_dark_mode_checkbox": "Démarrer en mode sombre\t",
+        "preview_notification_button": "🔔",
+        "download_canceled_message": "Téléchargement annulé",
+        "operation_completed_message": "Téléchargement terminé !",
+        "error_title": "Erreur",
+        "warning_title": "Avertissement",
+        "empty_url_warning": "Veuillez saisir un lien vidéo !",
+        "invalid_url_warning": "Veuillez saisir une URL valide",
+        "not_a_video_url_warning": "Ceci n'est pas un lien vidéo (il peut s'agir d'une page de résultats de recherche, d'une chaîne ou d'une playlist).\n\nVeuillez saisir le lien d'une seule vidéo.",
+        "quality_error_message": "Veuillez sélectionner une qualité",
+        "preview_info_title": "Aperçu",
+        "preview_loading_message": "Chargement...",
+        "system_notification_message": "Ceci est une notification de test.",
+        "download_complete_message": "Vidéo téléchargée avec succès.",
+        "audio_download_complete_message": "Fichier audio téléchargé avec succès.",
+        "download_starting_message": "Démarrage du téléchargement...",
+        "operation_in_progress_message": "Téléchargement en cours, veuillez patienter...",
+        "merging_message": "Traitement de la vidéo...",
+        "download_canceling_message": "Annulation du téléchargement...",
+        "playlist_checkbox_text": "Télécharger la playlist",
+        "file_not_found_error": "Le fichier 'unins000.exe' est introuvable. L'application n'est peut-être pas installée ou le fichier a peut-être été supprimé.",
+        "uninstall_button": "Supprimer",
+        "download_video_format_error": (
+            "Impossible de télécharger le contenu en raison d'un lien invalide ou des protections de la plateforme.\n\n"
+            "Veuillez vérifier que le lien est valide et accessible."
+        ),
+        "ffmpeg_not_found_error": (
+            "FFmpeg est introuvable et le téléchargement n'a pas pu démarrer.\n\n"
+            "Si vous avez cloné ce projet depuis GitHub, exécutez cette commande dans un terminal :\n"
+            "pip install imageio-ffmpeg\n\n"
+            "Redémarrez ensuite l'application."
+        ),
+        "unexpected_error_message": "Une erreur inattendue s'est produite. Veuillez réessayer.",
+        "uninstall_app_title": "Désinstaller l'application",
+        "uninstall_app_message": "L'application sera supprimée de votre ordinateur.\nVoulez-vous continuer ?",
+        "audio": "Audio",
+        "queue_remaining_label": "Restants dans la file",
+        "queue_title_label": "File d'attente",
+        "clear_queue_button": "Vider la file",
+        "add_to_queue_button": "➕ Ajouter à la file",
+        "ytdlp_downloading_message": "Préparation de yt-dlp... %{percent}",
+        "ytdlp_downloading_indeterminate_message": "Préparation de yt-dlp...",
+        "ytdlp_checking_message": "Recherche de mises à jour...",
+        "ytdlp_setup_failed_generic_message": "Impossible de télécharger yt-dlp.\n\nVeuillez réessayer. Si le problème persiste, signalez-le avec cette erreur :\n{error}",
+        "retry_button": "🔄 Réessayer",
+        "ytdlp_update_failed_network_message": "Impossible de mettre à jour yt-dlp (aucune connexion Internet).\n\nLa version actuelle sera utilisée.",
+        "ytdlp_update_failed_generic_message": "Impossible de mettre à jour yt-dlp.\n\nLa version actuelle sera utilisée. Erreur : {error}",
+        "choose_folder_button": "📁 Choisir l'emplacement",
+        "cut_label": "Couper",
+        "copy_label": "Copier",
+        "paste_label": "Coller",
+        "select_all_label": "Tout sélectionner",
+
+        # Classification des erreurs
+        "error_no_internet": "Aucune connexion Internet.\n\nVérifiez votre connexion et réessayez.",
+        "error_video_not_found": "Vidéo introuvable.\n\nLe lien est peut-être incorrect ou la vidéo a peut-être été supprimée.",
+        "error_unsupported_url": "Ce lien ne provient pas d'un site vidéo pris en charge.\n\nVeuillez saisir le lien d'une seule vidéo provenant d'une plateforme prise en charge.",
+        "error_video_private": "Cette vidéo est privée.\n\nLes vidéos privées ne peuvent pas être téléchargées.",
+        "error_age_restricted": "Cette vidéo nécessite une vérification de l'âge.\n\nLes vidéos soumises à une restriction d'âge ne peuvent pas être téléchargées avec cette application.",
+        "error_access_blocked": "YouTube a bloqué cette requête (protection anti-bot ou trop de requêtes).\n\nAttendez un moment et réessayez.",
+        "error_format_not_found": "Aucun format approprié n'a été trouvé pour cette vidéo.",
+        "error_ffmpeg_generic": "Une erreur s'est produite lors de la fusion de la vidéo et de l'audio.",
+        "error_disk_full": "Espace disque insuffisant.\n\nLibérez de l'espace et réessayez.",
+        "error_permission": "Autorisation d'écriture refusée.\n\nVérifiez les permissions d'écriture de l'emplacement de téléchargement.",
+        "error_unknown_ytdlp": "Une erreur inconnue s'est produite pendant le téléchargement.",
+        "error_download_stalled": "Le téléchargement est resté bloqué et a été arrêté.\n\n"
+                                  "yt-dlp a peut-être rencontré un problème avec cette vidéo. "
+                                  "Veuillez réessayer ou tester une autre vidéo.",
+
+        # Vérification des mises à jour
+        "check_updates_button": "🔄 Vérifier les mises à jour",
+        "update_check_title": "Vérifier les mises à jour",
+        "already_latest_message": "Vous utilisez déjà la dernière version ({version}).",
+        "update_available_title": "Mise à jour disponible",
+        "update_available_message": "Une nouvelle version ({version}) est disponible. Mettre à jour maintenant ?",
+        "update_no_installer_message": "Une nouvelle version ({version}) est disponible, mais aucun programme d'installation téléchargeable n'a été trouvé.\n\nVoulez-vous ouvrir la page de la version sur GitHub dans votre navigateur ?",
+        "update_check_failed_message": "Impossible de vérifier les mises à jour.\n\nVérifiez votre connexion Internet et réessayez.",
+        "update_downloading_message": "Téléchargement de la mise à jour...",
+    },
 }

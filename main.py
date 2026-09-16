@@ -345,7 +345,7 @@ dark_mode = False
 cancel_requested = False
 current_language: dict = {}
 sidebar_open = False
-SIDEBAR_WIDTH = 250
+SIDEBAR_WIDTH = 300
 sidebar_x = -SIDEBAR_WIDTH
 
 # Text color for dynamic queue rows; updated when the theme changes.
@@ -894,8 +894,6 @@ def change_language(selected: str):
 
     render_queue_list()  # refreshes the "Queue (N)" header text in the new language
 
-    url_entry.configure(placeholder_text=current_language["link_placeholder"])
-
     dropdown_options = [quality_dropdown_text(key) for key in DROPDOWN_QUALITY_ORDER]
     DROPDOWN_DISPLAY_TO_KEY.clear()
     DROPDOWN_DISPLAY_TO_KEY.update(zip(dropdown_options, DROPDOWN_QUALITY_ORDER))
@@ -1359,7 +1357,7 @@ light_dark = ctk.CTkButton(
 light_dark.place(relx=0.0, rely=1.0, anchor="sw", x=10, y=-10)
 
 # Language selector
-language_options = ["En", "Es", "Tr"]
+language_options = ["De", "En", "Es", "Fr", "It", "Tr"]
 language_var = ctk.StringVar(value=language_options[0])
 language_menu = ctk.CTkOptionMenu(
     sidebar_content,
