@@ -29,11 +29,11 @@ QUALITY_OPTIONS = [
     #         (None for audio-only — it has no resolution)
     # format: container format shown next to the label in the dropdown
     # label / lang_field: see module docstring above
-    {"key": "4K",    "height": 2160, "format": "mp4", "label": "2160p ⁴ᴷ"},
-    {"key": "2K",    "height": 1440, "format": "mp4", "label": "1440p ²ᴷ"},
-    {"key": "1080p", "height": 1080, "format": "mp4", "label": "1080p ᴴᴰ"},
-    {"key": "720p",  "height": 720,  "format": "mp4", "label": "720p"},
-    {"key": "audio", "height": None, "format": "mp3", "lang_field": "audio"},
+    {"key": "4K",    "height": 2160, "format": "MP4    ", "label": "2160p ⁴ᴷ"},
+    {"key": "2K",    "height": 1440, "format": "MP4    ", "label": "1440p ²ᴷ"},
+    {"key": "1080p", "height": 1080, "format": "MP4    ", "label": "1080p ᴴᴰ"},
+    {"key": "720p",  "height": 720,  "format": "MP4    ", "label": "720p"},
+    {"key": "audio", "height": None, "format": "MP3    ", "lang_field": "audio"},
 ]
 
 # Derived views used by downloader.py and main.py

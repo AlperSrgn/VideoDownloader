@@ -514,13 +514,10 @@ def quality_label(quality_key: str) -> str:
 
 
 def quality_dropdown_text(quality_key: str) -> str:
-    """Label plus its format tag (mp4/mp3), as shown in the dropdown itself.
-    Note: CTkOptionMenu has no real right-aligned column — this just appends
-    the tag after the label with some spacing, it won't line up into a
-    perfect right edge across rows of different lengths."""
+    """Format tag (mp4/mp3) plus the label, as shown in the dropdown itself."""
     label = quality_label(quality_key)
     tag = QUALITY_KEY_TO_FORMAT_TAG.get(quality_key, "")
-    return f"{label}    {tag}" if tag else label
+    return f"{tag}    {label}" if tag else label
 
 
 # ---------------------------------------------------------------------------
