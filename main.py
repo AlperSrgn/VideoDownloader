@@ -869,21 +869,21 @@ def toggle_sidebar():
 # ---------------------------------------------------------------------------
 def change_language(selected: str):
     global current_language
-    current_language = LANGUAGES.get(selected, LANGUAGES["Tr"])
+    current_language = LANGUAGES.get(selected, LANGUAGES["En"])
 
     label_map = {
-        download_button:             "download",
-        cancel_button:               "cancel",
-        download_option_label:       "kalite",
+        download_button:              "download_button",
+        cancel_button:                "cancel_button",
+        download_option_label:        "download_option_label",
         system_notification_checkbox: "system_notification_checkbox",
         start_in_dark_mode_checkbox:  "start_in_dark_mode_checkbox",
         preview_notification_button:  "preview_notification_button",
-        playlist_checkbox:            "playlist_checkbox_text",
+        playlist_checkbox:            "playlist_checkbox",
         uninstall_button:             "uninstall_button",
         clear_queue_button:           "clear_queue_button",
-        queue_add_button:             "add_to_queue_button",
-        save_location_button:         "choose_folder_button",
-        ytdlp_retry_button:           "retry_button",
+        queue_add_button:             "queue_add_button",
+        save_location_button:         "save_location_button",
+        ytdlp_retry_button:           "ytdlp_retry_button",
         check_updates_button:         "check_updates_button",
     }
     for widget, key in label_map.items():
@@ -1488,7 +1488,7 @@ def on_ytdlp_status(stage: str, detail):
     detail is the download percentage (0-100) or the failure exception.
     """
     def apply():
-        lang = current_language or LANGUAGES.get("Tr", {})
+        lang = current_language or LANGUAGES.get("En", {})
 
         if stage == "ready":
             ytdlp_status_label.pack_forget()
@@ -1506,7 +1506,7 @@ def on_ytdlp_status(stage: str, detail):
             )
             ytdlp_status_label.configure(text=message)
             ytdlp_status_label.pack(pady=(0, 5), before=action_buttons_frame)
-            ytdlp_retry_button.configure(text=lang["retry_button"])
+            ytdlp_retry_button.configure(text=lang["ytdlp_retry_button"])
             ytdlp_retry_button.pack(pady=(0, 5), before=action_buttons_frame)
             download_button.configure(state="disabled")
             url_entry.configure(state="disabled")
