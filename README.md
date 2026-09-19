@@ -105,8 +105,7 @@ On first launch, the application downloads `yt-dlp.exe` to:
 %LOCALAPPDATA%\VideoDownloader
 ```
 
-The application checks for updates once per app run.
-
+The application checks for `yt-dlp` updates at most every 12 hours. The last check is saved in `config.json`, so restarting the app won’t trigger a new check. If the check fails, it will be retried on the next launch.
 Therefore, there is no separate `pip install` step for yt-dlp.
 
 > **Internet access is required on first launch** so the application can download the standalone yt-dlp binary.
@@ -133,7 +132,7 @@ Run:
 python build.py
 ```
 
-The build script handles the PyInstaller build process and automatically resolves the local FFmpeg binary path through imageio_ffmpeg. No manual path configuration is required.
+The build script handles the PyInstaller build process and automatically resolves the local FFmpeg binary path through `imageio_ffmpeg`. No manual path configuration is required.
 
 ---
 
@@ -145,7 +144,7 @@ The build script handles the PyInstaller build process and automatically resolve
 | `downloader.py`       | Download logic — runs `yt-dlp.exe` as a subprocess, handles format selection, FFmpeg merging, and audio downloads |
 | `quality_options.py`  | Centralizes available quality and format options, including resolutions, container formats, and dropdown labels   |
 | `error_classifier.py` | Converts raw `yt-dlp` / FFmpeg errors and process results into clear, localized, user-facing messages             |
-| `ytdlp_manager.py`    | Manages the standalone `yt-dlp.exe` binary, including first-run download and per-session updates                  |
+| `ytdlp_manager.py`    | Manages the standalone `yt-dlp.exe` binary, including first-run download and rate-limited update checks           |
 | `utils.py`            | General file helpers — filename sanitization, FFmpeg path handling, icon copying, and URL cleaning                |
 | `settings.py`         | Configuration — reads and writes application settings to `AppData\Local\VideoDownloader\config.json`              |
 | `build.py`            | Builds the Windows executable with PyInstaller and automatically resolves the local FFmpeg binary path            |
@@ -169,7 +168,5 @@ The build script handles the PyInstaller build process and automatically resolve
 # Notes
 
 - The application requires internet access to download the standalone yt-dlp binary when it is not already available.
-- yt-dlp is updated through its **nightly** channel to receive fixes for website-side changes more quickly.
-- The application does not currently support login, so age-restricted and members-only videos cannot be downloaded.
-- Download and format support ultimately depends on the current capabilities of yt-dlp and the target website.
-- The installer already includes FFmpeg, so end users do not need to install FFmpeg separately.
+- `yt-dlp` is updated through its **nightly** channel to receive fixes for website-side changes more quickly.
+- The application does not currently support login, so restricted content may not be downloadable.
