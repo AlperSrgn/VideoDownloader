@@ -8,6 +8,8 @@ import time
 import uuid
 from collections import deque
 
+import psutil
+
 from settings import get_appdata_path
 from utils import (
     get_ffmpeg_path,
@@ -61,6 +63,41 @@ _STALL_TIMEOUT = 60  # seconds
 
 # Shared cancel flag — set to True from UI to abort an active download
 cancel_download = False
+
+
+def _apply_pause_state(process: subprocess.Popen, on_pause_check, suspended: bool) -> bool:
+    """Suspends or resumes `process` based on on_pause_check(), and returns
+    the updated suspended state.
+
+    Used by both the yt-dlp download loop and the ffmpeg merge loop, so
+    pausing genuinely stops network/CPU usage instead of just freezing the
+    progress bar. Callers reset their own "no output" timer while this
+    returns True, so a pause is never mistaken for a stall.
+    """
+    if on_pause_check is None:
+        return False
+
+    try:
+        want_paused = on_pause_check()
+    except Exception:
+        want_paused = False
+
+    if want_paused and not suspended:
+        try:
+            psutil.Process(process.pid).suspend()
+        except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+            logger.debug("Could not suspend process %s: %s", process.pid, e)
+            return False
+        return True
+
+    if not want_paused and suspended:
+        try:
+            psutil.Process(process.pid).resume()
+        except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+            logger.debug("Could not resume process %s: %s", process.pid, e)
+        return False
+
+    return suspended
 
 
 # ---------------------------------------------------------------------------
@@ -204,8 +241,25 @@ def _parse_progress_line(line: str):
     return percent, downloaded_mb, total_mb, eta
 
 
+class _PausedForResume(Exception):
+    """Internal signal — never seen outside this module. Raised by
+    _download_once when the user pauses mid-download; caught by
+    _run_download, which waits for resume and relaunches the exact same
+    yt-dlp command so it continues the partial file instead of starting
+    the download over (see _run_download's docstring for why)."""
+
+
+def _wait_while_paused(on_cancel_check, on_pause_check, cancel_message):
+    """Blocks the calling (background) thread while paused. Still reacts
+    to cancellation immediately, without waiting for a resume first."""
+    while on_pause_check is not None and on_pause_check():
+        if on_cancel_check():
+            raise DownloadCancelled(cancel_message)
+        time.sleep(_CANCEL_POLL_INTERVAL)
+
+
 def _run_download(cmd, on_progress, on_cancel_check, cancel_message, stall_message=None,
-                   known_total_mb=None):
+                   known_total_mb=None, on_pause_check=None):
     """
     Runs the yt-dlp.exe download, reports progress, and stops if cancelled.
     Cancellation is checked periodically even without output.
@@ -221,7 +275,36 @@ def _run_download(cmd, on_progress, on_cancel_check, cancel_message, stall_messa
     check the app would hang forever with no feedback. If no output is
     received for _STALL_TIMEOUT seconds, the process is killed and
     DownloadStalled is raised instead.
+
+    on_pause_check: optional callable checked while downloading. An
+    in-flight HTTP download can't be reliably frozen by just suspending
+    the yt-dlp process — the OS network stack keeps receiving into the
+    socket's buffer regardless of whether our thread gets scheduled, so a
+    "paused" download can silently keep completing itself in the
+    background (this is what used to happen here). So instead, pausing
+    stops the yt-dlp process — its partial file is left on disk — and
+    blocks until resumed, then relaunches the exact same command; yt-dlp
+    resumes the partial file itself via an HTTP Range request (its
+    default behavior) instead of re-downloading from scratch.
     """
+    while True:
+        try:
+            _download_once(
+                cmd, on_progress, on_cancel_check, cancel_message,
+                stall_message, known_total_mb, on_pause_check,
+            )
+            return
+        except _PausedForResume:
+            _wait_while_paused(on_cancel_check, on_pause_check, cancel_message)
+            # Loop back around and relaunch cmd — yt-dlp continues the
+            # partial file it already wrote rather than starting over.
+            continue
+
+
+def _download_once(cmd, on_progress, on_cancel_check, cancel_message, stall_message,
+                    known_total_mb, on_pause_check):
+    """Runs a single yt-dlp process end-to-end. Raises _PausedForResume if
+    the user paused mid-download — see _run_download, which wraps this."""
     process = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
@@ -268,6 +351,18 @@ def _run_download(cmd, on_progress, on_cancel_check, cancel_message, stall_messa
                 except subprocess.TimeoutExpired:
                     process.kill()
                 raise DownloadCancelled(cancel_message)
+
+            if on_pause_check is not None and on_pause_check():
+                # Stop the process (its partial file stays on disk) rather
+                # than suspending it — see _run_download's docstring for
+                # why suspending alone doesn't actually pause an in-flight
+                # HTTP download.
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                raise _PausedForResume()
 
             if time.monotonic() - last_output_time > _STALL_TIMEOUT:
                 logger.warning(
@@ -377,7 +472,8 @@ def _enqueue_lines(pipe, line_queue):
         line_queue.put(None)
 
 
-def _run_ffmpeg_merge(cmd, total_duration, on_merge_progress, on_cancel_check, cancel_message):
+def _run_ffmpeg_merge(cmd, total_duration, on_merge_progress, on_cancel_check, cancel_message,
+                       on_pause_check=None):
     """
     Runs the ffmpeg merge and reports progress through on_merge_progress.
     Progress is based on media seconds rather than MB.
@@ -386,6 +482,10 @@ def _run_ffmpeg_merge(cmd, total_duration, on_merge_progress, on_cancel_check, c
     still works. If total_duration is unavailable, percent stays at 0.
 
     Cancellation is checked on stdout lines and at regular intervals.
+
+    on_pause_check: optional callable — while it returns True, the ffmpeg
+    process is suspended (see _apply_pause_state), same as during the
+    yt-dlp download phase.
     """
     process = subprocess.Popen(
         cmd,
@@ -416,16 +516,27 @@ def _run_ffmpeg_merge(cmd, total_duration, on_merge_progress, on_cancel_check, c
 
     elapsed_seconds = 0.0
     speed = None
+    suspended = False
 
     try:
         while True:
             if on_cancel_check():
+                if suspended:
+                    try:
+                        psutil.Process(process.pid).resume()
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass
                 process.terminate()
                 try:
                     process.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     process.kill()
                 raise DownloadCancelled(cancel_message)
+
+            suspended = _apply_pause_state(process, on_pause_check, suspended)
+            if suspended:
+                time.sleep(_CANCEL_POLL_INTERVAL)
+                continue
 
             try:
                 line = line_queue.get(timeout=_CANCEL_POLL_INTERVAL)
@@ -492,11 +603,19 @@ def download_video(
     on_error,
     lang: dict,
     on_merge_progress=None,
+    on_pause_check=None,
 ) -> None:
     """
     Downloads video and audio separately, then merges them with ffmpeg.
     Calls on_done() or on_error(msg) when finished.
     Merge progress is reported based on processed seconds.
+
+    on_pause_check: optional callable checked throughout every phase. The
+    video and audio download phases pause by stopping yt-dlp and relaunching
+    it on resume, so it continues the partial file (see _run_download's
+    docstring for why); the merge phase pauses by suspending ffmpeg in
+    place, since it's local CPU work with no network buffering to worry
+    about (see _apply_pause_state).
     """
 
     def worker():
@@ -556,6 +675,12 @@ def download_video(
             "-f", video_format["format_id"],
             "--extractor-args", f"youtube:player_client={client}",
             "--newline", "--no-warnings",
+            # Explicit even though it's yt-dlp's default: relaunching this
+            # exact command after a pause (see _run_download) relies on it
+            # resuming the partial file via an HTTP Range request instead
+            # of starting over, and this guards against a local yt-dlp
+            # config overriding that default.
+            "--continue",
             "-o", f"{temp_base}_video.%(ext)s",
             url,
         ]
@@ -564,6 +689,7 @@ def download_video(
             "-f", audio_format["format_id"],
             "--extractor-args", f"youtube:player_client={client}",
             "--newline", "--no-warnings",
+            "--continue",
             "-o", f"{temp_base}_audio.%(ext)s",
             url,
         ]
@@ -582,11 +708,13 @@ def download_video(
                 video_cmd, _video_phase_progress, on_cancel_check,
                 lang["download_canceled_message"], lang["error_download_stalled"],
                 known_total_mb=_known_size_mb(video_format),
+                on_pause_check=on_pause_check,
             )
             _run_download(
                 audio_cmd, _audio_phase_progress, on_cancel_check,
                 lang["download_canceled_message"], lang["error_download_stalled"],
                 known_total_mb=_known_size_mb(audio_format),
+                on_pause_check=on_pause_check,
             )
         except DownloadCancelled as e:
             on_error(str(e))
@@ -632,6 +760,7 @@ def download_video(
                 _merge_phase_progress if on_merge_progress else None,
                 on_cancel_check,
                 lang["download_canceled_message"],
+                on_pause_check=on_pause_check,
             )
         except DownloadCancelled as e:
             # ffmpeg was killed mid-merge — output_path may contain a
@@ -681,6 +810,7 @@ def download_audio(
     on_error,
     lang: dict,
     on_merge_progress=None,
+    on_pause_check=None,
 ) -> None:
     """Download audio only as mp3. Runs in a background thread.
 
@@ -692,6 +822,13 @@ def download_audio(
     conversion actually happened. Splitting it into an explicit ffmpeg
     step lets us report that phase's progress via on_merge_progress,
     same as download_video does for merging.
+
+    on_pause_check: optional callable checked throughout both phases. The
+    download phase pauses by stopping yt-dlp and relaunching it on resume
+    so it continues the partial file (see _run_download's docstring); the
+    mp3 conversion phase pauses by suspending ffmpeg in place, since it's
+    local CPU work with no network buffering to worry about (see
+    _apply_pause_state).
     """
     def worker():
         try:
@@ -747,6 +884,9 @@ def download_audio(
             "-f", chosen_audio["format_id"],
             "--extractor-args", f"youtube:player_client={client}",
             "--newline", "--no-warnings",
+            # See video_cmd above — kept explicit since relaunching this
+            # after a pause relies on it.
+            "--continue",
             "-o", f"{output_template}.%(ext)s",
             url,
         ]
@@ -759,6 +899,7 @@ def download_audio(
                 cmd, _download_phase_progress, on_cancel_check,
                 lang["download_canceled_message"], lang["error_download_stalled"],
                 known_total_mb=_known_size_mb(chosen_audio),
+                on_pause_check=on_pause_check,
             )
         except DownloadCancelled as e:
             on_error(str(e))
@@ -798,6 +939,7 @@ def download_audio(
                 _convert_phase_progress if on_merge_progress else None,
                 on_cancel_check,
                 lang["download_canceled_message"],
+                on_pause_check=on_pause_check,
             )
         except DownloadCancelled as e:
             # Same reasoning as download_video: ffmpeg may have written a

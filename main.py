@@ -35,7 +35,7 @@ from utils import clean_playlist_url, copy_icons, get_icon_path
 # ---------------------------------------------------------------------------
 # Bump this on every release — must match the Inno Setup AppVersion so the
 # comparison against GitHub's latest release tag is meaningful.
-APP_VERSION = "3.3.0"
+APP_VERSION = "3.4.0"
 
 GITHUB_REPO = "AlperSrgn/VideoDownloader"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
@@ -343,6 +343,7 @@ THEMES = {
 # ---------------------------------------------------------------------------
 dark_mode = False
 cancel_requested = False
+pause_requested = False
 current_language: dict = {}
 sidebar_open = False
 SIDEBAR_WIDTH = 300
@@ -396,6 +397,13 @@ def on_progress(percent: float, downloaded_mb: float, total_mb: float, eta: str)
 
 
 def _update_progress_ui(percent: float, downloaded_mb: float, total_mb: float, eta: str):
+    if pause_requested:
+        # This update was queued (via root.after in on_progress) from a
+        # yt-dlp line the background thread read just before it noticed
+        # the pause request — the download has already been stopped by
+        # the time we get here, so drop this stale update rather than
+        # overwriting the "paused" label with it.
+        return
     progress_bar.set(percent / 100)
     progress_label.configure(
         text=(
@@ -418,6 +426,9 @@ def on_merge_progress(percent: float, elapsed_seconds: float, total_seconds: flo
 
 
 def _update_merge_progress_ui(percent: float, eta: str):
+    if pause_requested:
+        # Same stale-update guard as _update_progress_ui.
+        return
     progress_bar.set(percent / 100)
     progress_label.configure(
         text=(
@@ -429,6 +440,10 @@ def _update_merge_progress_ui(percent: float, eta: str):
 
 def on_cancel_check() -> bool:
     return cancel_requested
+
+
+def on_pause_check() -> bool:
+    return pause_requested
 
 
 def on_download_done(success_msg_key: str):
@@ -452,6 +467,8 @@ def _finalize_download(success_msg_key: str):
     else:
         hide_progress()
         set_widgets_state("normal")
+        pause_button.pack_forget()
+        download_button.pack(side="left", padx=5)
         download_button.configure(state="normal")
         queue_add_button.pack_forget()
         cancel_button.pack_forget()
@@ -472,6 +489,8 @@ def _handle_error(msg: str):
     else:
         hide_progress()
         set_widgets_state("normal")
+        pause_button.pack_forget()
+        download_button.pack(side="left", padx=5)
         download_button.configure(state="normal")
         queue_add_button.pack_forget()
         cancel_button.pack_forget()
@@ -745,7 +764,7 @@ def add_to_queue():
 def process_next_in_queue():
     """Pop the next item off the queue and start downloading it. Assumes
     current_queue_item is currently None (nothing else is in flight)."""
-    global current_queue_item, cancel_requested
+    global current_queue_item, cancel_requested, pause_requested
 
     if not download_queue:
         current_queue_item = None
@@ -754,6 +773,7 @@ def process_next_in_queue():
     current_queue_item = download_queue.popleft()
     render_queue_list()
     cancel_requested = False
+    pause_requested = False
 
     url = current_queue_item["url"]
     quality_key = current_queue_item["quality_key"]
@@ -761,7 +781,15 @@ def process_next_in_queue():
     # saves to the location selected when the download starts.
 
     set_widgets_state("disabled")
-    download_button.configure(state="disabled")
+    download_button.pack_forget()
+    # Reset to its default "paused? no" look in case the previous item in
+    # the queue ended while paused.
+    pause_button.configure(
+        text=current_language["pause_button"],
+        fg_color="#e0a12e",
+        hover_color="#b87f1f",
+    )
+    pause_button.pack(side="left", padx=5)
     queue_add_button.pack(side="left", padx=5)
     cancel_button.pack(pady=5)
 
@@ -781,6 +809,7 @@ def process_next_in_queue():
             on_error=on_download_error,
             lang=current_language,
             on_merge_progress=on_merge_progress,
+            on_pause_check=on_pause_check,
         )
     else:
         download_video(
@@ -793,6 +822,7 @@ def process_next_in_queue():
             on_error=on_download_error,
             lang=current_language,
             on_merge_progress=on_merge_progress,
+            on_pause_check=on_pause_check,
         )
 
 
@@ -873,6 +903,7 @@ def change_language(selected: str):
 
     label_map = {
         download_button:              "download_button",
+        pause_button:                 "pause_button",
         cancel_button:                "cancel_button",
         download_option_label:        "download_option_label",
         system_notification_checkbox: "system_notification_checkbox",
@@ -888,6 +919,11 @@ def change_language(selected: str):
     }
     for widget, key in label_map.items():
         widget.configure(text=current_language[key])
+
+    # pause_button's label depends on the paused state, not just the
+    # language, so it overrides the generic "pause_button" text set above.
+    if pause_requested:
+        pause_button.configure(text=current_language["resume_button"])
 
     render_queue_list()  # refreshes the "Queue (N)" header text in the new language
 
@@ -1233,8 +1269,8 @@ ytdlp_retry_button = ctk.CTkButton(
 ytdlp_retry_button.pack(pady=(0, 5))
 ytdlp_retry_button.pack_forget()
 
-# Action buttons: "İndir" is always visible,
-# "➕ Sıraya Ekle" is shown only while downloading.
+# Action buttons: "Download" is always visible,
+# "➕ Add to Queue" is shown only while downloading.
 action_buttons_frame = ctk.CTkFrame(bottom_panel, fg_color="transparent")
 action_buttons_frame.pack(pady=(0, 10))
 
@@ -1251,6 +1287,47 @@ download_button = ctk.CTkButton(
     state="disabled",  # re-enabled once on_ytdlp_status reports "ready"
 )
 download_button.pack(side="left", padx=5)
+
+# Shown in place of "download_button" while a download is active.
+def pause_download():
+    """Toggles the paused state of the item currently downloading.
+
+    The background download thread polls on_pause_check() (see downloader.py's
+    _apply_pause_state) and suspends/resumes the yt-dlp or ffmpeg process
+    accordingly, so pausing genuinely stops network/CPU usage rather than
+    just freezing the progress bar.
+    """
+    global pause_requested
+    pause_requested = not pause_requested
+
+    if pause_requested:
+        pause_button.configure(
+            text=current_language["resume_button"],
+            fg_color="#e0a12e",
+            hover_color="#b87f1f",
+        )
+        progress_label.configure(text=current_language["operation_paused_message"])
+    else:
+        pause_button.configure(
+            text=current_language["pause_button"],
+            fg_color="#e0a12e",
+            hover_color="#b87f1f",
+        )
+
+
+pause_button = ctk.CTkButton(
+    action_buttons_frame,
+    command=pause_download,
+    width=120,
+    height=45,
+    font=("Helvetica", 14, "bold"),
+    fg_color="#e0a12e",
+    hover_color="#b87f1f",
+    text_color="#fbfbfb",
+    corner_radius=5,
+)
+pause_button.pack(side="left", padx=5)
+pause_button.pack_forget()
 
 queue_add_button = ctk.CTkButton(
     action_buttons_frame,
