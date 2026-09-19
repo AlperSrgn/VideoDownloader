@@ -1,14 +1,18 @@
 """
-Uses the standalone yt-dlp.exe binary so new yt-dlp releases can be picked up
-without rebuilding the app.The binary is stored in AppData and updated
-once per app run, rather than before every download.
+Uses the standalone yt-dlp.exe binary.
+The binary is stored in the AppData folder and checked for updates
+at regular intervals.
 """
+
 
 import json
 import logging
 import os
 import subprocess
+import time
 import urllib.request
+
+from settings import load_setting, save_setting
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +22,13 @@ YT_DLP_EXE_NAME = "yt-dlp.exe"
 
 YT_DLP_DOWNLOAD_URL = "https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp.exe"
 YT_DLP_UPDATE_CHANNEL = "nightly"
+
+# config.json key: Unix timestamp of the last GitHub update check.
+# Persists the check time across app restarts until MIN_UPDATE_CHECK_INTERVAL passes.
+_LAST_UPDATE_CHECK_SETTING_KEY = "ytdlp_last_update_check_ts"
+
+# Minimum time to wait between two consecutive GitHub update checks.
+MIN_UPDATE_CHECK_INTERVAL = 12 * 60 * 60  # 12 hours
 
 # Applied to both connecting and each subsequent read while downloading
 # yt-dlp.exe. urllib.request.urlretrieve has no timeout support on its own,
@@ -46,6 +57,21 @@ def _run_hidden(cmd, **kwargs):
 
 def get_ytdlp_path(appdata_dir: str) -> str:
     return os.path.join(appdata_dir, YT_DLP_EXE_NAME)
+
+
+def _read_last_update_check() -> float:
+    """Reads the unix timestamp of the last update check from config.json.
+    Returns 0.0 if the setting was never written or is malformed (i.e.
+    "act as if it was never checked" -> a check is performed)."""
+    try:
+        return float(load_setting(_LAST_UPDATE_CHECK_SETTING_KEY, 0.0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _write_last_update_check(ts: float) -> None:
+    """Writes the timestamp of the last update check to config.json."""
+    save_setting(_LAST_UPDATE_CHECK_SETTING_KEY, ts)
 
 
 def download_ytdlp_exe(dest_path: str, on_progress=None) -> None:
@@ -84,20 +110,15 @@ def download_ytdlp_exe(dest_path: str, on_progress=None) -> None:
 
 def ensure_ytdlp(appdata_dir: str, force_check: bool = False, on_status=None) -> str:
     """
-    Ensures yt-dlp.exe exists and is up to date. On failure, uses the existing
-    copy or downloads one if none exists. The update check runs only
-    once per app session; subsequent calls reuse the result.
-    If provided, on_status(stage, detail) reports the download status:
-    detail is a progress percentage (0-100) for stage="downloading", the
-    exception that caused the failure for stage="error" (fatal — no usable
-    yt-dlp.exe exists yet), or the exception for stage="update_failed"
-    (non-fatal — the self-update check on a later launch didn't go through,
-    but the existing yt-dlp.exe copy still works). Pass either to
-    error_classifier.classify_ytdlp_download_error() /
-    classify_ytdlp_update_error() respectively for a proper localized
-    message instead of assuming it's always "no internet".
-    Returns the path to the executable.
-    """
+    Ensures yt-dlp.exe exists and is up to date. Uses the existing copy or
+    downloads one if needed. Update checks are limited by
+    MIN_UPDATE_CHECK_INTERVAL and the current process session, with the
+    check time persisted via settings. Pass force_check=True to bypass
+    these limits and force an immediate check.
+
+    If provided, on_status(stage, detail) reports download progress,
+    fatal errors, or non-fatal update failures. Returns the executable path."""
+
     global _session_checked, _cached_exe_path
 
     def _notify(stage, detail=None):
@@ -127,6 +148,20 @@ def ensure_ytdlp(appdata_dir: str, force_check: bool = False, on_status=None) ->
         _notify("ready")
         return _cached_exe_path or exe_path
 
+    if not force_check:
+        last_check = _read_last_update_check()
+        elapsed = time.time() - last_check
+        if elapsed < MIN_UPDATE_CHECK_INTERVAL:
+            # If not enough time has passed, skip GitHub and use the existing exe.
+            logger.debug(
+                "Skipping yt-dlp update check, last check was %.0f min ago",
+                elapsed / 60,
+            )
+            _session_checked = True
+            _cached_exe_path = exe_path
+            _notify("ready")
+            return exe_path
+
     _notify("checking_update")
     update_failed_exc = None
     try:
@@ -155,15 +190,16 @@ def ensure_ytdlp(appdata_dir: str, force_check: bool = False, on_status=None) ->
     _cached_exe_path = exe_path
 
     if update_failed_exc is not None:
-        # Not fatal — the existing copy of yt-dlp.exe still works, so we
-        # keep the download button enabled and just surface a brief,
-        # classified heads-up instead of blocking anything.
+        # Don't update the timestamp on a failed check; retry on the next launch.
+        # The existing yt-dlp.exe still works, so the process isn't blocked.
         logger.warning(
             "yt-dlp self-update check failed, continuing with existing copy: %s",
             update_failed_exc,
         )
         _notify("update_failed", update_failed_exc)
     else:
+        # Only record the check as "done" once it actually succeeded.
+        _write_last_update_check(time.time())
         _notify("ready")
 
     return exe_path
