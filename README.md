@@ -153,7 +153,7 @@ The build script handles the PyInstaller build process and automatically resolve
 
 # Screenshots
 
-<img src="https://github.com/user-attachments/assets/08ca5e47-c23e-44ca-b16d-ff59c947f299" alt="Cancel download" width="700"> 
+<img src="https://github.com/user-attachments/assets/bc2102a9-1e65-42e9-a4b4-3da7e26d41f1" alt="Cancel download" width="700"> 
 <img src="https://github.com/user-attachments/assets/49781470-a1df-407c-92ee-8aeb780f59fa" alt="Dark mode" width="700"> 
 <img src="https://github.com/user-attachments/assets/7b85fd50-4990-41d5-8402-676a7715e946" alt="Sidebar" width="700">
 
