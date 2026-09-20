@@ -27,7 +27,7 @@ from quality_options import (
 from error_classifier import classify_ytdlp_download_error, classify_ytdlp_update_error
 from languages import LANGUAGES
 from settings import load_setting, save_setting
-from utils import clean_playlist_url, copy_icons, get_icon_path
+from utils import clean_playlist_url, copy_icons, get_icon_path, load_button_icon
 
 
 # ---------------------------------------------------------------------------
@@ -35,7 +35,7 @@ from utils import clean_playlist_url, copy_icons, get_icon_path
 # ---------------------------------------------------------------------------
 # Bump this on every release — must match the Inno Setup AppVersion so the
 # comparison against GitHub's latest release tag is meaningful.
-APP_VERSION = "3.4.0"
+APP_VERSION = "3.4.1"
 
 GITHUB_REPO = "AlperSrgn/VideoDownloader"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
@@ -225,6 +225,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+logging.getLogger("PIL").setLevel(logging.WARNING)
 
 # ---------------------------------------------------------------------------
 # Icons
@@ -290,7 +291,8 @@ THEMES = {
         "frame":               {"fg_color": "#333333"},
         "video_url_label":     {"text_color": "#ebebeb"},
         "download_option_label": {"text_color": "#ebebeb"},
-        "light_dark":          {"text": "🔆"},
+        "light_dark":          {"text": ""},
+        "light_dark_icon":     "sun.png",   # shown in dark mode — hints "tap for light"
         "downloads_button":    {"fg_color": "#565656"},
         "menu_button":         {"fg_color": "#333333", "text_color": "#d0d0d0", "hover_color": "#565656"},
         "progress_label":      {"text_color": "#ebebeb", "bg_color": "#333333"},
@@ -315,7 +317,8 @@ THEMES = {
         "frame":               {"fg_color": "#ebebeb"},
         "video_url_label":     {"text_color": "#333333"},
         "download_option_label": {"text_color": "#333333"},
-        "light_dark":          {"text": "🌙"},
+        "light_dark":          {"text": ""},
+        "light_dark_icon":     "moon.png",   # shown in light mode — hints "tap for dark"
         "downloads_button":    {"fg_color": "#dddddd"},
         "menu_button":         {"fg_color": "#ebebeb", "text_color": "#333333", "hover_color": "#d0d0d0"},
         "progress_label":      {"text_color": "#333333", "bg_color": "#ebebeb"},
@@ -864,6 +867,10 @@ def toggle_theme():
     for key, widget in widget_map.items():
         widget.configure(**theme[key])
 
+    icon = _make_ctk_icon(theme["light_dark_icon"], "#fbfbfb", (24, 24))
+    if icon is not None:
+        light_dark.configure(image=icon)
+
     queue_item_text_color = theme["queue_item_label"]["text_color"]
     render_queue_list()  # repaints any already-visible queue rows with the new color
 
@@ -1300,11 +1307,15 @@ def pause_download():
     global pause_requested
     pause_requested = not pause_requested
 
+    icon_file = RESUME_ICON_FILE if pause_requested else PAUSE_ICON_FILE
+    icon = _make_ctk_icon(icon_file, "#fbfbfb")
+
     if pause_requested:
         pause_button.configure(
             text=current_language["resume_button"],
             fg_color="#e0a12e",
             hover_color="#b87f1f",
+            **({"image": icon} if icon is not None else {}),
         )
         progress_label.configure(text=current_language["operation_paused_message"])
     else:
@@ -1312,6 +1323,7 @@ def pause_download():
             text=current_language["pause_button"],
             fg_color="#e0a12e",
             hover_color="#b87f1f",
+            **({"image": icon} if icon is not None else {}),
         )
 
 
@@ -1374,10 +1386,9 @@ progress_label.pack_forget()
 # Downloads folder button
 downloads_button = ctk.CTkButton(
     root,
-    text="📂",
+    text="",
     command=open_downloads_folder,
     width=50, height=50,
-    font=("Helvetica", 30, "bold"),
     fg_color="#dddddd",
     hover_color="#bbbbbb",
     text_color="black",
@@ -1420,8 +1431,7 @@ menu_button.place(x=10, y=10)
 # Light/dark toggle inside sidebar
 light_dark = ctk.CTkButton(
     sidebar_content,
-    text="🌙",
-    font=("Helvetica", 30),
+    text="",
     fg_color="#4c6a8c",
     hover_color="#3b556f",
     text_color="#fbfbfb",
@@ -1546,6 +1556,62 @@ uninstall_button = ctk.CTkButton(
     text_color="#fbfbfb",
 )
 uninstall_button.place(relx=1.0, rely=1.0, anchor="se", x=-10, y=-10)
+
+# ---------------------------------------------------------------------------
+# Button icons (PNG files in icons/, downloaded from an icon site such as
+# Flaticon and dropped in next to appIcon.ico etc.). Each entry's color
+# matches that button's own text_color above, so the icon reads the same
+# as the label. A missing file just leaves that button text-only — see
+# load_button_icon() — so icons can be added one at a time.
+# ---------------------------------------------------------------------------
+BUTTON_ICON_SIZE = (18, 18)
+BUTTON_ICONS = {
+    download_button:              ("download.png",     "#fbfbfb"),
+    queue_add_button:             ("add.png",           "#fbfbfb"),
+    cancel_button:                ("cancel.png",        "#d9534f"),
+    save_location_button:         ("folder.png",        "#fbfbfb"),
+    check_updates_button:         ("refresh.png",       "#fbfbfb"),
+    ytdlp_retry_button:           ("refresh.png",       "#fbfbfb"),
+    preview_notification_button:  ("notification.png",  "#fbfbfb"),
+    clear_queue_button:           ("clear.png",          "#d9534f"),
+    uninstall_button:             ("uninstall.png",     "#fbfbfb"),
+    downloads_button:             ("folder.png",   "black", (30, 30)),
+}
+# pause_button toggles between two icons depending on state, so it's kept
+# separate from the static dict above and wired up in pause_download().
+PAUSE_ICON_FILE, RESUME_ICON_FILE = "pause.png", "resume.png"
+
+
+def _make_ctk_icon(filename: str, color: str, size=BUTTON_ICON_SIZE):
+    img = load_button_icon(filename, color=color, size=size)
+    if img is None:
+        return None
+    return ctk.CTkImage(light_image=img, dark_image=img, size=size)
+
+
+def apply_button_icons():
+    for widget, spec in BUTTON_ICONS.items():
+        filename, color = spec[0], spec[1]
+        size = spec[2] if len(spec) > 2 else BUTTON_ICON_SIZE
+        icon = _make_ctk_icon(filename, color, size)
+        if icon is not None:
+            widget.configure(image=icon, compound="left")
+
+    pause_icon_file = RESUME_ICON_FILE if pause_requested else PAUSE_ICON_FILE
+    pause_icon = _make_ctk_icon(pause_icon_file, "#fbfbfb")
+    if pause_icon is not None:
+        pause_button.configure(image=pause_icon, compound="left")
+
+    # light_dark starts in "light" mode (dark_mode=False at module load,
+    # before load_setting/toggle_theme run below) — so it shows the moon
+    # icon, matching THEMES["light"]["light_dark_icon"] set by toggle_theme().
+    theme_icon_file = "sun.png" if dark_mode else "moon.png"
+    theme_icon = _make_ctk_icon(theme_icon_file, "#fbfbfb", (24, 24))
+    if theme_icon is not None:
+        light_dark.configure(image=theme_icon)
+
+
+apply_button_icons()
 
 # yt-dlp version label (populated asynchronously)
 yt_dlp_version_label = ctk.CTkLabel(

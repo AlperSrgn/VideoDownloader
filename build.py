@@ -22,9 +22,7 @@ CMD = [
     "--onefile",
     "--noconsole",
     "--add-binary", f"{FFMPEG_PATH};.",
-    "--add-data", "icons\\notificationIcon.ico;icons",
-    "--add-data", "icons\\previewIcon.ico;icons",
-    "--add-data", "icons\\appIcon.ico;icons",
+    "--add-data", "icons;icons",
     "--hidden-import=plyer.platforms.win.notification",
     "main.py",
 ]

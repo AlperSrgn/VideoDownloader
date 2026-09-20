@@ -8,6 +8,7 @@ import time
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
 import imageio_ffmpeg
+from PIL import Image
 
 from settings import get_appdata_path
 
@@ -58,6 +59,46 @@ def copy_icons() -> None:
 
 def get_icon_path(name: str) -> str:
     return os.path.join(_icons_dir(), name)
+
+
+# ---------------------------------------------------------------------------
+# Button icons (PNG icons)
+# ---------------------------------------------------------------------------
+# These are read straight from the bundled "icons" folder into memory once
+# at startup — unlike the .ico files above, nothing needs the OS/notification
+# system to see them again later, so there's no need to copy them to AppData.
+
+def get_bundled_resource_path(*parts: str) -> str:
+    """Path to a file bundled with the app, working both in dev mode and in
+    the packaged .exe (mirrors the pattern already used for src_dir above,
+    which PyInstaller's --add-data resolves correctly in both cases)."""
+    base = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base, *parts)
+
+
+def _tinted_icon(path: str, color: str, size: tuple) -> Image.Image:
+    """Recolors a PNG icon while preserving its transparency."""
+    img = Image.open(path).convert("RGBA")
+    alpha = img.split()[3]
+    solid = Image.new("RGBA", img.size, color)
+    solid.putalpha(alpha)
+    return solid.resize(size, Image.LANCZOS)
+
+
+def load_button_icon(filename: str, color: str = "#fbfbfb", size=(18, 18)):
+    """Returns a tinted, resized PIL image for an icon in the bundled
+    icons/ folder, or None if the file isn't there yet. Returning None
+    instead of raising lets a button fall back to text-only if an icon
+    hasn't been added yet, instead of crashing the whole app."""
+    path = get_bundled_resource_path("icons", filename)
+    if not os.path.exists(path):
+        logger.warning("Button icon not found: %s", path)
+        return None
+    try:
+        return _tinted_icon(path, color, size)
+    except Exception as e:
+        logger.error("Button icon load error (%s): %s", filename, e)
+        return None
 
 
 # ---------------------------------------------------------------------------
