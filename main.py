@@ -309,8 +309,6 @@ THEMES = {
         "queue_header_label":  {"text_color": "#ebebeb"},
         "queue_list_frame":    {"fg_color": "#3d3d3d"},
         "queue_item_label":    {"text_color": "#ebebeb"},
-        "preview_title_label":    {"text_color": "#ebebeb"},
-        "preview_duration_label": {"text_color": "#bbbbbb"},
     },
     "light": {
         "root":                {"fg_color": "#ebebeb"},
@@ -335,8 +333,6 @@ THEMES = {
         "queue_header_label":  {"text_color": "#333333"},
         "queue_list_frame":    {"fg_color": "#f5f5f5"},
         "queue_item_label":    {"text_color": "#333333"},
-        "preview_title_label":    {"text_color": "#333333"},
-        "preview_duration_label": {"text_color": "#666666"},
     },
 }
 
@@ -468,6 +464,7 @@ def _finalize_download(success_msg_key: str):
     if download_queue:
         process_next_in_queue()
     else:
+        render_queue_list()  # clears the just-finished item from the queue list
         hide_progress()
         set_widgets_state("normal")
         pause_button.pack_forget()
@@ -490,6 +487,7 @@ def _handle_error(msg: str):
     if download_queue:
         process_next_in_queue()
     else:
+        render_queue_list()  # clears the just-errored item from the queue list
         hide_progress()
         set_widgets_state("normal")
         pause_button.pack_forget()
@@ -546,26 +544,35 @@ def quality_dropdown_text(quality_key: str) -> str:
 # Queue management
 # ---------------------------------------------------------------------------
 def render_queue_list():
-    """Redraw the waiting-items list. The currently-downloading item is not
-    shown here — it's already been popped off download_queue and is instead
-    reflected in the progress label above."""
+    """Redraw the queue list. The currently-downloading item (current_queue_item),
+    if any, is shown first as an active row (marked with ▶, no remove button —
+    cancel_button is used for that instead), followed by the waiting items."""
     for child in queue_list_frame.winfo_children():
         child.destroy()
 
-    if not download_queue:
+    total = len(download_queue) + (1 if current_queue_item else 0)
+    if not total:
         queue_list_frame.grid_remove()
         queue_header_label.grid_remove()
         clear_queue_button.grid_remove()
         return
 
     queue_header_label.configure(
-        text=f"{current_language['queue_title_label']} ({len(download_queue)})"
+        text=f"{current_language['queue_title_label']} ({total})"
     )
     queue_header_label.grid()
     clear_queue_button.grid()
     queue_list_frame.grid()
 
-    for idx, item in enumerate(download_queue, start=1):
+    # (display_index, item, is_active) — the active item gets no number
+    # (shown with ▶ instead), waiting items keep their original 1-based
+    # position in download_queue.
+    rows = []
+    if current_queue_item:
+        rows.append((None, current_queue_item, True))
+    rows.extend((idx, item, False) for idx, item in enumerate(download_queue, start=1))
+
+    for idx, item, is_active in rows:
         row = ctk.CTkFrame(queue_list_frame, fg_color="transparent")
         row.pack(fill="x", pady=2, padx=2)
 
@@ -581,11 +588,13 @@ def render_queue_list():
         text_frame = ctk.CTkFrame(row, fg_color="transparent")
         text_frame.pack(side="left", fill="x", expand=True)
 
+        prefix = "▶ " if is_active else f"{idx}. "
+
         if preview:
             title = preview["title"]
             display_title = title if len(title) <= 55 else title[:52] + "..."
             title_label = ctk.CTkLabel(
-                text_frame, text=f"{idx}. {display_title}",
+                text_frame, text=f"{prefix}{display_title}",
                 anchor="w", font=("Helvetica", 12, "bold"),
                 text_color=queue_item_text_color, justify="left",
             )
@@ -594,6 +603,8 @@ def render_queue_list():
             subtitle = f"[{quality_label(item['quality_key'])}]"
             if preview.get("duration"):
                 subtitle += f"  {preview['duration']}"
+            if is_active:
+                subtitle += f"  — {current_language['operation_in_progress_message']}"
             subtitle_label = ctk.CTkLabel(
                 text_frame, text=subtitle,
                 anchor="w", font=("Helvetica", 11),
@@ -606,18 +617,19 @@ def render_queue_list():
             display_url = item["url"] if len(item["url"]) <= 60 else item["url"][:57] + "..."
             label = ctk.CTkLabel(
                 text_frame,
-                text=f"{idx}. [{quality_label(item['quality_key'])}] {display_url}",
+                text=f"{prefix}[{quality_label(item['quality_key'])}] {display_url}",
                 anchor="w", font=("Helvetica", 12),
                 text_color=queue_item_text_color,
             )
             label.pack(anchor="w", fill="x")
 
-        remove_btn = ctk.CTkButton(
-            row, text="✕", width=24, height=24,
-            fg_color="transparent", hover_color="#dddddd", text_color="#d9534f",
-            command=lambda item_id=item["id"]: remove_from_queue(item_id),
-        )
-        remove_btn.pack(side="right", padx=5)
+        if not is_active:
+            remove_btn = ctk.CTkButton(
+                row, text="✕", width=24, height=24,
+                fg_color="transparent", hover_color="#dddddd", text_color="#d9534f",
+                command=lambda item_id=item["id"]: remove_from_queue(item_id),
+            )
+            remove_btn.pack(side="right", padx=5)
 
 
 def fetch_queue_item_preview(item: dict):
@@ -650,11 +662,14 @@ def fetch_queue_item_preview(item: dict):
 
 
 def apply_queue_item_preview(item_id: int, info: dict, thumb_bytes):
-    # The item may have been removed from the queue, cleared, or already
-    # promoted to "currently downloading" (popped off download_queue) while
-    # this fetch was in flight — in any of those cases there's nothing left
-    # to update.
-    target = next((i for i in download_queue if i["id"] == item_id), None)
+    # The item may have been removed from the queue or cleared while this
+    # fetch was in flight, or it may since have been promoted to
+    # "currently downloading" — check current_queue_item too, since it's
+    # now shown in the list as well (see render_queue_list).
+    if current_queue_item is not None and current_queue_item["id"] == item_id:
+        target = current_queue_item
+    else:
+        target = next((i for i in download_queue if i["id"] == item_id), None)
     if target is None:
         return
 
@@ -860,8 +875,6 @@ def toggle_theme():
         "quality_options_menu": quality_options_menu,
         "queue_header_label":  queue_header_label,
         "queue_list_frame":    queue_list_frame,
-        "preview_title_label":    preview_title_label,
-        "preview_duration_label": preview_duration_label,
     }
 
     for key, widget in widget_map.items():
@@ -949,105 +962,6 @@ def url_changed(*_):
         pass  # playlist_checkbox.grid()  — playlist support pending
     else:
         playlist_checkbox.grid_remove()
-
-    # NOTE: Preview in the URL field is temporarily disabled as it may
-    # cause the app to freeze or crash in some cases. Queue previews
-    # (fetch_queue_item_preview) are unaffected and use a separate mechanism.
-    # schedule_preview_fetch()
-
-
-# ---------------------------------------------------------------------------
-# URL preview panel: thumbnail + title + duration, shown a short moment
-# after the user pastes/types a link. This is a nicety, not a core flow —
-# any failure (invalid link, unsupported site, no network) just leaves the
-# panel hidden rather than showing an error.
-# ---------------------------------------------------------------------------
-_PREVIEW_DEBOUNCE_MS = 600  # wait for typing/pasting to settle before fetching
-_preview_after_id = None
-
-
-def schedule_preview_fetch():
-    """Debounced trigger: cancels any pending fetch and hides the current
-    preview immediately (it no longer matches what's in the box), then
-    schedules a new fetch only after typing has paused for a moment —
-    otherwise every keystroke would spawn a yt-dlp process."""
-    global _preview_after_id
-
-    if _preview_after_id is not None:
-        root.after_cancel(_preview_after_id)
-        _preview_after_id = None
-
-    preview_frame.grid_remove()
-
-    raw_url = url_var.get().strip()
-    if validate_video_url(raw_url) is not None:
-        return  # same validity bar as add_to_queue() — don't bother yt-dlp with junk
-
-    _preview_after_id = root.after(_PREVIEW_DEBOUNCE_MS, lambda: start_preview_fetch(raw_url))
-
-
-def start_preview_fetch(box_url: str):
-    # Keep the original URL to detect box changes during fetch.
-    # yt-dlp uses the cleaned URL with playlist params stripped, matching
-    # add_to_queue(), so only the single video is resolved.
-    lookup_url = clean_playlist_url(box_url)
-
-    # Show immediate feedback; yt-dlp startup and network requests can take a few seconds.
-    preview_thumbnail_label.configure(image=_BLANK_THUMBNAIL, text="")
-    preview_title_label.configure(text=current_language["preview_loading_message"])
-    preview_duration_label.configure(text="")
-    preview_frame.grid()
-
-    def worker():
-        from settings import get_appdata_path
-        from ytdlp_manager import get_ytdlp_path, fetch_preview_info
-
-        exe_path = get_ytdlp_path(get_appdata_path())
-        if not os.path.exists(exe_path):
-            # yt-dlp isn't ready; the URL field is disabled. Still, don't leave "Loading..." stuck.
-            root.after(0, lambda: preview_frame.grid_remove())
-            return
-
-        info = fetch_preview_info(exe_path, lookup_url)
-        if info is None:
-            return
-
-        thumb_bytes = None
-        thumb_url = info.get("thumbnail")
-        if thumb_url:
-            try:
-                with urllib.request.urlopen(thumb_url, timeout=10) as resp:
-                    thumb_bytes = resp.read()
-            except Exception as e:
-                logger.debug("Preview thumbnail download failed: %s", e)
-
-        root.after(0, lambda: apply_preview(box_url, info, thumb_bytes))
-
-    threading.Thread(target=worker, daemon=True).start()
-
-
-def apply_preview(request_url: str, info: dict, thumb_bytes: bytes | None):
-    # The URL box may have changed (or been cleared) while this fetch was
-    # in flight — discard a result that no longer matches what's shown.
-    if url_var.get().strip() != request_url:
-        return
-
-    preview_title_label.configure(text=info.get("title") or "")
-    preview_duration_label.configure(text=_format_duration(info.get("duration")))
-
-    if thumb_bytes:
-        try:
-            image = Image.open(io.BytesIO(thumb_bytes))
-            thumb_image = ctk.CTkImage(light_image=image, dark_image=image, size=(120, 68))
-            preview_thumbnail_label.configure(image=thumb_image, text="")
-            preview_thumbnail_label.image = thumb_image  # keep a reference so it isn't GC'd
-        except Exception as e:
-            logger.debug("Preview thumbnail decode failed: %s", e)
-            preview_thumbnail_label.configure(image=_BLANK_THUMBNAIL, text="")
-    else:
-        preview_thumbnail_label.configure(image=_BLANK_THUMBNAIL, text="")
-
-    preview_frame.grid()
 
 
 def _format_duration(seconds):
@@ -1192,40 +1106,6 @@ playlist_checkbox = ctk.CTkCheckBox(
 )
 #playlist_checkbox.grid(row=1, column=3, sticky="w", padx=10, pady=5)
 #playlist_checkbox.grid_remove()
-
-# URL preview: thumbnail + title + duration.
-# Hidden by default; schedule_preview_fetch() and apply_preview()
-# fill and show/hide this frame.
-preview_frame = ctk.CTkFrame(frame, fg_color="transparent")
-preview_frame.grid(row=1, column=0, columnspan=4, padx=10, pady=5, sticky="w")
-preview_frame.grid_remove()
-
-# configure(image=None) cannot clear a CTkLabel image.
-# Use a transparent CTkImage to properly replace the old thumbnail.
-_BLANK_THUMBNAIL = ctk.CTkImage(
-    light_image=Image.new("RGBA", (120, 68), (0, 0, 0, 0)),
-    dark_image=Image.new("RGBA", (120, 68), (0, 0, 0, 0)),
-    size=(120, 68),
-)
-
-preview_thumbnail_label = ctk.CTkLabel(preview_frame, text="", image=_BLANK_THUMBNAIL, width=120, height=68)
-preview_thumbnail_label.pack(side="left", padx=(0, 10))
-
-preview_text_frame = ctk.CTkFrame(preview_frame, fg_color="transparent")
-preview_text_frame.pack(side="left", fill="both", expand=True)
-
-preview_title_label = ctk.CTkLabel(
-    preview_text_frame, text="",
-    font=ctk.CTkFont(size=13, weight="bold"),
-    text_color="#333333", anchor="w", justify="left", wraplength=380,
-)
-preview_title_label.pack(anchor="w")
-
-preview_duration_label = ctk.CTkLabel(
-    preview_text_frame, text="",
-    font=ctk.CTkFont(size=12), text_color="#666666", anchor="w",
-)
-preview_duration_label.pack(anchor="w")
 
 # Queue header + clear button (row 2, hidden until something is queued)
 queue_header_label = ctk.CTkLabel(frame, text="", font=ctk.CTkFont(size=13, weight="bold"))
