@@ -603,14 +603,32 @@ def render_queue_list():
             subtitle = f"[{quality_label(item['quality_key'])}]"
             if preview.get("duration"):
                 subtitle += f"  {preview['duration']}"
+
             if is_active:
-                subtitle += f"  — {current_language['operation_in_progress_message']}"
-            subtitle_label = ctk.CTkLabel(
-                text_frame, text=subtitle,
-                anchor="w", font=("Helvetica", 11),
-                text_color=queue_item_text_color,
-            )
-            subtitle_label.pack(anchor="w", fill="x")
+                # Active item: show the status as a small download.png icon
+                # next to the subtitle text instead of the old text label.
+                subtitle_row = ctk.CTkFrame(text_frame, fg_color="transparent")
+                subtitle_row.pack(anchor="w", fill="x")
+
+                subtitle_label = ctk.CTkLabel(
+                    subtitle_row, text=subtitle,
+                    anchor="w", font=("Helvetica", 11),
+                    text_color=queue_item_text_color,
+                )
+                subtitle_label.pack(side="left")
+
+                status_icon = _make_ctk_icon("download.png", queue_item_text_color, (14, 14))
+                if status_icon is not None:
+                    status_icon_label = ctk.CTkLabel(subtitle_row, text="", image=status_icon)
+                    status_icon_label.image = status_icon  # keep a reference so it isn't GC'd
+                    status_icon_label.pack(side="left", padx=(10, 0))
+            else:
+                subtitle_label = ctk.CTkLabel(
+                    text_frame, text=subtitle,
+                    anchor="w", font=("Helvetica", 11),
+                    text_color=queue_item_text_color,
+                )
+                subtitle_label.pack(anchor="w", fill="x")
         else:
             # Preview not fetched yet (or fetch failed/timed out) — same
             # plain [quality] url line as before, so nothing looks broken.
