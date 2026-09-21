@@ -309,6 +309,7 @@ THEMES = {
         "queue_header_label":  {"text_color": "#ebebeb"},
         "queue_list_frame":    {"fg_color": "#3d3d3d"},
         "queue_item_label":    {"text_color": "#ebebeb"},
+        "clear_queue_button":  {"fg_color": "#333333", "hover_color": "#565656"},
     },
     "light": {
         "root":                {"fg_color": "#ebebeb"},
@@ -333,6 +334,7 @@ THEMES = {
         "queue_header_label":  {"text_color": "#333333"},
         "queue_list_frame":    {"fg_color": "#f5f5f5"},
         "queue_item_label":    {"text_color": "#333333"},
+        "clear_queue_button":  {"fg_color": "#ebebeb", "hover_color": "#dddddd"},
     },
 }
 
@@ -893,6 +895,7 @@ def toggle_theme():
         "quality_options_menu": quality_options_menu,
         "queue_header_label":  queue_header_label,
         "queue_list_frame":    queue_list_frame,
+        "clear_queue_button":  clear_queue_button,
     }
 
     for key, widget in widget_map.items():
@@ -1134,7 +1137,7 @@ clear_queue_button = ctk.CTkButton(
     frame,
     command=clear_queue,
     width=100, height=24,
-    font=("Helvetica", 11),
+    font=("Helvetica", 13, "bold"),
     fg_color="#ebebeb", hover_color="#dddddd", text_color="#d9534f",
 )
 clear_queue_button.grid(row=2, column=2, columnspan=2, padx=10, pady=(1, 0), sticky="e")
