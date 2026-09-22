@@ -35,7 +35,7 @@ from utils import clean_playlist_url, copy_icons, get_icon_path, load_button_ico
 # ---------------------------------------------------------------------------
 # Bump this on every release — must match the Inno Setup AppVersion so the
 # comparison against GitHub's latest release tag is meaningful.
-APP_VERSION = "3.4.1"
+APP_VERSION = "3.5.0"
 
 GITHUB_REPO = "AlperSrgn/VideoDownloader"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
@@ -645,7 +645,7 @@ def render_queue_list():
 
         if not is_active:
             remove_btn = ctk.CTkButton(
-                row, text="✕", width=24, height=24,
+                row, text="❌", width=24, height=24,
                 fg_color="transparent", hover_color="#dddddd", text_color="#d9534f",
                 command=lambda item_id=item["id"]: remove_from_queue(item_id),
             )
