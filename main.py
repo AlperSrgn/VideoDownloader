@@ -39,6 +39,7 @@ APP_VERSION = "3.5.0"
 
 GITHUB_REPO = "AlperSrgn/VideoDownloader"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+EXPECTED_INSTALLER_NAME = "VideoDownloaderSetup.exe"
 
 
 def _parse_version(v: str):
@@ -84,13 +85,13 @@ def check_for_updates():
 
             latest_tag = data.get("tag_name", "")
             assets = data.get("assets", [])
-            # Only trust an actual .exe asset — never fall back to the
+            # Only trust the exact installer asset — never fall back to the
             # release page URL, since that's an HTML page, not a binary,
             # and would fail (or worse, be executed as garbage) if used
             # as the "installer" to download and run.
             installer_url = next(
                 (a["browser_download_url"] for a in assets
-                 if a.get("name", "").lower().endswith(".exe")),
+                 if a.get("name", "").lower() == EXPECTED_INSTALLER_NAME.lower()),
                 None,
             )
             root.after(0, lambda: _on_update_check_done(latest_tag, installer_url))
