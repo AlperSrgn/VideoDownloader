@@ -36,6 +36,25 @@ from error_classifier import (
 
 logger = logging.getLogger(__name__)
 
+# Every temporary download file starts with this prefix (followed by a
+# per-download UUID), including yt-dlp's own .part/.ytdl side files.
+TEMP_PREFIX = ".ytdlp_tmp_"
+
+
+def cleanup_temp_files(folder: str, prefix: str) -> None:
+    """Deletes files in `folder` whose name starts with `prefix` (a single
+    download's TEMP_PREFIX + uuid). Never raises — cleanup is best-effort."""
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return
+    for name in names:
+        if name.startswith(prefix):
+            try:
+                os.remove(os.path.join(folder, name))
+            except OSError as e:
+                logger.warning("Could not remove temp file %s: %s", name, e)
+
 # Fixed weights combine video download, audio download,
 # and ffmpeg merge into one progress bar.
 # Previously, weights were calculated dynamically from file sizes.
@@ -98,6 +117,37 @@ def _apply_pause_state(process: subprocess.Popen, on_pause_check, suspended: boo
         return False
 
     return suspended
+
+
+def _terminate_process_tree(process: subprocess.Popen) -> None:
+    """Terminates `process` together with its child processes.
+
+    yt-dlp.exe is a PyInstaller build: the process we launch can be just a
+    launcher, with the real yt-dlp running as its child. Terminating only the
+    parent leaves the child alive and still holding the .part file open, so
+    the temp-file cleanup can't delete it. Children are collected first
+    because once the parent is gone they can no longer be found through it.
+    """
+    try:
+        children = psutil.Process(process.pid).children(recursive=True)
+    except psutil.Error:
+        children = []
+    process.terminate()
+    for child in children:
+        try:
+            child.terminate()
+        except psutil.Error:
+            pass
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+    _, alive = psutil.wait_procs(children, timeout=5)
+    for child in alive:
+        try:
+            child.kill()
+        except psutil.Error:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -345,11 +395,7 @@ def _download_once(cmd, on_progress, on_cancel_check, cancel_message, stall_mess
     try:
         while True:
             if on_cancel_check():
-                process.terminate()
-                try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    process.kill()
+                _terminate_process_tree(process)
                 raise DownloadCancelled(cancel_message)
 
             if on_pause_check is not None and on_pause_check():
@@ -369,11 +415,7 @@ def _download_once(cmd, on_progress, on_cancel_check, cancel_message, stall_mess
                     "yt-dlp produced no output for %ss — treating as stalled "
                     "and killing the process. cmd=%s", _STALL_TIMEOUT, cmd,
                 )
-                process.terminate()
-                try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    process.kill()
+                _terminate_process_tree(process)
                 raise DownloadStalled(stall_message)
 
             try:
@@ -618,6 +660,11 @@ def download_video(
     about (see _apply_pause_state).
     """
 
+    # Temp files use a UUID, so even repeated downloads of the same video
+    # only match the current download's file. Created here (not inside
+    # _worker_impl) so worker()'s finally can clean up on every exit path.
+    temp_id = uuid.uuid4().hex
+
     def worker():
         try:
             _worker_impl()
@@ -625,6 +672,10 @@ def download_video(
             # Safety net: # Unexpected errors can stop the thread and leave the UI stuck.
             logger.exception("Unexpected error in download_video worker")
             on_error(classify_generic_exception(e, lang))
+        finally:
+            # Cancel, stall, yt-dlp error, missing file, unexpected exception:
+            # whichever way we got here, leave no .ytdlp_tmp_* files behind.
+            cleanup_temp_files(save_location, f"{TEMP_PREFIX}{temp_id}")
 
     def _worker_impl():
         if not os.path.exists(get_ffmpeg_path()):
@@ -665,9 +716,6 @@ def download_video(
         title = info.get("title", "video")
         safe_title = sanitize_filename(title)
 
-        # Temp files use a UUID, so even repeated downloads of the same video
-        # only match the current download's file.
-        temp_id = uuid.uuid4().hex
         temp_base = os.path.join(save_location, f".ytdlp_tmp_{temp_id}")
 
         video_cmd = [
@@ -830,12 +878,18 @@ def download_audio(
     local CPU work with no network buffering to worry about (see
     _apply_pause_state).
     """
+    # UUID for the temp file so find_glob_file doesn't accidentally match an
+    # old file. Created here so worker()'s finally can clean up on every exit path.
+    temp_id = uuid.uuid4().hex
+
     def worker():
         try:
             _worker_impl()
         except Exception as e:
             logger.exception("Unexpected error in download_audio worker")
             on_error(classify_generic_exception(e, lang))
+        finally:
+            cleanup_temp_files(save_location, f"{TEMP_PREFIX}{temp_id}")
 
     def _worker_impl():
         if not os.path.exists(get_ffmpeg_path()):
@@ -871,9 +925,6 @@ def download_audio(
         output_filename = unique_filename(save_location, f"{safe_title}.mp3")
         output_path = os.path.join(save_location, output_filename)
 
-        # Same as download_video: use a UUID for the temp file so find_glob_file
-        # doesn't accidentally match an old file.
-        temp_id = uuid.uuid4().hex
         output_template = os.path.join(save_location, f".ytdlp_tmp_{temp_id}")
 
         # Download the raw audio track only — no -x/--audio-format here.
