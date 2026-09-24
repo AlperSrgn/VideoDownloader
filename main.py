@@ -53,6 +53,91 @@ def _parse_version(v: str):
     return tuple(parts)
 
 
+# ---------------------------------------------------------------------------
+# Single instance
+# ---------------------------------------------------------------------------
+# The app shares config.json, the save folder, the startup temp-file sweep and
+# the yt-dlp binary, so a second copy would interfere with the first. A named
+# mutex marks the running copy; a second launch just brings the first window
+# to the front and exits. "Local\\" scopes it to the current Windows session,
+# matching the per-user config.
+_SINGLE_INSTANCE_MUTEX_NAME = "Local\\VideoDownloader_SingleInstance"
+_WINDOW_TITLE_PREFIX = "Video Downloader v"
+_single_instance_handle = None  # must stay alive for the whole process lifetime
+
+
+def _acquire_single_instance() -> bool:
+    """True if this is the first copy. Also True when the check can't be done
+    (non-Windows or API failure) so the app never refuses to start because of it."""
+    global _single_instance_handle
+    if os.name != "nt":
+        return True
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.CreateMutexW.restype = wintypes.HANDLE
+        k32.CreateMutexW.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR]
+        k32.CloseHandle.argtypes = [wintypes.HANDLE]
+
+        handle = k32.CreateMutexW(None, False, _SINGLE_INSTANCE_MUTEX_NAME)
+        if not handle:
+            return True
+        if ctypes.get_last_error() == 183:  # ERROR_ALREADY_EXISTS
+            k32.CloseHandle(handle)
+            return False
+        _single_instance_handle = handle
+        return True
+    except Exception:
+        return True
+
+
+def _focus_existing_window() -> None:
+    """Best-effort: restore and focus the first copy's window."""
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
+        user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+        user32.IsWindowVisible.argtypes = [wintypes.HWND]
+        user32.IsIconic.argtypes = [wintypes.HWND]
+        user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+        user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+
+        found = []
+        enum_proc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+        def _check(hwnd, _lparam):
+            if not user32.IsWindowVisible(hwnd):
+                return True
+            length = user32.GetWindowTextLengthW(hwnd)
+            if length:
+                buf = ctypes.create_unicode_buffer(length + 1)
+                user32.GetWindowTextW(hwnd, buf, length + 1)
+                if buf.value.startswith(_WINDOW_TITLE_PREFIX):
+                    found.append(hwnd)
+                    return False  # stop enumerating
+            return True
+
+        user32.EnumWindows(enum_proc(_check), 0)
+        if found:
+            if user32.IsIconic(found[0]):
+                user32.ShowWindow(found[0], 9)  # SW_RESTORE
+            user32.SetForegroundWindow(found[0])
+    except Exception:
+        pass
+
+
+if not _acquire_single_instance():
+    _focus_existing_window()
+    sys.exit(0)
+
+
 def _set_update_lock(state: str):
     """Disable/enable the buttons that must stay locked while checking for
     or installing an update. download_button only re-enables if nothing
