@@ -74,6 +74,87 @@ AUDIO_CONVERT_WEIGHT = 15
 
 _NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
+# ---------------------------------------------------------------------------
+# Windows Job Object: kill child processes when the app exits
+# ---------------------------------------------------------------------------
+# ffmpeg / yt-dlp are child processes. On Windows they do NOT die when the
+# parent dies (window X, crash, Task Manager kill). They would keep running
+# and keep the temp files locked. Every process we launch is added to a job
+# with KILL_ON_JOB_CLOSE, so Windows itself kills them when this app's
+# process ends, however it ends.
+if os.name == "nt":
+    import ctypes
+    from ctypes import wintypes
+
+    class _BASIC_LIMIT(ctypes.Structure):
+        _fields_ = [
+            ("PerProcessUserTimeLimit", ctypes.c_int64),
+            ("PerJobUserTimeLimit", ctypes.c_int64),
+            ("LimitFlags", wintypes.DWORD),
+            ("MinimumWorkingSetSize", ctypes.c_size_t),
+            ("MaximumWorkingSetSize", ctypes.c_size_t),
+            ("ActiveProcessLimit", wintypes.DWORD),
+            ("Affinity", ctypes.c_size_t),
+            ("PriorityClass", wintypes.DWORD),
+            ("SchedulingClass", wintypes.DWORD),
+        ]
+
+    class _IO_COUNTERS(ctypes.Structure):
+        _fields_ = [(n, ctypes.c_uint64) for n in (
+            "ReadOps", "WriteOps", "OtherOps",
+            "ReadBytes", "WriteBytes", "OtherBytes")]
+
+    class _EXT_LIMIT(ctypes.Structure):
+        _fields_ = [
+            ("BasicLimitInformation", _BASIC_LIMIT),
+            ("IoInfo", _IO_COUNTERS),
+            ("ProcessMemoryLimit", ctypes.c_size_t),
+            ("JobMemoryLimit", ctypes.c_size_t),
+            ("PeakProcessMemoryUsed", ctypes.c_size_t),
+            ("PeakJobMemoryUsed", ctypes.c_size_t),
+        ]
+
+    _k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _k32.CreateJobObjectW.restype = wintypes.HANDLE
+    _k32.CreateJobObjectW.argtypes = [wintypes.LPVOID, wintypes.LPCWSTR]
+    _k32.SetInformationJobObject.argtypes = [
+        wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD]
+    _k32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+
+
+def _create_kill_on_close_job():
+    """Returns a job handle, or None if it can't be created (non-Windows or
+    API failure). The app keeps working without it, just without the
+    kill-on-exit safety net."""
+    if os.name != "nt":
+        return None
+    try:
+        job = _k32.CreateJobObjectW(None, None)
+        if not job:
+            return None
+        info = _EXT_LIMIT()
+        info.BasicLimitInformation.LimitFlags = 0x2000  # KILL_ON_JOB_CLOSE
+        ok = _k32.SetInformationJobObject(job, 9, ctypes.byref(info), ctypes.sizeof(info))
+        return job if ok else None
+    except Exception as e:
+        logger.debug("Could not create job object: %s", e)
+        return None
+
+
+_JOB = _create_kill_on_close_job()  # must stay alive for the whole app lifetime
+
+
+def _attach_to_job(process: subprocess.Popen) -> None:
+    """Adds `process` to the kill-on-close job. Best-effort, never raises."""
+    if _JOB is None:
+        return
+    try:
+        if not _k32.AssignProcessToJobObject(_JOB, int(process._handle)):
+            logger.debug("Could not assign pid %s to job object", process.pid)
+    except Exception as e:
+        logger.debug("Job assign failed for pid %s: %s", process.pid, e)
+
+
 # If yt-dlp produces absolutely no output for this long, we treat it as
 # stuck (e.g. an infinite loop while solving YouTube's nsig challenge for a
 # specific video — CPU stays high while disk/network usage stays at zero)
@@ -365,6 +446,7 @@ def _download_once(cmd, on_progress, on_cancel_check, cancel_message, stall_mess
         bufsize=1,
         creationflags=_NO_WINDOW,
     )
+    _attach_to_job(process)
 
     line_queue = queue.Queue()
     reader_thread = threading.Thread(
@@ -539,6 +621,7 @@ def _run_ffmpeg_merge(cmd, total_duration, on_merge_progress, on_cancel_check, c
         bufsize=1,
         creationflags=_NO_WINDOW,
     )
+    _attach_to_job(process)
 
     line_queue = queue.Queue()
     reader_thread = threading.Thread(

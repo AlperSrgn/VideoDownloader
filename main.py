@@ -18,7 +18,7 @@ from PIL import Image
 from plyer import notification
 from tkinter import Menu, filedialog, messagebox
 
-from downloader import download_video, download_audio
+from downloader import download_video, download_audio, cleanup_temp_files, TEMP_PREFIX
 from quality_options import (
     DROPDOWN_QUALITY_ORDER,
     QUALITY_OPTION_BY_KEY,
@@ -369,6 +369,11 @@ if not os.path.isdir(save_location):
 
 # Save the resolved location to config.json.
 save_setting("save_location", save_location)
+
+# Temp files (.ytdlp_tmp_*) left behind if the app was closed or killed
+# mid-download. Each download uses a fresh UUID, so these can never be
+# resumed and are just garbage.
+cleanup_temp_files(save_location, TEMP_PREFIX)
 
 
 # ---------------------------------------------------------------------------
