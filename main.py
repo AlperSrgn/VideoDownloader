@@ -264,20 +264,30 @@ def fetch_ytdlp_version(callback, on_status=None):
 # Window close (X)
 # ---------------------------------------------------------------------------
 def on_close_request():
-    """Idle: close right away. Download/merge in progress: ask first. On
-    confirm, the download is stopped through the normal cancel path (stops
+    """Idle: close right away. Download/merge in progress: pause it and ask.
+    On confirm, the download is stopped through the normal cancel path (stops
     yt-dlp/ffmpeg and lets the worker delete its temp files), then the app
-    closes. Declining leaves the download running."""
+    closes. Declining restores the previous pause state, so the download
+    continues where it left off."""
     global closing, cancel_requested, pause_requested
 
     if closing:
         return
 
     if current_queue_item is not None:
+        # Freeze the download while the dialog is open, using the same pause
+        # mechanism as the Pause button (the button itself is left untouched).
+        item_at_open = current_queue_item
+        was_paused = pause_requested
+        pause_requested = True
         if not messagebox.askyesno(
             current_language["close_confirm_title"],
             current_language["close_confirm_message"],
         ):
+            # Only restore if it's still the same item; a new queue item
+            # that started meanwhile has already reset its own pause state.
+            if current_queue_item is item_at_open:
+                pause_requested = was_paused
             return
         closing = True
         download_queue.clear()   # don't let the next queued item start
