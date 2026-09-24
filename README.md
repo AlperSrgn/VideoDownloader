@@ -105,10 +105,7 @@ On first launch, the application downloads `yt-dlp.exe` to:
 %LOCALAPPDATA%\VideoDownloader
 ```
 
-The application checks for `yt-dlp` updates at most every 12 hours. The last check is saved in `config.json`, so restarting the app won’t trigger a new check. If the check fails, it will be retried on the next launch.
-Therefore, there is no separate `pip install` step for yt-dlp.
-
-> **Internet access is required on first launch** so the application can download the standalone yt-dlp binary.
+The application checks for `yt-dlp` updates every 12 hours. The last check is saved in `config.json`, so restarting won’t trigger another check. Failed checks are retried on the next launch, so no separate `pip install` step is required.
 
 ---
 
