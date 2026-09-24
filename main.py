@@ -261,6 +261,46 @@ def fetch_ytdlp_version(callback, on_status=None):
 
 
 # ---------------------------------------------------------------------------
+# Window close (X)
+# ---------------------------------------------------------------------------
+def on_close_request():
+    """Idle: close right away. Download/merge in progress: ask first. On
+    confirm, the download is stopped through the normal cancel path (stops
+    yt-dlp/ffmpeg and lets the worker delete its temp files), then the app
+    closes. Declining leaves the download running."""
+    global closing, cancel_requested, pause_requested
+
+    if closing:
+        return
+
+    if current_queue_item is not None:
+        if not messagebox.askyesno(
+            current_language["close_confirm_title"],
+            current_language["close_confirm_message"],
+        ):
+            return
+        closing = True
+        download_queue.clear()   # don't let the next queued item start
+        pause_requested = False
+        cancel_requested = True
+        root.withdraw()          # window disappears immediately
+
+    _finish_close(0)
+
+
+def _finish_close(attempt: int):
+    """Waits (max ~10 s) for the cancelled worker to finish, then closes.
+    Anything still alive after that is killed by the job object."""
+    if current_queue_item is not None and attempt < 100:
+        root.after(100, lambda: _finish_close(attempt + 1))
+        return
+    if closing:
+        # All processes are stopped by now; remove whatever temp files remain.
+        cleanup_temp_files(save_location, TEMP_PREFIX)
+    root.destroy()
+
+
+# ---------------------------------------------------------------------------
 # Uninstall
 # ---------------------------------------------------------------------------
 def uninstall_app():
@@ -346,6 +386,7 @@ THEMES = {
 dark_mode = False
 cancel_requested = False
 pause_requested = False
+closing = False  # True once the user confirmed closing during an active download
 current_language: dict = {}
 sidebar_open = False
 SIDEBAR_WIDTH = 300
@@ -489,7 +530,8 @@ def on_download_error(msg: str):
 def _handle_error(msg: str):
     global current_queue_item
 
-    messagebox.showerror(current_language["error_title"], msg)
+    if not closing:  # closing cancels the download on purpose — no error popup
+        messagebox.showerror(current_language["error_title"], msg)
 
     current_queue_item = None
     if download_queue:
@@ -1085,6 +1127,7 @@ root = ctk.CTk()
 root.title(f"Video Downloader v{APP_VERSION}")
 root.geometry("800x600")
 root.iconbitmap(APP_ICON)
+root.protocol("WM_DELETE_WINDOW", on_close_request)
 
 # Main frame
 frame = ctk.CTkFrame(root, fg_color="#ebebeb")
