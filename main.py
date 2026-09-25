@@ -1,21 +1,11 @@
-import io
-import itertools
-import json
 import logging
-import re
 import os
 import subprocess
 import sys
-import tempfile
 import threading
-import urllib.parse
-import urllib.request
 import webbrowser
-from collections import deque
 
 import customtkinter as ctk
-from PIL import Image
-from plyer import notification
 from tkinter import Menu, filedialog, messagebox
 
 from downloader import download_video, download_audio, cleanup_temp_files, TEMP_PREFIX
@@ -26,31 +16,20 @@ from quality_options import (
 )
 from error_classifier import classify_ytdlp_download_error, classify_ytdlp_update_error
 from languages import LANGUAGES
+from process_manager import acquire_single_instance, focus_existing_window
 from settings import load_setting, save_setting
-from utils import clean_playlist_url, copy_icons, get_icon_path, load_button_icon
-
-
-# ---------------------------------------------------------------------------
-# App version & "Check for Updates"
-# ---------------------------------------------------------------------------
-# Bump this on every release — must match the Inno Setup AppVersion so the
-# comparison against GitHub's latest release tag is meaningful.
-APP_VERSION = "3.6.0"
-
-GITHUB_REPO = "AlperSrgn/VideoDownloader"
-GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
-EXPECTED_INSTALLER_NAME = "VideoDownloaderSetup.exe"
-
-
-def _parse_version(v: str):
-    """'v3.2.0' / '3.2.0' -> (3, 2, 0) so versions compare numerically
-    instead of as strings (e.g. '3.10.0' > '3.9.0')."""
-    v = v.strip().lstrip("vV")
-    parts = []
-    for p in v.split("."):
-        m = re.match(r"\d+", p)
-        parts.append(int(m.group()) if m else 0)
-    return tuple(parts)
+from ui.notifications import notify as send_notification
+from ui.queue_view import QueueView
+from ui.theme import ThemeManager
+from updater import UpdateChecker, APP_VERSION
+from utils import (
+    clean_playlist_url,
+    copy_icons,
+    format_save_location_display,
+    get_icon_path,
+    load_button_icon,
+    validate_video_url,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -60,246 +39,15 @@ def _parse_version(v: str):
 # the yt-dlp binary, so a second copy would interfere with the first. A named
 # mutex marks the running copy; a second launch just brings the first window
 # to the front and exits. "Local\\" scopes it to the current Windows session,
-# matching the per-user config.
+# matching the per-user config. The actual mutex/window-enumeration logic
+# lives in process_manager.py — these two values are the only app-specific
+# bits it needs.
 _SINGLE_INSTANCE_MUTEX_NAME = "Local\\VideoDownloader_SingleInstance"
 _WINDOW_TITLE_PREFIX = "Video Downloader v"
-_single_instance_handle = None  # must stay alive for the whole process lifetime
 
-
-def _acquire_single_instance() -> bool:
-    """True if this is the first copy. Also True when the check can't be done
-    (non-Windows or API failure) so the app never refuses to start because of it."""
-    global _single_instance_handle
-    if os.name != "nt":
-        return True
-    try:
-        import ctypes
-        from ctypes import wintypes
-
-        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        k32.CreateMutexW.restype = wintypes.HANDLE
-        k32.CreateMutexW.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR]
-        k32.CloseHandle.argtypes = [wintypes.HANDLE]
-
-        handle = k32.CreateMutexW(None, False, _SINGLE_INSTANCE_MUTEX_NAME)
-        if not handle:
-            return True
-        if ctypes.get_last_error() == 183:  # ERROR_ALREADY_EXISTS
-            k32.CloseHandle(handle)
-            return False
-        _single_instance_handle = handle
-        return True
-    except Exception:
-        return True
-
-
-def _focus_existing_window() -> None:
-    """Best-effort: restore and focus the first copy's window."""
-    if os.name != "nt":
-        return
-    try:
-        import ctypes
-        from ctypes import wintypes
-
-        user32 = ctypes.WinDLL("user32", use_last_error=True)
-        user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
-        user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
-        user32.IsWindowVisible.argtypes = [wintypes.HWND]
-        user32.IsIconic.argtypes = [wintypes.HWND]
-        user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
-        user32.SetForegroundWindow.argtypes = [wintypes.HWND]
-
-        found = []
-        enum_proc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
-
-        def _check(hwnd, _lparam):
-            if not user32.IsWindowVisible(hwnd):
-                return True
-            length = user32.GetWindowTextLengthW(hwnd)
-            if length:
-                buf = ctypes.create_unicode_buffer(length + 1)
-                user32.GetWindowTextW(hwnd, buf, length + 1)
-                if buf.value.startswith(_WINDOW_TITLE_PREFIX):
-                    found.append(hwnd)
-                    return False  # stop enumerating
-            return True
-
-        user32.EnumWindows(enum_proc(_check), 0)
-        if found:
-            if user32.IsIconic(found[0]):
-                user32.ShowWindow(found[0], 9)  # SW_RESTORE
-            user32.SetForegroundWindow(found[0])
-    except Exception:
-        pass
-
-
-if not _acquire_single_instance():
-    _focus_existing_window()
+if not acquire_single_instance(_SINGLE_INSTANCE_MUTEX_NAME):
+    focus_existing_window(_WINDOW_TITLE_PREFIX)
     sys.exit(0)
-
-
-def _set_update_lock(state: str):
-    """Disable/enable the buttons that must stay locked while checking for
-    or installing an update. download_button only re-enables if nothing
-    else (e.g. an active download) still needs it disabled."""
-    check_updates_button.configure(state=state)
-    uninstall_button.configure(state=state)
-    if state == "disabled":
-        download_button.configure(state="disabled")
-    elif current_queue_item is None:
-        download_button.configure(state="normal")
-
-
-def check_for_updates():
-    """Triggered by the sidebar's 'Check for Updates' button. Hits the
-    GitHub releases API in the background so the UI never freezes, then
-    reports back on the main thread via root.after()."""
-    _set_update_lock("disabled")
-
-    def worker():
-        try:
-            req = urllib.request.Request(
-                GITHUB_LATEST_RELEASE_API,
-                headers={
-                    "Accept": "application/vnd.github+json",
-                    "User-Agent": "VideoDownloader-UpdateCheck",
-                },
-            )
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-
-            latest_tag = data.get("tag_name", "")
-            assets = data.get("assets", [])
-            # Only trust the exact installer asset — never fall back to the
-            # release page URL, since that's an HTML page, not a binary,
-            # and would fail (or worse, be executed as garbage) if used
-            # as the "installer" to download and run.
-            installer_url = next(
-                (a["browser_download_url"] for a in assets
-                 if a.get("name", "").lower() == EXPECTED_INSTALLER_NAME.lower()),
-                None,
-            )
-            root.after(0, lambda: _on_update_check_done(latest_tag, installer_url))
-        except Exception as e:
-            logger.debug("Update check failed: %s", e)
-            root.after(0, _on_update_check_failed)
-
-    threading.Thread(target=worker, daemon=True).start()
-
-
-def _on_update_check_done(latest_tag: str, installer_url: str):
-    _set_update_lock("normal")
-
-    if not latest_tag:
-        _on_update_check_failed()
-        return
-
-    try:
-        is_newer = _parse_version(latest_tag) > _parse_version(APP_VERSION)
-    except Exception:
-        is_newer = latest_tag.lstrip("vV") != APP_VERSION
-
-    if not is_newer:
-        messagebox.showinfo(
-            current_language["update_check_title"],
-            current_language["already_latest_message"].replace("{version}", APP_VERSION),
-        )
-        return
-
-    if not installer_url:
-        # A newer tag exists on GitHub, but it has no .exe asset attached
-        # (e.g. the release was published without uploading the installer).
-        # Offer the release page instead of failing silently or, worse,
-        # trying to download/run something that isn't a real installer.
-        wants_browser = messagebox.askyesno(
-            current_language["update_available_title"],
-            current_language["update_no_installer_message"].replace("{version}", latest_tag),
-        )
-        if wants_browser:
-            webbrowser.open(f"https://github.com/{GITHUB_REPO}/releases/tag/{latest_tag}")
-        return
-
-    wants_update = messagebox.askyesno(
-        current_language["update_available_title"],
-        current_language["update_available_message"].replace("{version}", latest_tag),
-    )
-    if wants_update:
-        _download_and_run_installer(installer_url)
-
-
-def _on_update_check_failed():
-    _set_update_lock("normal")
-    messagebox.showerror(
-        current_language["error_title"],
-        current_language["update_check_failed_message"],
-    )
-
-
-def _download_and_run_installer(installer_url: str):
-    """Downloads the installer .exe to a temp folder, then launches it and
-    closes the app — the same Inno Setup installer already overwrites the
-    existing install in place, matching the manual update flow that was
-    already tested."""
-    _set_update_lock("disabled")
-    ytdlp_status_label.configure(text=current_language["update_downloading_message"])
-    ytdlp_status_label.pack(pady=(0, 5), before=action_buttons_frame)
-
-    def worker():
-        try:
-            installer_path = os.path.join(tempfile.gettempdir(), "VideoDownloaderSetup_update.exe")
-            req = urllib.request.Request(installer_url, headers={"User-Agent": "VideoDownloader-UpdateCheck"})
-            with urllib.request.urlopen(req, timeout=30) as resp, open(installer_path, "wb") as f:
-                while True:
-                    chunk = resp.read(1024 * 256)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-
-            # Sanity check before executing anything: a valid Windows PE
-            # binary starts with the "MZ" signature and Inno Setup
-            # installers are never a few KB. Without this check, a bad
-            # download (e.g. an HTML error page saved with a .exe name)
-            # would get handed straight to subprocess.Popen().
-            if not _looks_like_valid_installer(installer_path):
-                try:
-                    os.remove(installer_path)
-                except OSError:
-                    pass
-                root.after(0, _on_update_check_failed)
-                root.after(0, ytdlp_status_label.pack_forget)
-                return
-
-            root.after(0, lambda: _launch_installer_and_exit(installer_path))
-        except Exception as e:
-            logger.debug("Installer download failed: %s", e)
-            root.after(0, _on_update_check_failed)
-            root.after(0, ytdlp_status_label.pack_forget)
-
-    threading.Thread(target=worker, daemon=True).start()
-
-
-def _looks_like_valid_installer(path: str, min_size_bytes: int = 500_000) -> bool:
-    """Cheap sanity check: real Windows executables start with the "MZ"
-    signature and Inno Setup installers are always well over 500 KB. This
-    catches e.g. an HTML error/redirect page that got saved with a .exe
-    name, before we ever try to run it."""
-    try:
-        if os.path.getsize(path) < min_size_bytes:
-            return False
-        with open(path, "rb") as f:
-            return f.read(2) == b"MZ"
-    except OSError:
-        return False
-
-
-def _launch_installer_and_exit(installer_path: str):
-    clean_env = {
-        k: v for k, v in os.environ.items()
-        if not k.startswith("_PYI_") and k != "_MEIPASS2"
-    }
-    subprocess.Popen([installer_path], env=clean_env)
-    root.destroy()
-    sys.exit()
 
 
 # ---------------------------------------------------------------------------
@@ -359,10 +107,10 @@ def on_close_request():
     if closing:
         return
 
-    if current_queue_item is not None:
+    if queue_view.current_item is not None:
         # Freeze the download while the dialog is open, using the same pause
         # mechanism as the Pause button (the button itself is left untouched).
-        item_at_open = current_queue_item
+        item_at_open = queue_view.current_item
         was_paused = pause_requested
         pause_requested = True
         if not messagebox.askyesno(
@@ -371,11 +119,11 @@ def on_close_request():
         ):
             # Only restore if it's still the same item; a new queue item
             # that started meanwhile has already reset its own pause state.
-            if current_queue_item is item_at_open:
+            if queue_view.current_item is item_at_open:
                 pause_requested = was_paused
             return
         closing = True
-        download_queue.clear()   # don't let the next queued item start
+        queue_view.clear()   # don't let the next queued item start
         pause_requested = False
         cancel_requested = True
         root.withdraw()          # window disappears immediately
@@ -386,7 +134,7 @@ def on_close_request():
 def _finish_close(attempt: int):
     """Waits (max ~10 s) for the cancelled worker to finish, then closes.
     Anything still alive after that is killed by the job object."""
-    if current_queue_item is not None and attempt < 100:
+    if queue_view.current_item is not None and attempt < 100:
         root.after(100, lambda: _finish_close(attempt + 1))
         return
     if closing:
@@ -419,66 +167,16 @@ def uninstall_app():
 
 
 # ---------------------------------------------------------------------------
-# Theme definitions (module-level constant)
+# Theme definitions
 # ---------------------------------------------------------------------------
-THEMES = {
-    "dark": {
-        "root":                {"fg_color": "#333333"},
-        "frame":               {"fg_color": "#333333"},
-        "video_url_label":     {"text_color": "#ebebeb"},
-        "download_option_label": {"text_color": "#ebebeb"},
-        "light_dark":          {"text": ""},
-        "light_dark_icon":     "sun.png",   # shown in dark mode — hints "tap for light"
-        "downloads_button":    {"fg_color": "#565656"},
-        "menu_button":         {"fg_color": "#333333", "text_color": "#d0d0d0", "hover_color": "#565656"},
-        "progress_label":      {"text_color": "#ebebeb", "bg_color": "#333333"},
-        "cancel_button":       {"fg_color": "#333333", "hover_color": "#565656"},
-        "url_entry":           {"fg_color": "#565656", "text_color": "#ebebeb"},
-        "playlist_checkbox":   {
-            "text_color": "#ebebeb", "bg_color": "#333333",
-            "border_color": "#ebebeb", "fg_color": "#ebebeb", "checkmark_color": "#333333"
-        },
-        "quality_options_menu": {
-            "fg_color": "#565656", "text_color": "#ebebeb",
-            "button_color": "#444444", "button_hover_color": "#666666"
-        },
-        "queue_header_label":  {"text_color": "#ebebeb"},
-        "queue_list_frame":    {"fg_color": "#3d3d3d"},
-        "queue_item_label":    {"text_color": "#ebebeb"},
-        "clear_queue_button":  {"fg_color": "#333333", "hover_color": "#565656"},
-    },
-    "light": {
-        "root":                {"fg_color": "#ebebeb"},
-        "frame":               {"fg_color": "#ebebeb"},
-        "video_url_label":     {"text_color": "#333333"},
-        "download_option_label": {"text_color": "#333333"},
-        "light_dark":          {"text": ""},
-        "light_dark_icon":     "moon.png",   # shown in light mode — hints "tap for dark"
-        "downloads_button":    {"fg_color": "#dddddd"},
-        "menu_button":         {"fg_color": "#ebebeb", "text_color": "#333333", "hover_color": "#d0d0d0"},
-        "progress_label":      {"text_color": "#333333", "bg_color": "#ebebeb"},
-        "cancel_button":       {"fg_color": "#ebebeb", "hover_color": "#dddddd"},
-        "url_entry":           {"fg_color": "#ffffff", "text_color": "#333333"},
-        "playlist_checkbox":   {
-            "text_color": "#333333", "bg_color": "#ebebeb",
-            "border_color": "#333333", "fg_color": "#333333", "checkmark_color": "#ebebeb"
-        },
-        "quality_options_menu": {
-            "fg_color": "#e0e0e0", "text_color": "#333333",
-            "button_color": "#d0d0d0", "button_hover_color": "#c0c0c0"
-        },
-        "queue_header_label":  {"text_color": "#333333"},
-        "queue_list_frame":    {"fg_color": "#f5f5f5"},
-        "queue_item_label":    {"text_color": "#333333"},
-        "clear_queue_button":  {"fg_color": "#ebebeb", "hover_color": "#dddddd"},
-    },
-}
+# Moved to ui/theme.py — pure data, no widget references. See that module
+# for the dict itself.
 
 
 # ---------------------------------------------------------------------------
 # State
 # ---------------------------------------------------------------------------
-dark_mode = False
+theme_manager = ThemeManager()
 cancel_requested = False
 pause_requested = False
 closing = False  # True once the user confirmed closing during an active download
@@ -487,13 +185,8 @@ sidebar_open = False
 SIDEBAR_WIDTH = 300
 sidebar_x = -SIDEBAR_WIDTH
 
-# Text color for dynamic queue rows; updated when the theme changes.
-queue_item_text_color = THEMES["light"]["queue_item_label"]["text_color"]
-
-# Download queue — items waiting to start.
-download_queue = deque()
-current_queue_item = None  # {"id": int, "url": str} or None when idle
-_queue_id_counter = itertools.count(1)
+# Download queue — items waiting to start, plus the one currently in flight.
+queue_view = QueueView()
 
 # Folder where completed downloads are saved.
 # Can be changed by the user and is saved to config.json.
@@ -594,18 +287,15 @@ def on_download_done(success_msg_key: str):
 
 
 def _finalize_download(success_msg_key: str):
-    global current_queue_item
+    send_notification(
+        system_notification_enabled.get(),
+        current_language["operation_completed_message"],
+        current_language[success_msg_key],
+        NOTIFICATION_ICON,
+    )
 
-    if system_notification_enabled.get():
-        notification.notify(
-            title=current_language["operation_completed_message"],
-            message=current_language[success_msg_key],
-            timeout=3,
-            app_icon=NOTIFICATION_ICON,
-        )
-
-    current_queue_item = None
-    if download_queue:
+    queue_view.current_item = None
+    if queue_view.items:
         process_next_in_queue()
     else:
         render_queue_list()  # clears the just-finished item from the queue list
@@ -623,13 +313,11 @@ def on_download_error(msg: str):
 
 
 def _handle_error(msg: str):
-    global current_queue_item
-
     if not closing:  # closing cancels the download on purpose — no error popup
         messagebox.showerror(current_language["error_title"], msg)
 
-    current_queue_item = None
-    if download_queue:
+    queue_view.current_item = None
+    if queue_view.items:
         process_next_in_queue()
     else:
         render_queue_list()  # clears the just-errored item from the queue list
@@ -688,229 +376,48 @@ def quality_dropdown_text(quality_key: str) -> str:
 # ---------------------------------------------------------------------------
 # Queue management
 # ---------------------------------------------------------------------------
+# The queue's own state and rendering live in QueueView (ui/queue_view.py);
+# these are thin wrappers that supply the widgets/state QueueView needs and
+# don't own itself (theme color, icon factory, language strings), plus the
+# remove-then-redraw / preview-applied-then-redraw glue.
+
 def render_queue_list():
-    """Redraw the queue list. The currently-downloading item (current_queue_item),
-    if any, is shown first as an active row (marked with ▶, no remove button —
+    """Redraw the queue list. The currently-downloading item, if any, is
+    shown first as an active row (marked with ▶, no remove button —
     cancel_button is used for that instead), followed by the waiting items."""
-    for child in queue_list_frame.winfo_children():
-        child.destroy()
-
-    total = len(download_queue) + (1 if current_queue_item else 0)
-    if not total:
-        queue_list_frame.grid_remove()
-        queue_header_label.grid_remove()
-        clear_queue_button.grid_remove()
-        return
-
-    queue_header_label.configure(
-        text=f"{current_language['queue_title_label']} ({total})"
+    queue_view.render(
+        widgets={
+            "list_frame": queue_list_frame,
+            "header_label": queue_header_label,
+            "clear_button": clear_queue_button,
+        },
+        text_color=theme_manager.queue_item_text_color,
+        make_icon=_make_ctk_icon,
+        quality_label=quality_label,
+        current_language=current_language,
+        on_remove=remove_from_queue,
     )
-    queue_header_label.grid()
-    clear_queue_button.grid()
-    queue_list_frame.grid()
-
-    # (display_index, item, is_active) — the active item gets no number
-    # (shown with ▶ instead), waiting items keep their original 1-based
-    # position in download_queue.
-    rows = []
-    if current_queue_item:
-        rows.append((None, current_queue_item, True))
-    rows.extend((idx, item, False) for idx, item in enumerate(download_queue, start=1))
-
-    for idx, item, is_active in rows:
-        row = ctk.CTkFrame(queue_list_frame, fg_color="transparent")
-        row.pack(fill="x", pady=2, padx=2)
-
-        preview = item.get("preview")
-
-        # Thumbnail — only shown once fetched; the row just starts without
-        # one and gets it added in when apply_queue_item_preview() re-renders.
-        if preview and preview.get("thumb_image"):
-            thumb_label = ctk.CTkLabel(row, text="", image=preview["thumb_image"], width=60, height=34)
-            thumb_label.image = preview["thumb_image"]  # keep a reference so it isn't GC'd
-            thumb_label.pack(side="left", padx=(5, 8))
-
-        text_frame = ctk.CTkFrame(row, fg_color="transparent")
-        text_frame.pack(side="left", fill="x", expand=True)
-
-        prefix = "▶ " if is_active else f"{idx}. "
-
-        if preview:
-            title = preview["title"]
-            display_title = title if len(title) <= 55 else title[:52] + "..."
-            title_label = ctk.CTkLabel(
-                text_frame, text=f"{prefix}{display_title}",
-                anchor="w", font=("Helvetica", 12, "bold"),
-                text_color=queue_item_text_color, justify="left",
-            )
-            title_label.pack(anchor="w", fill="x")
-
-            subtitle = f"[{quality_label(item['quality_key'])}]"
-            if preview.get("duration"):
-                subtitle += f"  {preview['duration']}"
-
-            if is_active:
-                # Active item: show the status as a small download.png icon
-                # next to the subtitle text instead of the old text label.
-                subtitle_row = ctk.CTkFrame(text_frame, fg_color="transparent")
-                subtitle_row.pack(anchor="w", fill="x")
-
-                subtitle_label = ctk.CTkLabel(
-                    subtitle_row, text=subtitle,
-                    anchor="w", font=("Helvetica", 11),
-                    text_color=queue_item_text_color,
-                )
-                subtitle_label.pack(side="left")
-
-                status_icon = _make_ctk_icon("download.png", queue_item_text_color, (14, 14))
-                if status_icon is not None:
-                    status_icon_label = ctk.CTkLabel(subtitle_row, text="", image=status_icon)
-                    status_icon_label.image = status_icon  # keep a reference so it isn't GC'd
-                    status_icon_label.pack(side="left", padx=(10, 0))
-            else:
-                subtitle_label = ctk.CTkLabel(
-                    text_frame, text=subtitle,
-                    anchor="w", font=("Helvetica", 11),
-                    text_color=queue_item_text_color,
-                )
-                subtitle_label.pack(anchor="w", fill="x")
-        else:
-            # Preview not fetched yet (or fetch failed/timed out) — same
-            # plain [quality] url line as before, so nothing looks broken.
-            display_url = item["url"] if len(item["url"]) <= 60 else item["url"][:57] + "..."
-            label = ctk.CTkLabel(
-                text_frame,
-                text=f"{prefix}[{quality_label(item['quality_key'])}] {display_url}",
-                anchor="w", font=("Helvetica", 12),
-                text_color=queue_item_text_color,
-            )
-            label.pack(anchor="w", fill="x")
-
-        if not is_active:
-            remove_btn = ctk.CTkButton(
-                row, text="❌", width=24, height=24,
-                fg_color="transparent", hover_color="#dddddd", text_color="#d9534f",
-                command=lambda item_id=item["id"]: remove_from_queue(item_id),
-            )
-            remove_btn.pack(side="right", padx=5)
 
 
 def fetch_queue_item_preview(item: dict):
     """Fetches preview info in the background and updates the queued item.
     Uses the item ID, so it can update while waiting in the queue."""
-    def worker():
-        from settings import get_appdata_path
-        from ytdlp_manager import get_ytdlp_path, fetch_preview_info
-
-        exe_path = get_ytdlp_path(get_appdata_path())
-        if not os.path.exists(exe_path):
-            return  # yt-dlp isn't ready yet — leave the plain url line as-is
-
-        info = fetch_preview_info(exe_path, item["url"])
-        if info is None:
-            return  # invalid link / unsupported site / no network — leave the plain url line
-
-        thumb_bytes = None
-        thumb_url = info.get("thumbnail")
-        if thumb_url:
-            try:
-                with urllib.request.urlopen(thumb_url, timeout=10) as resp:
-                    thumb_bytes = resp.read()
-            except Exception as e:
-                logger.debug("Queue item thumbnail download failed: %s", e)
-
-        root.after(0, lambda: apply_queue_item_preview(item["id"], info, thumb_bytes))
-
-    threading.Thread(target=worker, daemon=True).start()
+    queue_view.fetch_preview(item, after=root.after, on_done=_apply_preview_and_render)
 
 
-def apply_queue_item_preview(item_id: int, info: dict, thumb_bytes):
-    # The item may have been removed from the queue or cleared while this
-    # fetch was in flight, or it may since have been promoted to
-    # "currently downloading" — check current_queue_item too, since it's
-    # now shown in the list as well (see render_queue_list).
-    if current_queue_item is not None and current_queue_item["id"] == item_id:
-        target = current_queue_item
-    else:
-        target = next((i for i in download_queue if i["id"] == item_id), None)
-    if target is None:
-        return
-
-    thumb_image = None
-    if thumb_bytes:
-        try:
-            image = Image.open(io.BytesIO(thumb_bytes))
-            thumb_image = ctk.CTkImage(light_image=image, dark_image=image, size=(60, 34))
-        except Exception as e:
-            logger.debug("Queue item thumbnail decode failed: %s", e)
-
-    target["preview"] = {
-        "title": info.get("title") or target["url"],
-        "duration": _format_duration(info.get("duration")),
-        "thumb_image": thumb_image,
-    }
+def _apply_preview_and_render(item_id: int, info: dict, thumb_bytes):
+    queue_view.apply_preview(item_id, info, thumb_bytes)
     render_queue_list()
 
 
 def remove_from_queue(item_id: int):
-    global download_queue
-    download_queue = deque(item for item in download_queue if item["id"] != item_id)
+    queue_view.remove(item_id)
     render_queue_list()
 
 
 def clear_queue():
-    global download_queue
-    download_queue = deque()
+    queue_view.clear()
     render_queue_list()
-
-
-# Known YouTube page types that list many videos rather than one: search
-# results, channel pages, bare playlist pages, hashtag pages. This app only
-# supports single-video download — handing one of these to yt-dlp makes it
-# try to extract EVERY entry (full webpage + format lookup per video),
-# which can take many minutes with zero incremental feedback and looks
-# exactly like the app has frozen. Checked upfront (in both the preview
-# fetch and add_to_queue) so yt-dlp is never even touched with them.
-_YOUTUBE_LISTING_URL_PATTERN = re.compile(
-    r"youtube\.com/(?:results\?|channel/|c/|@|playlist\?|hashtag/)", re.IGNORECASE
-)
-
-# Basic domain-shape check (labels separated by dots, no spaces/invalid
-# chars) — catches things like "http://asdf" (no host) or a pasted string
-# with a typo that still happens to start with "http://".
-_HOSTNAME_PATTERN = re.compile(
-    r"^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?"
-    r"(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$"
-)
-
-
-def validate_video_url(raw_url: str) -> str | None:
-    """Shared URL validation for add_to_queue() and preview.
-    Returns None if valid, otherwise the language key for the warning.
-
-    Only checks URL structure (scheme/host/listing patterns);
-    does not verify reachability or yt-dlp support.
-    """
-
-    if not raw_url:
-        return "empty_url_warning"
-
-    if any(ch.isspace() for ch in raw_url):
-        return "invalid_url_warning"
-
-    parsed = urllib.parse.urlparse(raw_url)
-
-    if parsed.scheme not in ("http", "https"):
-        return "invalid_url_warning"
-
-    hostname = parsed.hostname or ""
-    if not hostname or not _HOSTNAME_PATTERN.match(hostname):
-        return "invalid_url_warning"
-
-    if _YOUTUBE_LISTING_URL_PATTERN.search(raw_url):
-        return "not_a_video_url_warning"
-
-    return None
 
 
 def add_to_queue():
@@ -932,32 +439,29 @@ def add_to_queue():
         return
 
     url = clean_playlist_url(raw_url)
-    queued_item = {"id": next(_queue_id_counter), "url": url, "quality_key": quality_key, "preview": None}
-    download_queue.append(queued_item)
+    queued_item = queue_view.enqueue(url, quality_key)
     url_entry.delete(0, "end")
     render_queue_list()
     fetch_queue_item_preview(queued_item)
 
-    if current_queue_item is None:
+    if queue_view.current_item is None:
         process_next_in_queue()
 
 
 def process_next_in_queue():
     """Pop the next item off the queue and start downloading it. Assumes
-    current_queue_item is currently None (nothing else is in flight)."""
-    global current_queue_item, cancel_requested, pause_requested
+    queue_view.current_item is currently None (nothing else is in flight)."""
+    global cancel_requested, pause_requested
 
-    if not download_queue:
-        current_queue_item = None
+    if queue_view.pop_next() is None:
         return
 
-    current_queue_item = download_queue.popleft()
     render_queue_list()
     cancel_requested = False
     pause_requested = False
 
-    url = current_queue_item["url"]
-    quality_key = current_queue_item["quality_key"]
+    url = queue_view.current_item["url"]
+    quality_key = queue_view.current_item["quality_key"]
     # Uses the current global save_location;
     # saves to the location selected when the download starts.
 
@@ -974,7 +478,7 @@ def process_next_in_queue():
     queue_add_button.pack(side="left", padx=5)
     cancel_button.pack(pady=5)
 
-    remaining = len(download_queue)
+    remaining = len(queue_view.items)
     starting_text = current_language["download_starting_message"]
     if remaining:
         starting_text += f"  ({current_language['queue_remaining_label']}: {remaining})"
@@ -1019,10 +523,6 @@ def cancel_download():
 # Theme toggle
 # ---------------------------------------------------------------------------
 def toggle_theme():
-    global dark_mode, queue_item_text_color
-    theme_key = "dark" if not dark_mode else "light"
-    theme = THEMES[theme_key]
-
     widget_map = {
         "root":                root,
         "frame":               frame,
@@ -1040,18 +540,8 @@ def toggle_theme():
         "queue_list_frame":    queue_list_frame,
         "clear_queue_button":  clear_queue_button,
     }
-
-    for key, widget in widget_map.items():
-        widget.configure(**theme[key])
-
-    icon = _make_ctk_icon(theme["light_dark_icon"], "#fbfbfb", (24, 24))
-    if icon is not None:
-        light_dark.configure(image=icon)
-
-    queue_item_text_color = theme["queue_item_label"]["text_color"]
+    theme_manager.toggle(widget_map, _make_ctk_icon)
     render_queue_list()  # repaints any already-visible queue rows with the new color
-
-    dark_mode = not dark_mode
 
 
 # ---------------------------------------------------------------------------
@@ -1128,15 +618,6 @@ def url_changed(*_):
         playlist_checkbox.grid_remove()
 
 
-def _format_duration(seconds):
-    if not seconds:
-        return ""
-    seconds = int(seconds)
-    h, rem = divmod(seconds, 3600)
-    m, s = divmod(rem, 60)
-    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
-
-
 # ---------------------------------------------------------------------------
 # Misc UI callbacks
 # ---------------------------------------------------------------------------
@@ -1181,16 +662,8 @@ def open_downloads_folder():
         webbrowser.open(save_location)
 
 
-def _format_save_location_display(path: str) -> str:
-    """Shorten a path for display in the sidebar's limited width."""
-    max_len = 28
-    if len(path) <= max_len:
-        return path
-    return "…" + path[-(max_len - 1):]
-
-
 def update_save_location_label():
-    save_location_value_label.configure(text=_format_save_location_display(save_location))
+    save_location_value_label.configure(text=format_save_location_display(save_location))
 
 
 def choose_save_location():
@@ -1206,13 +679,12 @@ def choose_save_location():
 
 
 def preview_notification():
-    if system_notification_enabled.get():
-        notification.notify(
-            title=current_language["preview_info_title"],
-            message=current_language["system_notification_message"],
-            timeout=3,
-            app_icon=PREVIEW_ICON,
-        )
+    send_notification(
+        system_notification_enabled.get(),
+        current_language["preview_info_title"],
+        current_language["system_notification_message"],
+        PREVIEW_ICON,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1569,7 +1041,6 @@ update_save_location_label()
 # Check for Updates button
 check_updates_button = ctk.CTkButton(
     sidebar_content,
-    command=check_for_updates,
     font=("Helvetica", 13),
     fg_color="#4c6a8c",
     hover_color="#3b556f",
@@ -1601,6 +1072,21 @@ uninstall_button = ctk.CTkButton(
     text_color="#fbfbfb",
 )
 uninstall_button.place(relx=1.0, rely=1.0, anchor="se", x=-10, y=-10)
+
+# Now that every widget it needs exists, wire up the update checker and
+# hook it to the button created above (its command couldn't be set at
+# creation time since the checker needs uninstall_button too).
+update_checker = UpdateChecker(
+    root=root,
+    get_language=lambda: current_language,
+    is_download_active=lambda: queue_view.current_item is not None,
+    check_updates_button=check_updates_button,
+    uninstall_button=uninstall_button,
+    download_button=download_button,
+    ytdlp_status_label=ytdlp_status_label,
+    action_buttons_frame=action_buttons_frame,
+)
+check_updates_button.configure(command=update_checker.check_for_updates)
 
 # ---------------------------------------------------------------------------
 # Button icons (PNG files in icons/, downloaded from an icon site such as
@@ -1647,10 +1133,11 @@ def apply_button_icons():
     if pause_icon is not None:
         pause_button.configure(image=pause_icon, compound="left")
 
-    # light_dark starts in "light" mode (dark_mode=False at module load,
-    # before load_setting/toggle_theme run below) — so it shows the moon
-    # icon, matching THEMES["light"]["light_dark_icon"] set by toggle_theme().
-    theme_icon_file = "sun.png" if dark_mode else "moon.png"
+    # light_dark starts in "light" mode (theme_manager.dark_mode=False at
+    # module load, before load_setting/toggle_theme run below) — so it
+    # shows the moon icon, matching THEMES["light"]["light_dark_icon"] set
+    # by toggle_theme().
+    theme_icon_file = "sun.png" if theme_manager.dark_mode else "moon.png"
     theme_icon = _make_ctk_icon(theme_icon_file, "#fbfbfb", (24, 24))
     if theme_icon is not None:
         light_dark.configure(image=theme_icon)
@@ -1682,7 +1169,7 @@ def on_ytdlp_status(stage: str, detail):
             ytdlp_status_label.pack_forget()
             ytdlp_retry_button.pack_forget()
             url_entry.configure(state="normal")
-            if current_queue_item is None:  # don't steal control from an active download
+            if queue_view.current_item is None:  # don't steal control from an active download
                 download_button.configure(state="normal")
             return
 
@@ -1711,7 +1198,7 @@ def on_ytdlp_status(stage: str, detail):
             ytdlp_status_label.configure(text=message)
             ytdlp_status_label.pack(pady=(0, 5), before=action_buttons_frame)
             url_entry.configure(state="normal")
-            if current_queue_item is None:
+            if queue_view.current_item is None:
                 download_button.configure(state="normal")
             root.after(6000, ytdlp_status_label.pack_forget)
             return

@@ -8,10 +8,16 @@ import time
 import uuid
 from collections import deque
 
-import psutil
-
+from process_manager import (
+    NO_WINDOW,
+    attach_to_job,
+    apply_pause_state,
+    resume_if_suspended,
+    terminate_process_tree,
+)
 from settings import get_appdata_path
 from utils import (
+    cleanup_temp_files,
     get_ffmpeg_path,
     sanitize_filename,
     unique_filename,
@@ -40,21 +46,6 @@ logger = logging.getLogger(__name__)
 # per-download UUID), including yt-dlp's own .part/.ytdl side files.
 TEMP_PREFIX = ".ytdlp_tmp_"
 
-
-def cleanup_temp_files(folder: str, prefix: str) -> None:
-    """Deletes files in `folder` whose name starts with `prefix` (a single
-    download's TEMP_PREFIX + uuid). Never raises — cleanup is best-effort."""
-    try:
-        names = os.listdir(folder)
-    except OSError:
-        return
-    for name in names:
-        if name.startswith(prefix):
-            try:
-                os.remove(os.path.join(folder, name))
-            except OSError as e:
-                logger.warning("Could not remove temp file %s: %s", name, e)
-
 # Fixed weights combine video download, audio download,
 # and ffmpeg merge into one progress bar.
 # Previously, weights were calculated dynamically from file sizes.
@@ -72,89 +63,6 @@ AUDIO_DOWNLOAD_WEIGHT = 85
 AUDIO_CONVERT_WEIGHT = 15
 
 
-_NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-
-# ---------------------------------------------------------------------------
-# Windows Job Object: kill child processes when the app exits
-# ---------------------------------------------------------------------------
-# ffmpeg / yt-dlp are child processes. On Windows they do NOT die when the
-# parent dies (window X, crash, Task Manager kill). They would keep running
-# and keep the temp files locked. Every process we launch is added to a job
-# with KILL_ON_JOB_CLOSE, so Windows itself kills them when this app's
-# process ends, however it ends.
-if os.name == "nt":
-    import ctypes
-    from ctypes import wintypes
-
-    class _BASIC_LIMIT(ctypes.Structure):
-        _fields_ = [
-            ("PerProcessUserTimeLimit", ctypes.c_int64),
-            ("PerJobUserTimeLimit", ctypes.c_int64),
-            ("LimitFlags", wintypes.DWORD),
-            ("MinimumWorkingSetSize", ctypes.c_size_t),
-            ("MaximumWorkingSetSize", ctypes.c_size_t),
-            ("ActiveProcessLimit", wintypes.DWORD),
-            ("Affinity", ctypes.c_size_t),
-            ("PriorityClass", wintypes.DWORD),
-            ("SchedulingClass", wintypes.DWORD),
-        ]
-
-    class _IO_COUNTERS(ctypes.Structure):
-        _fields_ = [(n, ctypes.c_uint64) for n in (
-            "ReadOps", "WriteOps", "OtherOps",
-            "ReadBytes", "WriteBytes", "OtherBytes")]
-
-    class _EXT_LIMIT(ctypes.Structure):
-        _fields_ = [
-            ("BasicLimitInformation", _BASIC_LIMIT),
-            ("IoInfo", _IO_COUNTERS),
-            ("ProcessMemoryLimit", ctypes.c_size_t),
-            ("JobMemoryLimit", ctypes.c_size_t),
-            ("PeakProcessMemoryUsed", ctypes.c_size_t),
-            ("PeakJobMemoryUsed", ctypes.c_size_t),
-        ]
-
-    _k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    _k32.CreateJobObjectW.restype = wintypes.HANDLE
-    _k32.CreateJobObjectW.argtypes = [wintypes.LPVOID, wintypes.LPCWSTR]
-    _k32.SetInformationJobObject.argtypes = [
-        wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD]
-    _k32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
-
-
-def _create_kill_on_close_job():
-    """Returns a job handle, or None if it can't be created (non-Windows or
-    API failure). The app keeps working without it, just without the
-    kill-on-exit safety net."""
-    if os.name != "nt":
-        return None
-    try:
-        job = _k32.CreateJobObjectW(None, None)
-        if not job:
-            return None
-        info = _EXT_LIMIT()
-        info.BasicLimitInformation.LimitFlags = 0x2000  # KILL_ON_JOB_CLOSE
-        ok = _k32.SetInformationJobObject(job, 9, ctypes.byref(info), ctypes.sizeof(info))
-        return job if ok else None
-    except Exception as e:
-        logger.debug("Could not create job object: %s", e)
-        return None
-
-
-_JOB = _create_kill_on_close_job()  # must stay alive for the whole app lifetime
-
-
-def _attach_to_job(process: subprocess.Popen) -> None:
-    """Adds `process` to the kill-on-close job. Best-effort, never raises."""
-    if _JOB is None:
-        return
-    try:
-        if not _k32.AssignProcessToJobObject(_JOB, int(process._handle)):
-            logger.debug("Could not assign pid %s to job object", process.pid)
-    except Exception as e:
-        logger.debug("Job assign failed for pid %s: %s", process.pid, e)
-
-
 # If yt-dlp produces absolutely no output for this long, we treat it as
 # stuck (e.g. an infinite loop while solving YouTube's nsig challenge for a
 # specific video — CPU stays high while disk/network usage stays at zero)
@@ -163,72 +71,6 @@ _STALL_TIMEOUT = 60  # seconds
 
 # Shared cancel flag — set to True from UI to abort an active download
 cancel_download = False
-
-
-def _apply_pause_state(process: subprocess.Popen, on_pause_check, suspended: bool) -> bool:
-    """Suspends or resumes `process` based on on_pause_check(), and returns
-    the updated suspended state.
-
-    Used by both the yt-dlp download loop and the ffmpeg merge loop, so
-    pausing genuinely stops network/CPU usage instead of just freezing the
-    progress bar. Callers reset their own "no output" timer while this
-    returns True, so a pause is never mistaken for a stall.
-    """
-    if on_pause_check is None:
-        return False
-
-    try:
-        want_paused = on_pause_check()
-    except Exception:
-        want_paused = False
-
-    if want_paused and not suspended:
-        try:
-            psutil.Process(process.pid).suspend()
-        except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
-            logger.debug("Could not suspend process %s: %s", process.pid, e)
-            return False
-        return True
-
-    if not want_paused and suspended:
-        try:
-            psutil.Process(process.pid).resume()
-        except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
-            logger.debug("Could not resume process %s: %s", process.pid, e)
-        return False
-
-    return suspended
-
-
-def _terminate_process_tree(process: subprocess.Popen) -> None:
-    """Terminates `process` together with its child processes.
-
-    yt-dlp.exe is a PyInstaller build: the process we launch can be just a
-    launcher, with the real yt-dlp running as its child. Terminating only the
-    parent leaves the child alive and still holding the .part file open, so
-    the temp-file cleanup can't delete it. Children are collected first
-    because once the parent is gone they can no longer be found through it.
-    """
-    try:
-        children = psutil.Process(process.pid).children(recursive=True)
-    except psutil.Error:
-        children = []
-    process.terminate()
-    for child in children:
-        try:
-            child.terminate()
-        except psutil.Error:
-            pass
-    try:
-        process.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        process.kill()
-    _, alive = psutil.wait_procs(children, timeout=5)
-    for child in alive:
-        try:
-            child.kill()
-        except psutil.Error:
-            pass
 
 
 # ---------------------------------------------------------------------------
@@ -444,9 +286,9 @@ def _download_once(cmd, on_progress, on_cancel_check, cancel_message, stall_mess
         encoding="utf-8",
         errors="replace",
         bufsize=1,
-        creationflags=_NO_WINDOW,
+        creationflags=NO_WINDOW,
     )
-    _attach_to_job(process)
+    attach_to_job(process)
 
     line_queue = queue.Queue()
     reader_thread = threading.Thread(
@@ -477,7 +319,7 @@ def _download_once(cmd, on_progress, on_cancel_check, cancel_message, stall_mess
     try:
         while True:
             if on_cancel_check():
-                _terminate_process_tree(process)
+                terminate_process_tree(process)
                 raise DownloadCancelled(cancel_message)
 
             if on_pause_check is not None and on_pause_check():
@@ -497,7 +339,7 @@ def _download_once(cmd, on_progress, on_cancel_check, cancel_message, stall_mess
                     "yt-dlp produced no output for %ss — treating as stalled "
                     "and killing the process. cmd=%s", _STALL_TIMEOUT, cmd,
                 )
-                _terminate_process_tree(process)
+                terminate_process_tree(process)
                 raise DownloadStalled(stall_message)
 
             try:
@@ -608,7 +450,7 @@ def _run_ffmpeg_merge(cmd, total_duration, on_merge_progress, on_cancel_check, c
     Cancellation is checked on stdout lines and at regular intervals.
 
     on_pause_check: optional callable — while it returns True, the ffmpeg
-    process is suspended (see _apply_pause_state), same as during the
+    process is suspended (see apply_pause_state), same as during the
     yt-dlp download phase.
     """
     process = subprocess.Popen(
@@ -619,9 +461,9 @@ def _run_ffmpeg_merge(cmd, total_duration, on_merge_progress, on_cancel_check, c
         encoding="utf-8",
         errors="replace",
         bufsize=1,
-        creationflags=_NO_WINDOW,
+        creationflags=NO_WINDOW,
     )
-    _attach_to_job(process)
+    attach_to_job(process)
 
     line_queue = queue.Queue()
     reader_thread = threading.Thread(
@@ -646,11 +488,7 @@ def _run_ffmpeg_merge(cmd, total_duration, on_merge_progress, on_cancel_check, c
     try:
         while True:
             if on_cancel_check():
-                if suspended:
-                    try:
-                        psutil.Process(process.pid).resume()
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        pass
+                resume_if_suspended(process, suspended)
                 process.terminate()
                 try:
                     process.wait(timeout=5)
@@ -658,7 +496,7 @@ def _run_ffmpeg_merge(cmd, total_duration, on_merge_progress, on_cancel_check, c
                     process.kill()
                 raise DownloadCancelled(cancel_message)
 
-            suspended = _apply_pause_state(process, on_pause_check, suspended)
+            suspended = apply_pause_state(process, on_pause_check, suspended)
             if suspended:
                 time.sleep(_CANCEL_POLL_INTERVAL)
                 continue
@@ -740,7 +578,7 @@ def download_video(
     it on resume, so it continues the partial file (see _run_download's
     docstring for why); the merge phase pauses by suspending ffmpeg in
     place, since it's local CPU work with no network buffering to worry
-    about (see _apply_pause_state).
+    about (see apply_pause_state).
     """
 
     # Temp files use a UUID, so even repeated downloads of the same video
@@ -959,7 +797,7 @@ def download_audio(
     so it continues the partial file (see _run_download's docstring); the
     mp3 conversion phase pauses by suspending ffmpeg in place, since it's
     local CPU work with no network buffering to worry about (see
-    _apply_pause_state).
+    apply_pause_state).
     """
     # UUID for the temp file so find_glob_file doesn't accidentally match an
     # old file. Created here so worker()'s finally can clean up on every exit path.

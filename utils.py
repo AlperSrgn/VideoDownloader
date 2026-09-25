@@ -203,9 +203,95 @@ def update_file_timestamp(filepath: str) -> None:
         os.utime(filepath, (now, now))
 
 
+def cleanup_temp_files(folder: str, prefix: str) -> None:
+    """Deletes files in `folder` whose name starts with `prefix` (a single
+    download's TEMP_PREFIX + uuid). Never raises — cleanup is best-effort."""
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return
+    for name in names:
+        if name.startswith(prefix):
+            try:
+                os.remove(os.path.join(folder, name))
+            except OSError as e:
+                logger.warning("Could not remove temp file %s: %s", name, e)
+
+
+# ---------------------------------------------------------------------------
+# Formatting helpers
+# ---------------------------------------------------------------------------
+
+def format_duration(seconds) -> str:
+    """Formats a duration in seconds as H:MM:SS, or M:SS under an hour."""
+    if not seconds:
+        return ""
+    seconds = int(seconds)
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
+
+def format_save_location_display(path: str) -> str:
+    """Shorten a path for display in the sidebar's limited width."""
+    max_len = 28
+    if len(path) <= max_len:
+        return path
+    return "…" + path[-(max_len - 1):]
+
+
 # ---------------------------------------------------------------------------
 # URL helpers
 # ---------------------------------------------------------------------------
+
+# Known YouTube page types that list many videos rather than one: search
+# results, channel pages, bare playlist pages, hashtag pages. This app only
+# supports single-video download — handing one of these to yt-dlp makes it
+# try to extract EVERY entry (full webpage + format lookup per video),
+# which can take many minutes with zero incremental feedback and looks
+# exactly like the app has frozen. Checked upfront (in both the preview
+# fetch and add_to_queue) so yt-dlp is never even touched with them.
+_YOUTUBE_LISTING_URL_PATTERN = re.compile(
+    r"youtube\.com/(?:results\?|channel/|c/|@|playlist\?|hashtag/)", re.IGNORECASE
+)
+
+# Basic domain-shape check (labels separated by dots, no spaces/invalid
+# chars) — catches things like "http://asdf" (no host) or a pasted string
+# with a typo that still happens to start with "http://".
+_HOSTNAME_PATTERN = re.compile(
+    r"^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?"
+    r"(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$"
+)
+
+
+def validate_video_url(raw_url: str) -> str | None:
+    """Shared URL validation for add_to_queue() and preview.
+    Returns None if valid, otherwise the language key for the warning.
+
+    Only checks URL structure (scheme/host/listing patterns);
+    does not verify reachability or yt-dlp support.
+    """
+
+    if not raw_url:
+        return "empty_url_warning"
+
+    if any(ch.isspace() for ch in raw_url):
+        return "invalid_url_warning"
+
+    parsed = urlparse(raw_url)
+
+    if parsed.scheme not in ("http", "https"):
+        return "invalid_url_warning"
+
+    hostname = parsed.hostname or ""
+    if not hostname or not _HOSTNAME_PATTERN.match(hostname):
+        return "invalid_url_warning"
+
+    if _YOUTUBE_LISTING_URL_PATTERN.search(raw_url):
+        return "not_a_video_url_warning"
+
+    return None
+
 
 def clean_playlist_url(url: str) -> str:
     """Strip playlist/radio parameters from a YouTube URL."""
