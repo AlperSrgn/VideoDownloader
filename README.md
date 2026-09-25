@@ -139,10 +139,12 @@ The build script handles the PyInstaller build process and automatically resolve
 | --------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | `main.py`             | UI layer — builds and manages the interface, including the download queue                                         |
 | `downloader.py`       | Download logic — runs `yt-dlp.exe` as a subprocess, handles format selection, FFmpeg merging, and audio downloads |
+| `process_manager.py`  | Windows process/window management — Job Object lifecycle for child processes, pause/resume, process-tree termination, and single-instance mutex + window-focus handling |
+| `updater.py`          | Checks GitHub for new releases and handles downloading, verifying, and launching the installer                    |
 | `quality_options.py`  | Centralizes available quality and format options, including resolutions, container formats, and dropdown labels   |
 | `error_classifier.py` | Converts raw `yt-dlp` / FFmpeg errors and process results into clear, localized, user-facing messages             |
 | `ytdlp_manager.py`    | Manages the standalone `yt-dlp.exe` binary, including first-run download and rate-limited update checks           |
-| `utils.py`            | General file helpers — filename sanitization, FFmpeg path handling, icon copying, and URL cleaning                |
+| `utils.py`            | General helpers — filename sanitization, temp file cleanup, video URL validation/cleaning, duration/path display formatting, FFmpeg path handling, and icon copying                |
 | `settings.py`         | Configuration — reads and writes application settings to `AppData\Local\VideoDownloader\config.json`              |
 | `build.py`            | Builds the Windows executable with PyInstaller and automatically resolves the local FFmpeg binary path            |
 | `languages.py`        | Localization strings and language support for the application                                                     |
