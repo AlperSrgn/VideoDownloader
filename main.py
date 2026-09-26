@@ -10,6 +10,7 @@ import customtkinter as ctk
 from tkinter import Menu, filedialog, messagebox
 
 from downloader import download_video, download_audio, cleanup_temp_files, TEMP_PREFIX
+from app_state import AppState
 from quality_options import (
     build_dropdown_options,
     quality_dropdown_text,
@@ -105,30 +106,28 @@ def on_close_request():
     yt-dlp/ffmpeg and lets the worker delete its temp files), then the app
     closes. Declining restores the previous pause state, so the download
     continues where it left off."""
-    global closing, cancel_requested, pause_requested
-
-    if closing:
+    if app_state.closing:
         return
 
     if queue_view.current_item is not None:
         # Freeze the download while the dialog is open, using the same pause
         # mechanism as the Pause button (the button itself is left untouched).
         item_at_open = queue_view.current_item
-        was_paused = pause_requested
-        pause_requested = True
+        was_paused = app_state.pause_requested
+        app_state.pause_requested = True
         if not messagebox.askyesno(
-            current_language["close_confirm_title"],
-            current_language["close_confirm_message"],
+            app_state.current_language["close_confirm_title"],
+            app_state.current_language["close_confirm_message"],
         ):
             # Only restore if it's still the same item; a new queue item
             # that started meanwhile has already reset its own pause state.
             if queue_view.current_item is item_at_open:
-                pause_requested = was_paused
+                app_state.pause_requested = was_paused
             return
-        closing = True
+        app_state.closing = True
         queue_view.clear()   # don't let the next queued item start
-        pause_requested = False
-        cancel_requested = True
+        app_state.pause_requested = False
+        app_state.cancel_requested = True
         root.withdraw()          # window disappears immediately
 
     _finish_close(0)
@@ -140,9 +139,9 @@ def _finish_close(attempt: int):
     if queue_view.current_item is not None and attempt < 100:
         root.after(100, lambda: _finish_close(attempt + 1))
         return
-    if closing:
+    if app_state.closing:
         # All processes are stopped by now; remove whatever temp files remain.
-        cleanup_temp_files(save_location, TEMP_PREFIX)
+        cleanup_temp_files(app_state.save_location, TEMP_PREFIX)
     root.destroy()
 
 
@@ -154,8 +153,8 @@ def uninstall_app():
     uninstall_path = os.path.join(app_dir, "unins000.exe")
 
     if not messagebox.askyesno(
-        current_language["uninstall_app_title"],
-        current_language["uninstall_app_message"]
+        app_state.current_language["uninstall_app_title"],
+        app_state.current_language["uninstall_app_message"]
     ):
         return
 
@@ -164,8 +163,8 @@ def uninstall_app():
         sys.exit()
     else:
         messagebox.showerror(
-            current_language["error_title"],
-            current_language["file_not_found_error"]
+            app_state.current_language["error_title"],
+            app_state.current_language["file_not_found_error"]
         )
 
 
@@ -180,32 +179,35 @@ def uninstall_app():
 # State
 # ---------------------------------------------------------------------------
 theme_manager = ThemeManager()
-cancel_requested = False
-pause_requested = False
-closing = False  # True once the user confirmed closing during an active download
-current_language: dict = {}
-sidebar_open = False
-SIDEBAR_WIDTH = 300
-sidebar_x = -SIDEBAR_WIDTH
 
 # Download queue — items waiting to start, plus the one currently in flight.
 queue_view = QueueView()
 
+SIDEBAR_WIDTH = 300
+
 # Folder where completed downloads are saved.
 # Can be changed by the user and is saved to config.json.
 DEFAULT_SAVE_LOCATION = os.path.join(os.path.expanduser("~"), "Downloads")
-save_location = load_setting("save_location", DEFAULT_SAVE_LOCATION)
-if not os.path.isdir(save_location):
+_initial_save_location = load_setting("save_location", DEFAULT_SAVE_LOCATION)
+if not os.path.isdir(_initial_save_location):
     # Fall back if the folder was moved or deleted.
-    save_location = DEFAULT_SAVE_LOCATION
+    _initial_save_location = DEFAULT_SAVE_LOCATION
 
 # Save the resolved location to config.json.
-save_setting("save_location", save_location)
+save_setting("save_location", _initial_save_location)
+
+# cancel_requested, pause_requested, closing, current_language, sidebar_open,
+# sidebar_x and save_location used to be separate module-level globals,
+# mutated via `global` from many functions below — now grouped into one
+# AppState instance (see app_state.py). dark_mode (ThemeManager, above) and
+# the download queue (QueueView, above) were already encapsulated the same
+# way before this.
+app_state = AppState(save_location=_initial_save_location, sidebar_width=SIDEBAR_WIDTH)
 
 # Temp files (.ytdlp_tmp_*) left behind if the app was closed or killed
 # mid-download. Each download uses a fresh UUID, so these can never be
 # resumed and are just garbage.
-cleanup_temp_files(save_location, TEMP_PREFIX)
+cleanup_temp_files(app_state.save_location, TEMP_PREFIX)
 
 
 # ---------------------------------------------------------------------------
@@ -236,7 +238,7 @@ def on_progress(percent: float, downloaded_mb: float, total_mb: float, eta: str)
 
 
 def _update_progress_ui(percent: float, downloaded_mb: float, total_mb: float, eta: str):
-    if pause_requested:
+    if app_state.pause_requested:
         # This update was queued (via root.after in on_progress) from a
         # yt-dlp line the background thread read just before it noticed
         # the pause request — the download has already been stopped by
@@ -247,7 +249,7 @@ def _update_progress_ui(percent: float, downloaded_mb: float, total_mb: float, e
     progress_label.configure(
         text=(
             f"{percent:.1f}%   |   {downloaded_mb:.2f} / {total_mb:.2f} MB   |   {eta}\n"
-            f"{current_language['operation_in_progress_message']}"
+            f"{app_state.current_language['operation_in_progress_message']}"
         )
     )
 
@@ -265,24 +267,24 @@ def on_merge_progress(percent: float, elapsed_seconds: float, total_seconds: flo
 
 
 def _update_merge_progress_ui(percent: float, eta: str):
-    if pause_requested:
+    if app_state.pause_requested:
         # Same stale-update guard as _update_progress_ui.
         return
     progress_bar.set(percent / 100)
     progress_label.configure(
         text=(
             f"{percent:.1f}%   |   {eta}\n"
-            f"{current_language['merging_message']}"
+            f"{app_state.current_language['merging_message']}"
         )
     )
 
 
 def on_cancel_check() -> bool:
-    return cancel_requested
+    return app_state.cancel_requested
 
 
 def on_pause_check() -> bool:
-    return pause_requested
+    return app_state.pause_requested
 
 
 def on_download_done(success_msg_key: str):
@@ -292,8 +294,8 @@ def on_download_done(success_msg_key: str):
 def _finalize_download(success_msg_key: str):
     send_notification(
         system_notification_enabled.get(),
-        current_language["operation_completed_message"],
-        current_language[success_msg_key],
+        app_state.current_language["operation_completed_message"],
+        app_state.current_language[success_msg_key],
         NOTIFICATION_ICON,
     )
 
@@ -316,8 +318,8 @@ def on_download_error(msg: str):
 
 
 def _handle_error(msg: str):
-    if not closing:  # closing cancels the download on purpose — no error popup
-        messagebox.showerror(current_language["error_title"], msg)
+    if not app_state.closing:  # closing cancels the download on purpose — no error popup
+        messagebox.showerror(app_state.current_language["error_title"], msg)
 
     queue_view.current_item = None
     if queue_view.items:
@@ -363,8 +365,8 @@ def render_queue_list():
         },
         text_color=theme_manager.queue_item_text_color,
         make_icon=_make_ctk_icon,
-        quality_label=lambda key: quality_label(key, current_language),
-        current_language=current_language,
+        quality_label=lambda key: quality_label(key, app_state.current_language),
+        current_language=app_state.current_language,
         on_remove=remove_from_queue,
     )
 
@@ -395,16 +397,16 @@ def add_to_queue():
     error_key = validate_video_url(raw_url)
     if error_key:
         messagebox.showwarning(
-            current_language["warning_title"],
-            current_language[error_key],
+            app_state.current_language["warning_title"],
+            app_state.current_language[error_key],
         )
         return
 
     quality_key = resolve_quality_key(option_var.get())
     if not quality_key:
         messagebox.showwarning(
-            current_language["warning_title"],
-            current_language["quality_error_message"],
+            app_state.current_language["warning_title"],
+            app_state.current_language["quality_error_message"],
         )
         return
 
@@ -421,18 +423,16 @@ def add_to_queue():
 def process_next_in_queue():
     """Pop the next item off the queue and start downloading it. Assumes
     queue_view.current_item is currently None (nothing else is in flight)."""
-    global cancel_requested, pause_requested
-
     if queue_view.pop_next() is None:
         return
 
     render_queue_list()
-    cancel_requested = False
-    pause_requested = False
+    app_state.cancel_requested = False
+    app_state.pause_requested = False
 
     url = queue_view.current_item["url"]
     quality_key = queue_view.current_item["quality_key"]
-    # Uses the current global save_location;
+    # Uses the current app_state.save_location;
     # saves to the location selected when the download starts.
 
     set_widgets_state("disabled")
@@ -440,7 +440,7 @@ def process_next_in_queue():
     # Reset to its default "paused? no" look in case the previous item in
     # the queue ended while paused.
     pause_button.configure(
-        text=current_language["pause_button"],
+        text=app_state.current_language["pause_button"],
         fg_color="#e0a12e",
         hover_color="#b87f1f",
     )
@@ -449,33 +449,33 @@ def process_next_in_queue():
     cancel_button.pack(pady=5)
 
     remaining = len(queue_view.items)
-    starting_text = current_language["download_starting_message"]
+    starting_text = app_state.current_language["download_starting_message"]
     if remaining:
-        starting_text += f"  ({current_language['queue_remaining_label']}: {remaining})"
+        starting_text += f"  ({app_state.current_language['queue_remaining_label']}: {remaining})"
     show_progress(starting_text)
 
     if quality_key == "audio":
         download_audio(
             url=url,
-            save_location=save_location,
+            save_location=app_state.save_location,
             on_progress=on_progress,
             on_cancel_check=on_cancel_check,
             on_done=lambda: on_download_done("audio_download_complete_message"),
             on_error=on_download_error,
-            lang=current_language,
+            lang=app_state.current_language,
             on_merge_progress=on_merge_progress,
             on_pause_check=on_pause_check,
         )
     else:
         download_video(
             url=url,
-            save_location=save_location,
+            save_location=app_state.save_location,
             target_resolution=quality_key,
             on_progress=on_progress,
             on_cancel_check=on_cancel_check,
             on_done=lambda: on_download_done("download_complete_message"),
             on_error=on_download_error,
-            lang=current_language,
+            lang=app_state.current_language,
             on_merge_progress=on_merge_progress,
             on_pause_check=on_pause_check,
         )
@@ -484,9 +484,8 @@ def process_next_in_queue():
 def cancel_download():
     """Cancels only the item currently downloading. If more items are
     queued, the next one starts automatically once this one stops."""
-    global cancel_requested
-    cancel_requested = True
-    progress_label.configure(text=current_language["download_canceling_message"])
+    app_state.cancel_requested = True
+    progress_label.configure(text=app_state.current_language["download_canceling_message"])
 
 
 # ---------------------------------------------------------------------------
@@ -518,32 +517,32 @@ def toggle_theme():
 # Sidebar animation
 # ---------------------------------------------------------------------------
 def animate_sidebar(target_x: int, step: int):
-    global sidebar_x
-    if sidebar_x != target_x:
-        sidebar_x = max(target_x, min(0, sidebar_x + step)) if step > 0 else max(target_x, sidebar_x + step)
-        sidebar_frame.place(x=sidebar_x, y=0)
+    if app_state.sidebar_x != target_x:
+        app_state.sidebar_x = (
+            max(target_x, min(0, app_state.sidebar_x + step)) if step > 0
+            else max(target_x, app_state.sidebar_x + step)
+        )
+        sidebar_frame.place(x=app_state.sidebar_x, y=0)
         root.after(5, lambda: animate_sidebar(target_x, step))
     else:
         sidebar_frame.place(x=target_x, y=0)
 
 
 def toggle_sidebar():
-    global sidebar_open
-    if sidebar_open:
+    if app_state.sidebar_open:
         animate_sidebar(-SIDEBAR_WIDTH, -10)
         menu_button.place(x=10, y=10)
     else:
         animate_sidebar(0, 10)
         menu_button.place_forget()
-    sidebar_open = not sidebar_open
+    app_state.sidebar_open = not app_state.sidebar_open
 
 
 # ---------------------------------------------------------------------------
 # Language
 # ---------------------------------------------------------------------------
 def change_language(selected: str):
-    global current_language
-    current_language = LANGUAGES.get(selected, LANGUAGES["En"])
+    app_state.current_language = LANGUAGES.get(selected, LANGUAGES["En"])
 
     label_map = {
         download_button:              "download_button",
@@ -562,16 +561,16 @@ def change_language(selected: str):
         check_updates_button:         "check_updates_button",
     }
     for widget, key in label_map.items():
-        widget.configure(text=current_language[key])
+        widget.configure(text=app_state.current_language[key])
 
     # pause_button's label depends on the paused state, not just the
     # language, so it overrides the generic "pause_button" text set above.
-    if pause_requested:
-        pause_button.configure(text=current_language["resume_button"])
+    if app_state.pause_requested:
+        pause_button.configure(text=app_state.current_language["resume_button"])
 
     render_queue_list()  # refreshes the "Queue (N)" header text in the new language
 
-    dropdown_options = build_dropdown_options(current_language)
+    dropdown_options = build_dropdown_options(app_state.current_language)
     quality_options_menu.configure(values=dropdown_options)
     save_setting("language", selected)
 
@@ -601,20 +600,20 @@ def show_entry_context_menu(event, entry: ctk.CTkEntry):
         activeborderwidth=6,
     )
     menu.add_command(
-        label=f"✂   {current_language['cut_label']}",
+        label=f"✂   {app_state.current_language['cut_label']}",
         command=lambda: real_entry.event_generate("<<Cut>>"),
     )
     menu.add_command(
-        label=f"⧉   {current_language['copy_label']}",
+        label=f"⧉   {app_state.current_language['copy_label']}",
         command=lambda: real_entry.event_generate("<<Copy>>"),
     )
     menu.add_command(
-        label=f"📋   {current_language['paste_label']}",
+        label=f"📋   {app_state.current_language['paste_label']}",
         command=lambda: real_entry.event_generate("<<Paste>>"),
     )
     menu.add_separator()
     menu.add_command(
-        label=f"▤   {current_language['select_all_label']}",
+        label=f"▤   {app_state.current_language['select_all_label']}",
         command=lambda: entry.select_range(0, "end"),
     )
     try:
@@ -625,23 +624,22 @@ def show_entry_context_menu(event, entry: ctk.CTkEntry):
 
 def open_downloads_folder():
     if os.name == "nt":
-        os.startfile(save_location)
+        os.startfile(app_state.save_location)
     else:
-        webbrowser.open(save_location)
+        webbrowser.open(app_state.save_location)
 
 
 def update_save_location_label():
-    save_location_value_label.configure(text=format_save_location_display(save_location))
+    save_location_value_label.configure(text=format_save_location_display(app_state.save_location))
 
 
 def choose_save_location():
-    global save_location
     folder = filedialog.askdirectory(
-        initialdir=save_location if os.path.isdir(save_location) else DEFAULT_SAVE_LOCATION,
-        title=current_language.get("choose_folder_button", "Choose Folder"),
+        initialdir=app_state.save_location if os.path.isdir(app_state.save_location) else DEFAULT_SAVE_LOCATION,
+        title=app_state.current_language.get("choose_folder_button", "Choose Folder"),
     )
     if folder:
-        save_location = folder
+        app_state.save_location = folder
         save_setting("save_location", folder)
         update_save_location_label()
 
@@ -649,8 +647,8 @@ def choose_save_location():
 def preview_notification():
     send_notification(
         system_notification_enabled.get(),
-        current_language["preview_info_title"],
-        current_language["system_notification_message"],
+        app_state.current_language["preview_info_title"],
+        app_state.current_language["system_notification_message"],
         PREVIEW_ICON,
     )
 
@@ -663,23 +661,22 @@ def pause_download():
     accordingly, so pausing genuinely stops network/CPU usage rather than
     just freezing the progress bar.
     """
-    global pause_requested
-    pause_requested = not pause_requested
+    app_state.pause_requested = not app_state.pause_requested
 
-    icon_file = RESUME_ICON_FILE if pause_requested else PAUSE_ICON_FILE
+    icon_file = RESUME_ICON_FILE if app_state.pause_requested else PAUSE_ICON_FILE
     icon = _make_ctk_icon(icon_file, "#fbfbfb")
 
-    if pause_requested:
+    if app_state.pause_requested:
         pause_button.configure(
-            text=current_language["resume_button"],
+            text=app_state.current_language["resume_button"],
             fg_color="#e0a12e",
             hover_color="#b87f1f",
             **({"image": icon} if icon is not None else {}),
         )
-        progress_label.configure(text=current_language["operation_paused_message"])
+        progress_label.configure(text=app_state.current_language["operation_paused_message"])
     else:
         pause_button.configure(
-            text=current_language["pause_button"],
+            text=app_state.current_language["pause_button"],
             fg_color="#e0a12e",
             hover_color="#b87f1f",
             **({"image": icon} if icon is not None else {}),
@@ -725,7 +722,7 @@ _ui = build_app_window(
     app_version=APP_VERSION,
     app_icon=APP_ICON,
     sidebar_width=SIDEBAR_WIDTH,
-    sidebar_x=sidebar_x,
+    sidebar_x=app_state.sidebar_x,
 )
 
 root = _ui.root
@@ -779,7 +776,7 @@ update_save_location_label()
 # creation time since the checker needs uninstall_button too).
 update_checker = UpdateChecker(
     root=root,
-    get_language=lambda: current_language,
+    get_language=lambda: app_state.current_language,
     is_download_active=lambda: queue_view.current_item is not None,
     check_updates_button=check_updates_button,
     uninstall_button=uninstall_button,
@@ -829,7 +826,7 @@ def apply_button_icons():
         if icon is not None:
             widget.configure(image=icon, compound="left")
 
-    pause_icon_file = RESUME_ICON_FILE if pause_requested else PAUSE_ICON_FILE
+    pause_icon_file = RESUME_ICON_FILE if app_state.pause_requested else PAUSE_ICON_FILE
     pause_icon = _make_ctk_icon(pause_icon_file, "#fbfbfb")
     if pause_icon is not None:
         pause_button.configure(image=pause_icon, compound="left")
@@ -864,7 +861,7 @@ def on_ytdlp_status(stage: str, detail):
     detail is the download percentage (0-100) or the failure exception.
     """
     def apply():
-        lang = current_language or LANGUAGES.get("En", {})
+        lang = app_state.current_language or LANGUAGES.get("En", {})
 
         if stage == "ready":
             ytdlp_status_label.pack_forget()
@@ -943,7 +940,7 @@ if dark_mode_enabled.get():
 saved_lang = load_setting("language", "En")
 language_var.set(saved_lang)
 change_language(saved_lang)
-option_var.set(quality_dropdown_text("1080p", current_language))  # keep the default selection in sync with the tagged dropdown text
+option_var.set(quality_dropdown_text("1080p", app_state.current_language))  # keep the default selection in sync with the tagged dropdown text
 
 # ---------------------------------------------------------------------------
 root.mainloop()
