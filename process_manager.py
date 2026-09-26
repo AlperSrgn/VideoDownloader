@@ -136,7 +136,8 @@ def apply_pause_state(process: subprocess.Popen, on_pause_check, suspended: bool
 
     try:
         want_paused = on_pause_check()
-    except Exception:
+    except Exception as e:
+        logger.debug("on_pause_check() raised, treating as not paused: %s", e)
         want_paused = False
 
     if want_paused and not suspended:
@@ -275,5 +276,5 @@ def focus_existing_window(title_prefix: str) -> None:
             if _user32.IsIconic(found[0]):
                 _user32.ShowWindow(found[0], 9)  # SW_RESTORE
             _user32.SetForegroundWindow(found[0])
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Could not focus existing window: %s", e)
