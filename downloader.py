@@ -29,6 +29,8 @@ from quality_options import RESOLUTION_MAP
 from ytdlp_manager import (
     ensure_ytdlp,
     find_info_with_compatible_format,
+    find_suitable_audio_format,
+    find_suitable_format,
 )
 from error_classifier import (
     DownloadCancelled,
@@ -75,99 +77,11 @@ cancel_download = False
 
 
 # ---------------------------------------------------------------------------
-# Format selection (unchanged — operates on the same 'formats' list shape
-# that yt-dlp's --dump-json output produces)
+# Format selection: find_suitable_format / find_suitable_audio_format now
+# live in ytdlp_manager.py (imported below) — they operate purely on the
+# 'formats' list shape yt-dlp's --dump-json produces, with no
+# download-orchestration logic of their own.
 # ---------------------------------------------------------------------------
-
-def _select_original_audio(audio_formats: list):
-    """
-    Selects the *original* audio track instead of an auto-dubbed one.
-
-    yt-dlp tags audio formats with language and language_preference.
-    The original track usually has the highest language_preference value.
-
-    First, formats with the highest language_preference are selected;
-    ties are then resolved by bitrate.
-    """
-    if not audio_formats:
-        return None
-
-    max_pref = max((f.get("language_preference") or -1) for f in audio_formats)
-    original_candidates = [
-        f for f in audio_formats
-        if (f.get("language_preference") or -1) == max_pref
-    ]
-    chosen = max(original_candidates, key=lambda x: x.get("abr") or 0)
-
-    logger.debug(
-        "Original audio track selected: format=%s language=%s language_preference=%s abr=%s",
-        chosen.get("format_id"), chosen.get("language"),
-        chosen.get("language_preference"), chosen.get("abr"),
-    )
-    return chosen
-
-
-def find_suitable_format(formats: list, video_height: int):
-    """
-    Return (video_format, audio_format) for the best available resolution
-    at or below video_height. Returns (None, None) if SABR-protected or unavailable.
-    """
-    video_formats = [
-        f for f in formats
-        if f.get("url") and f.get("vcodec") != "none" and f.get("height") is not None
-    ]
-    audio_formats = [
-        f for f in formats
-        if f.get("url") and f.get("acodec") != "none" and f.get("vcodec") == "none"
-    ]
-
-    if not video_formats or not audio_formats:
-        return None, None
-
-    available_heights = sorted(
-        {f["height"] for f in video_formats if f["height"] <= video_height},
-        reverse=True
-    )
-    if not available_heights:
-        available_heights = sorted({f["height"] for f in video_formats}, reverse=True)
-
-    for h in available_heights:
-        candidates = [f for f in video_formats if f.get("height") == h]
-        if not candidates:
-            continue
-
-        chosen_video = max(candidates, key=lambda x: x.get("tbr") or 0)
-        chosen_audio = _select_original_audio(audio_formats)
-
-        if chosen_video.get("url") and chosen_audio and chosen_audio.get("url"):
-            logger.debug(
-                "Compatible formats found — Video: %s (%dp), Audio: %s",
-                chosen_video["format_id"], h, chosen_audio["format_id"]
-            )
-            return chosen_video, chosen_audio
-        else:
-            logger.debug(
-                "SABR protection detected for %s (%dp)", chosen_video["format_id"], h
-            )
-            return None, None
-
-    return None, None
-
-
-def find_suitable_audio_format(formats: list):
-    """
-    Returns the original audio track as (audio_format,) so it can be passed
-    directly to find_info_with_compatible_format.
-
-    Returns (None,) if no usable audio track is available, allowing the next
-    client to be tried.
-    """
-    audio_formats = [
-        f for f in formats
-        if f.get("url") and f.get("acodec") != "none" and f.get("vcodec") == "none"
-    ]
-    return (_select_original_audio(audio_formats),)
-
 
 # ---------------------------------------------------------------------------
 # Progress parsing (replaces yt_dlp's progress_hooks — we now read yt-dlp
