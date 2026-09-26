@@ -33,6 +33,19 @@ GITHUB_REPO = "AlperSrgn/VideoDownloader"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 EXPECTED_INSTALLER_NAME = "VideoDownloaderSetup.exe"
 
+_USER_AGENT = "VideoDownloader-UpdateCheck"
+
+
+def _github_request(url: str, extra_headers: dict = None) -> urllib.request.Request:
+    """Builds a urllib Request carrying our identifying User-Agent header —
+    shared by the release-info check (which also needs its own Accept
+    header) and the installer download, so the header dict isn't
+    duplicated at both call sites."""
+    headers = {"User-Agent": _USER_AGENT}
+    if extra_headers:
+        headers.update(extra_headers)
+    return urllib.request.Request(url, headers=headers)
+
 
 def _parse_version(v: str):
     """'v3.2.0' / '3.2.0' -> (3, 2, 0) so versions compare numerically
@@ -99,12 +112,9 @@ class UpdateChecker:
 
         def worker():
             try:
-                req = urllib.request.Request(
+                req = _github_request(
                     GITHUB_LATEST_RELEASE_API,
-                    headers={
-                        "Accept": "application/vnd.github+json",
-                        "User-Agent": "VideoDownloader-UpdateCheck",
-                    },
+                    extra_headers={"Accept": "application/vnd.github+json"},
                 )
                 with urllib.request.urlopen(req, timeout=10) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
@@ -186,9 +196,7 @@ class UpdateChecker:
         def worker():
             try:
                 installer_path = os.path.join(tempfile.gettempdir(), "VideoDownloaderSetup_update.exe")
-                req = urllib.request.Request(
-                    installer_url, headers={"User-Agent": "VideoDownloader-UpdateCheck"}
-                )
+                req = _github_request(installer_url)
                 with urllib.request.urlopen(req, timeout=30) as resp, open(installer_path, "wb") as f:
                     while True:
                         chunk = resp.read(1024 * 256)
