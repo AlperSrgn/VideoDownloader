@@ -86,15 +86,14 @@ git clone https://github.com/AlperSrgn/VideoDownloader.git
 
 Create and activate a virtual environment using your preferred method.
 
-### Install FFmpeg Dependency
+### Install Dependencies
 
-Install `imageio-ffmpeg` from the virtual environment:
+Install all runtime dependencies from `requirements.txt`:
 
 ```bash
-pip install imageio-ffmpeg
+pip install -r requirements.txt
 ```
 
-The application automatically locates the FFmpeg binary using `imageio_ffmpeg.get_ffmpeg_exe()`. No manual FFmpeg path configuration is required.
 ### yt-dlp
 
 Video Downloader uses the official standalone `yt-dlp.exe` binary instead of the `yt-dlp` Python package.
