@@ -11,9 +11,10 @@ from tkinter import Menu, filedialog, messagebox
 
 from downloader import download_video, download_audio, cleanup_temp_files, TEMP_PREFIX
 from quality_options import (
-    DROPDOWN_QUALITY_ORDER,
-    QUALITY_OPTION_BY_KEY,
-    QUALITY_KEY_TO_FORMAT_TAG,
+    build_dropdown_options,
+    quality_dropdown_text,
+    quality_label,
+    resolve_quality_key,
 )
 from error_classifier import classify_ytdlp_download_error, classify_ytdlp_update_error
 from languages import LANGUAGES
@@ -336,43 +337,10 @@ def _handle_error(msg: str):
 # Quality selection helpers
 # ---------------------------------------------------------------------------
 # The dropdown shows language-specific labels, but each queue item stores
-# its selection as a language-independent key, so it stays valid if the language changes.
-# The quality list itself (order, resolution, format tag) lives in
-# quality_options.py — add new options there, not here.
-
-# Maps the exact composed dropdown text (label + format tag) back to its
-# quality key. Rebuilt every time the dropdown is (re)populated in
-# change_language(), since the label text changes with the language.
-DROPDOWN_DISPLAY_TO_KEY = {}
-
-
-def resolve_quality_key(selection: str):
-    """Turn the dropdown's current display text into a stable quality key,
-    or None if it doesn't match anything (shouldn't normally happen)."""
-    return DROPDOWN_DISPLAY_TO_KEY.get(selection)
-
-
-def quality_label(quality_key: str) -> str:
-    """Turn a stored quality key back into a label in the current language,
-    for display in the queue list.
-
-    Most options have a fixed `label` (same text in every language); a few
-    (like "audio") have a `lang_field` instead and are looked up from the
-    current language dict — see quality_options.py.
-    """
-    opt = QUALITY_OPTION_BY_KEY.get(quality_key)
-    if not opt:
-        return quality_key
-    if "label" in opt:
-        return opt["label"]
-    return current_language.get(opt.get("lang_field"), quality_key)
-
-
-def quality_dropdown_text(quality_key: str) -> str:
-    """Format tag (mp4/mp3) plus the label, as shown in the dropdown itself."""
-    label = quality_label(quality_key)
-    tag = QUALITY_KEY_TO_FORMAT_TAG.get(quality_key, "")
-    return f"{tag}    {label}" if tag else label
+# its selection as a language-independent key, so it stays valid if the
+# language changes. The quality list itself, plus quality_label(),
+# quality_dropdown_text(), build_dropdown_options() and resolve_quality_key(),
+# now live in quality_options.py — add new options there, not here.
 
 
 # ---------------------------------------------------------------------------
@@ -395,7 +363,7 @@ def render_queue_list():
         },
         text_color=theme_manager.queue_item_text_color,
         make_icon=_make_ctk_icon,
-        quality_label=quality_label,
+        quality_label=lambda key: quality_label(key, current_language),
         current_language=current_language,
         on_remove=remove_from_queue,
     )
@@ -603,9 +571,7 @@ def change_language(selected: str):
 
     render_queue_list()  # refreshes the "Queue (N)" header text in the new language
 
-    dropdown_options = [quality_dropdown_text(key) for key in DROPDOWN_QUALITY_ORDER]
-    DROPDOWN_DISPLAY_TO_KEY.clear()
-    DROPDOWN_DISPLAY_TO_KEY.update(zip(dropdown_options, DROPDOWN_QUALITY_ORDER))
+    dropdown_options = build_dropdown_options(current_language)
     quality_options_menu.configure(values=dropdown_options)
     save_setting("language", selected)
 
@@ -977,7 +943,7 @@ if dark_mode_enabled.get():
 saved_lang = load_setting("language", "En")
 language_var.set(saved_lang)
 change_language(saved_lang)
-option_var.set(quality_dropdown_text("1080p"))  # keep the default selection in sync with the tagged dropdown text
+option_var.set(quality_dropdown_text("1080p", current_language))  # keep the default selection in sync with the tagged dropdown text
 
 # ---------------------------------------------------------------------------
 root.mainloop()

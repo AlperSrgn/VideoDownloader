@@ -43,3 +43,57 @@ RESOLUTION_MAP = {
 }
 DROPDOWN_QUALITY_ORDER = [opt["key"] for opt in QUALITY_OPTIONS]
 QUALITY_KEY_TO_FORMAT_TAG = {opt["key"]: opt["format"] for opt in QUALITY_OPTIONS}
+
+
+# ---------------------------------------------------------------------------
+# Display helpers (moved from main.py)
+# ---------------------------------------------------------------------------
+# The dropdown shows language-specific labels, but each queue item stores its
+# selection as a language-independent key, so it stays valid if the language
+# changes. `lang` is the current language dict from languages.py — passed in
+# explicitly rather than read from a global, so this module has no dependency
+# on main.py's state.
+
+def quality_label(quality_key: str, lang: dict) -> str:
+    """Turn a stored quality key back into a label in the given language,
+    for display in the queue list.
+
+    Most options have a fixed `label` (same text in every language); a few
+    (like "audio") have a `lang_field` instead and are looked up from `lang`.
+    """
+    opt = QUALITY_OPTION_BY_KEY.get(quality_key)
+    if not opt:
+        return quality_key
+    if "label" in opt:
+        return opt["label"]
+    return lang.get(opt.get("lang_field"), quality_key)
+
+
+def quality_dropdown_text(quality_key: str, lang: dict) -> str:
+    """Format tag (mp4/mp3) plus the label, as shown in the dropdown itself."""
+    label = quality_label(quality_key, lang)
+    tag = QUALITY_KEY_TO_FORMAT_TAG.get(quality_key, "")
+    return f"{tag}    {label}" if tag else label
+
+
+# Reverse lookup: exact composed dropdown text -> quality key. The display
+# text is language-dependent (see quality_dropdown_text above), so this map
+# is rebuilt every time the dropdown is repopulated in a new language, via
+# build_dropdown_options() — called from main.py's change_language().
+_dropdown_display_to_key: dict = {}
+
+
+def build_dropdown_options(lang: dict) -> list:
+    """Returns the dropdown's display strings, in DROPDOWN_QUALITY_ORDER, for
+    the given language — and refreshes the reverse lookup used by
+    resolve_quality_key() to match."""
+    options = [quality_dropdown_text(key, lang) for key in DROPDOWN_QUALITY_ORDER]
+    _dropdown_display_to_key.clear()
+    _dropdown_display_to_key.update(zip(options, DROPDOWN_QUALITY_ORDER))
+    return options
+
+
+def resolve_quality_key(selection: str):
+    """Turn the dropdown's current display text into a stable quality key,
+    or None if it doesn't match anything (shouldn't normally happen)."""
+    return _dropdown_display_to_key.get(selection)
