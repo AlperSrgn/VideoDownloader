@@ -12,6 +12,7 @@ from process_manager import (
     NO_WINDOW,
     attach_to_job,
     apply_pause_state,
+    enqueue_lines,
     resume_if_suspended,
     terminate_process_tree,
 )
@@ -292,7 +293,7 @@ def _download_once(cmd, on_progress, on_cancel_check, cancel_message, stall_mess
 
     line_queue = queue.Queue()
     reader_thread = threading.Thread(
-        target=_enqueue_lines, args=(process.stdout, line_queue), daemon=True
+        target=enqueue_lines, args=(process.stdout, line_queue), daemon=True
     )
     reader_thread.start()
 
@@ -427,17 +428,6 @@ def _format_duration(seconds: float) -> str:
 _CANCEL_POLL_INTERVAL = 0.2  # seconds
 
 
-def _enqueue_lines(pipe, line_queue):
-    """Runs in the background, pushing `pipe` lines to `line_queue` and adding
-    None at the end. This allows the main loop to use a timeout; `readline()`
-    has no timeout support, and Windows pipes can't be used with `select()`."""
-    try:
-        for line in pipe:
-            line_queue.put(line)
-    finally:
-        line_queue.put(None)
-
-
 def _run_ffmpeg_merge(cmd, total_duration, on_merge_progress, on_cancel_check, cancel_message,
                        on_pause_check=None):
     """
@@ -467,7 +457,7 @@ def _run_ffmpeg_merge(cmd, total_duration, on_merge_progress, on_cancel_check, c
 
     line_queue = queue.Queue()
     reader_thread = threading.Thread(
-        target=_enqueue_lines, args=(process.stdout, line_queue), daemon=True
+        target=enqueue_lines, args=(process.stdout, line_queue), daemon=True
     )
     reader_thread.start()
 
