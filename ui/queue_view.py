@@ -1,9 +1,15 @@
 """
-Download-queue state and its on-screen rendering.
+On-screen rendering of the download queue, on top of a DownloadQueue.
 
-QueueView owns the queue itself (items waiting to download, plus the one
-currently in flight) and knows how to redraw it into a set of widgets and
-how to fetch/attach a preview (title, duration, thumbnail) for an item.
+QueueView owns one DownloadQueue instance (see download_queue.py — items
+waiting to download, plus the one currently in flight) and knows how to
+redraw it into a set of widgets and how to fetch/attach a preview (title,
+duration, thumbnail) for an item. The queue mutation methods below
+(enqueue/pop_next/remove/clear/find) and the current_item/items/total
+accessors are thin pass-throughs to that DownloadQueue, kept here so every
+existing call site (main.py's queue_view.current_item, queue_view.items,
+queue_view.enqueue(...), etc.) keeps working unchanged — only the state
+itself moved, not the interface.
 
 It has no opinion on when items get added or when the next one should
 start downloading — that's still main.py's job (add_to_queue,
@@ -14,16 +20,15 @@ redraw the same way the moved functions used to.
 """
 
 import io
-import itertools
 import logging
 import os
 import threading
 import urllib.request
-from collections import deque
 
 import customtkinter as ctk
 from PIL import Image
 
+from download_queue import DownloadQueue
 from utils import format_duration
 
 logger = logging.getLogger(__name__)
@@ -31,43 +36,42 @@ logger = logging.getLogger(__name__)
 
 class QueueView:
     def __init__(self):
-        self.items = deque()      # waiting items: {"id", "url", "quality_key", "preview"}
-        self.current_item = None  # the one item currently downloading, or None when idle
-        self._id_counter = itertools.count(1)
+        self.queue = DownloadQueue()
 
-    # -- queue mutation ----------------------------------------------------
+    # -- pass-throughs to DownloadQueue, so existing call sites (main.py's
+    # queue_view.current_item / .items / .enqueue(...) etc.) don't need to
+    # change -----------------------------------------------------------
 
-    def enqueue(self, url: str, quality_key: str) -> dict:
-        """Adds a new item to the end of the queue and returns it."""
-        item = {"id": next(self._id_counter), "url": url, "quality_key": quality_key, "preview": None}
-        self.items.append(item)
-        return item
+    @property
+    def current_item(self):
+        return self.queue.current_item
 
-    def pop_next(self):
-        """Moves the next waiting item (if any) into current_item and
-        returns it (or None if the queue was empty). Assumes current_item
-        is already None — i.e. nothing else is currently in flight."""
-        self.current_item = self.items.popleft() if self.items else None
-        return self.current_item
+    @current_item.setter
+    def current_item(self, value):
+        self.queue.current_item = value
 
-    def remove(self, item_id: int) -> None:
-        self.items = deque(item for item in self.items if item["id"] != item_id)
-
-    def clear(self) -> None:
-        self.items = deque()
-
-    def find(self, item_id: int):
-        """Looks up an item by id among current_item and the waiting items.
-        Used to apply a preview fetched in the background, since by the
-        time it arrives the item may have moved between the two, or been
-        removed/cleared entirely."""
-        if self.current_item is not None and self.current_item["id"] == item_id:
-            return self.current_item
-        return next((i for i in self.items if i["id"] == item_id), None)
+    @property
+    def items(self):
+        return self.queue.items
 
     @property
     def total(self) -> int:
-        return len(self.items) + (1 if self.current_item else 0)
+        return self.queue.total
+
+    def enqueue(self, url: str, quality_key: str) -> dict:
+        return self.queue.enqueue(url, quality_key)
+
+    def pop_next(self):
+        return self.queue.pop_next()
+
+    def remove(self, item_id: int) -> None:
+        self.queue.remove(item_id)
+
+    def clear(self) -> None:
+        self.queue.clear()
+
+    def find(self, item_id: int):
+        return self.queue.find(item_id)
 
     # -- preview fetching ----------------------------------------------------
 
