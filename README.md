@@ -137,17 +137,29 @@ The build script handles the PyInstaller build process and automatically resolve
 
 | File                  | Description                                                                                                       |
 | --------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `main.py`             | UI layer — builds and manages the interface, including the download queue                                         |
-| `downloader.py`       | Download logic — runs `yt-dlp.exe` as a subprocess, handles format selection, FFmpeg merging, and audio downloads |
-| `process_manager.py`  | Windows process/window management — Job Object lifecycle for child processes, pause/resume, process-tree termination, and single-instance mutex + window-focus handling |
+| `main.py`             | Application entry point and orchestration — owns the callbacks (queue management, download start/cancel/pause, theme/language switching, progress updates) that wire `app_state.py`, `download_queue.py`, `downloader.py` and the `ui/` package together |
+| `app_state.py`        | Groups application-wide status flags (cancel/pause requests, closing state, current language, sidebar position, save location) that would otherwise be separate global variables |
+| `download_queue.py`   | Pure download-queue state (items waiting to download, plus the one currently in flight) — no GUI or threading dependencies, so it can be tested on its own |
+| `downloader.py`       | Download logic — runs `yt-dlp.exe` as a subprocess, handles FFmpeg merging, and orchestrates video/audio downloads |
+| `process_manager.py`  | Windows process/window management — Job Object lifecycle for child processes, pause/resume, process-tree termination, background pipe reading, and single-instance mutex + window-focus handling |
 | `updater.py`          | Checks GitHub for new releases and handles downloading, verifying, and launching the installer                    |
 | `quality_options.py`  | Centralizes available quality and format options, including resolutions, container formats, and dropdown labels   |
 | `error_classifier.py` | Converts raw `yt-dlp` / FFmpeg errors and process results into clear, localized, user-facing messages             |
-| `ytdlp_manager.py`    | Manages the standalone `yt-dlp.exe` binary, including first-run download and rate-limited update checks           |
+| `ytdlp_manager.py`    | Manages the standalone `yt-dlp.exe` binary — first-run download, rate-limited update checks, and selecting the best available video/audio format from extracted info |
 | `utils.py`            | General helpers — filename sanitization, temp file cleanup, video URL validation/cleaning, duration/path display formatting, FFmpeg path handling, and icon copying                |
 | `settings.py`         | Configuration — reads and writes application settings to `AppData\Local\VideoDownloader\config.json`              |
 | `build.py`            | Builds the Windows executable with PyInstaller and automatically resolves the local FFmpeg binary path            |
 | `languages.py`        | Localization strings and language support for the application                                                     |
+
+## `ui/` package
+
+| File                     | Description                                                                                          |
+| ------------------------ | ------------------------------------------------------------------------------------------------------ |
+| `ui/app_window.py`       | Builds every widget of the main window and the settings sidebar                                        |
+| `ui/queue_view.py`       | Renders the download queue (on top of `download_queue.py`) into widgets, and fetches per-item preview info (title, duration, thumbnail) |
+| `ui/theme.py`            | Light/dark theme definitions and the `ThemeManager` that applies them to the widget set                |
+| `ui/notifications.py`    | Thin wrapper around Windows system notifications (via `plyer`), respecting the user's notification setting |
+
 ---
 
 # Screenshots
