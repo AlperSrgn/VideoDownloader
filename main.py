@@ -9,18 +9,18 @@ from types import SimpleNamespace
 import customtkinter as ctk
 from tkinter import Menu, filedialog, messagebox
 
-from app_state import AppState
-from download_controller import DownloadController
-from downloader import cleanup_temp_files, TEMP_PREFIX
-from quality_options import build_dropdown_options, quality_dropdown_text
-from error_classifier import classify_ytdlp_download_error, classify_ytdlp_update_error
+from core.app_state import AppState
+from core.download_controller import DownloadController
+from downloading.downloader import cleanup_temp_files, TEMP_PREFIX
+from core.quality_options import build_dropdown_options, quality_dropdown_text
+from downloading.error_classifier import classify_ytdlp_download_error, classify_ytdlp_update_error
 from languages import LANGUAGES
-from process_manager import acquire_single_instance, focus_existing_window
+from system.process_manager import acquire_single_instance, focus_existing_window
 from settings import load_setting, save_setting
 from ui.app_window import build_app_window
 from ui.notifications import notify as send_notification
 from ui.theme import ThemeManager
-from updater import UpdateChecker, APP_VERSION
+from system.updater import UpdateChecker, APP_VERSION
 from utils import (
     copy_icons,
     format_save_location_display,
@@ -80,7 +80,7 @@ def fetch_ytdlp_version(callback, on_status=None):
     def worker():
         try:
             from settings import get_appdata_path
-            from ytdlp_manager import ensure_ytdlp, get_ytdlp_version
+            from downloading.ytdlp_manager import ensure_ytdlp, get_ytdlp_version
             # ensure_ytdlp downloads on first run and updates on later launches.
             # The auto-update runs once each time the app starts.
             exe_path = ensure_ytdlp(get_appdata_path(), on_status=on_status)

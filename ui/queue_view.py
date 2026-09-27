@@ -28,7 +28,7 @@ import urllib.request
 import customtkinter as ctk
 from PIL import Image
 
-from download_queue import DownloadQueue
+from core.download_queue import DownloadQueue
 from utils import format_duration
 
 logger = logging.getLogger(__name__)
@@ -87,7 +87,7 @@ class QueueView:
         """
         def worker():
             from settings import get_appdata_path
-            from ytdlp_manager import get_ytdlp_path, fetch_preview_info
+            from downloading.ytdlp_manager import get_ytdlp_path, fetch_preview_info
 
             exe_path = get_ytdlp_path(get_appdata_path())
             if not os.path.exists(exe_path):

@@ -8,7 +8,7 @@ import time
 import uuid
 from collections import deque
 
-from process_manager import (
+from system.process_manager import (
     NO_WINDOW,
     attach_to_job,
     apply_pause_state,
@@ -25,14 +25,14 @@ from utils import (
     update_file_timestamp,
     find_glob_file,
 )
-from quality_options import RESOLUTION_MAP
-from ytdlp_manager import (
+from core.quality_options import RESOLUTION_MAP
+from downloading.ytdlp_manager import (
     ensure_ytdlp,
     find_info_with_compatible_format,
     find_suitable_audio_format,
     find_suitable_format,
 )
-from error_classifier import (
+from downloading.error_classifier import (
     DownloadCancelled,
     DownloadStalled,
     YtDlpProcessError,

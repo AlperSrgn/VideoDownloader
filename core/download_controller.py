@@ -20,8 +20,8 @@ the same build-then-wire two-step main.py already uses for UpdateChecker.
 
 from tkinter import messagebox
 
-from downloader import download_video, download_audio
-from quality_options import quality_label, resolve_quality_key
+from downloading.downloader import download_video, download_audio
+from core.quality_options import quality_label, resolve_quality_key
 from ui.queue_view import QueueView
 from utils import clean_playlist_url, validate_video_url
 
