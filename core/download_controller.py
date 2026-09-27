@@ -87,6 +87,25 @@ class DownloadController:
         self.progress_bar.pack_forget()
         self.progress_label.pack_forget()
 
+    # -- pause button appearance ----------------------------------------------
+    # Single place that sets the pause button's text/color/icon together, so
+    # the three can never drift out of sync (pause_download() and
+    # process_next_in_queue() both used to set these separately, and a
+    # previous version of process_next_in_queue() forgot the icon — leaving
+    # a "Pause" label with a leftover resume icon after a paused item was
+    # cancelled and the next one started).
+
+    def _set_pause_button_state(self, paused: bool) -> None:
+        icon_file = self.RESUME_ICON_FILE if paused else self.PAUSE_ICON_FILE
+        icon = self.make_icon(icon_file, "#fbfbfb")
+        text_key = "resume_button" if paused else "pause_button"
+        self.pause_button.configure(
+            text=self.app_state.current_language[text_key],
+            fg_color="#e0a12e",
+            hover_color="#b87f1f",
+            **({"image": icon} if icon is not None else {}),
+        )
+
     # -- progress callbacks --------------------------------------------------
     # Called from the background download thread (see downloader.py) — must
     # not touch Tkinter widgets directly, so the actual UI update is
@@ -257,13 +276,9 @@ class DownloadController:
 
         self.set_widgets_state("disabled")
         self.download_button.pack_forget()
-        # Reset to its default "paused? no" look in case the previous item
-        # in the queue ended while paused.
-        self.pause_button.configure(
-            text=self.app_state.current_language["pause_button"],
-            fg_color="#e0a12e",
-            hover_color="#b87f1f",
-        )
+        # Reset to its default "paused? no" look (text, color AND icon) in
+        # case the previous item in the queue ended while paused.
+        self._set_pause_button_state(paused=False)
         self.pause_button.pack(side="left", padx=5)
         self.queue_add_button.pack(side="left", padx=5)
         self.cancel_button.pack(pady=5)
@@ -316,22 +331,7 @@ class DownloadController:
         network/CPU usage rather than just freezing the progress bar.
         """
         self.app_state.pause_requested = not self.app_state.pause_requested
-
-        icon_file = self.RESUME_ICON_FILE if self.app_state.pause_requested else self.PAUSE_ICON_FILE
-        icon = self.make_icon(icon_file, "#fbfbfb")
+        self._set_pause_button_state(paused=self.app_state.pause_requested)
 
         if self.app_state.pause_requested:
-            self.pause_button.configure(
-                text=self.app_state.current_language["resume_button"],
-                fg_color="#e0a12e",
-                hover_color="#b87f1f",
-                **({"image": icon} if icon is not None else {}),
-            )
             self.progress_label.configure(text=self.app_state.current_language["operation_paused_message"])
-        else:
-            self.pause_button.configure(
-                text=self.app_state.current_language["pause_button"],
-                fg_color="#e0a12e",
-                hover_color="#b87f1f",
-                **({"image": icon} if icon is not None else {}),
-            )
