@@ -9,30 +9,23 @@ from types import SimpleNamespace
 import customtkinter as ctk
 from tkinter import Menu, filedialog, messagebox
 
-from downloader import download_video, download_audio, cleanup_temp_files, TEMP_PREFIX
 from app_state import AppState
-from quality_options import (
-    build_dropdown_options,
-    quality_dropdown_text,
-    quality_label,
-    resolve_quality_key,
-)
+from download_controller import DownloadController
+from downloader import cleanup_temp_files, TEMP_PREFIX
+from quality_options import build_dropdown_options, quality_dropdown_text
 from error_classifier import classify_ytdlp_download_error, classify_ytdlp_update_error
 from languages import LANGUAGES
 from process_manager import acquire_single_instance, focus_existing_window
 from settings import load_setting, save_setting
 from ui.app_window import build_app_window
 from ui.notifications import notify as send_notification
-from ui.queue_view import QueueView
 from ui.theme import ThemeManager
 from updater import UpdateChecker, APP_VERSION
 from utils import (
-    clean_playlist_url,
     copy_icons,
     format_save_location_display,
     get_icon_path,
     load_button_icon,
-    validate_video_url,
 )
 
 
@@ -109,10 +102,10 @@ def on_close_request():
     if app_state.closing:
         return
 
-    if queue_view.current_item is not None:
+    if download_controller.queue_view.current_item is not None:
         # Freeze the download while the dialog is open, using the same pause
         # mechanism as the Pause button (the button itself is left untouched).
-        item_at_open = queue_view.current_item
+        item_at_open = download_controller.queue_view.current_item
         was_paused = app_state.pause_requested
         app_state.pause_requested = True
         if not messagebox.askyesno(
@@ -121,11 +114,11 @@ def on_close_request():
         ):
             # Only restore if it's still the same item; a new queue item
             # that started meanwhile has already reset its own pause state.
-            if queue_view.current_item is item_at_open:
+            if download_controller.queue_view.current_item is item_at_open:
                 app_state.pause_requested = was_paused
             return
         app_state.closing = True
-        queue_view.clear()   # don't let the next queued item start
+        download_controller.queue_view.clear()   # don't let the next queued item start
         app_state.pause_requested = False
         app_state.cancel_requested = True
         root.withdraw()          # window disappears immediately
@@ -136,7 +129,7 @@ def on_close_request():
 def _finish_close(attempt: int):
     """Waits (max ~10 s) for the cancelled worker to finish, then closes.
     Anything still alive after that is killed by the job object."""
-    if queue_view.current_item is not None and attempt < 100:
+    if download_controller.queue_view.current_item is not None and attempt < 100:
         root.after(100, lambda: _finish_close(attempt + 1))
         return
     if app_state.closing:
@@ -180,9 +173,6 @@ def uninstall_app():
 # ---------------------------------------------------------------------------
 theme_manager = ThemeManager()
 
-# Download queue — items waiting to start, plus the one currently in flight.
-queue_view = QueueView()
-
 SIDEBAR_WIDTH = 300
 
 # Folder where completed downloads are saved.
@@ -200,139 +190,15 @@ save_setting("save_location", _initial_save_location)
 # sidebar_x and save_location used to be separate module-level globals,
 # mutated via `global` from many functions below — now grouped into one
 # AppState instance (see app_state.py). dark_mode (ThemeManager, above) and
-# the download queue (QueueView, above) were already encapsulated the same
-# way before this.
+# the download queue (QueueView, owned by DownloadController — see
+# download_controller.py) were already encapsulated the same way before
+# this.
 app_state = AppState(save_location=_initial_save_location, sidebar_width=SIDEBAR_WIDTH)
 
 # Temp files (.ytdlp_tmp_*) left behind if the app was closed or killed
 # mid-download. Each download uses a fresh UUID, so these can never be
 # resumed and are just garbage.
 cleanup_temp_files(app_state.save_location, TEMP_PREFIX)
-
-
-# ---------------------------------------------------------------------------
-# UI helpers
-# ---------------------------------------------------------------------------
-def set_widgets_state(state: str):
-    for w in [uninstall_button, check_updates_button]:
-        w.configure(state=state)
-
-
-def show_progress(text: str = ""):
-    progress_bar.set(0)
-    progress_bar.pack(pady=10)
-    progress_label.configure(text=text)
-    progress_label.pack()
-
-
-def hide_progress():
-    progress_bar.pack_forget()
-    progress_label.pack_forget()
-
-
-def on_progress(percent: float, downloaded_mb: float, total_mb: float, eta: str):
-    """Called from the background download thread — must not touch Tkinter
-    widgets directly, so the actual UI update is marshaled onto the main
-    thread via root.after()."""
-    root.after(0, lambda: _update_progress_ui(percent, downloaded_mb, total_mb, eta))
-
-
-def _update_progress_ui(percent: float, downloaded_mb: float, total_mb: float, eta: str):
-    if app_state.pause_requested:
-        # This update was queued (via root.after in on_progress) from a
-        # yt-dlp line the background thread read just before it noticed
-        # the pause request — the download has already been stopped by
-        # the time we get here, so drop this stale update rather than
-        # overwriting the "paused" label with it.
-        return
-    progress_bar.set(percent / 100)
-    progress_label.configure(
-        text=(
-            f"{percent:.1f}%   |   {downloaded_mb:.2f} / {total_mb:.2f} MB   |   {eta}\n"
-            f"{app_state.current_language['operation_in_progress_message']}"
-        )
-    )
-
-
-def on_merge_progress(percent: float, elapsed_seconds: float, total_seconds: float, eta: str):
-    """Separate from on_progress: merge progress is based on
-    media time processed by ffmpeg, not MB. So it uses a separate label format instead of "X / Y MB".
-
-    If total_seconds is unknown, percent stays at 0 and
-    the progress bar won't reach 100% until ffmpeg finishes.
-
-    Called from the background thread and uses root.after().
-    """
-    root.after(0, lambda: _update_merge_progress_ui(percent, eta))
-
-
-def _update_merge_progress_ui(percent: float, eta: str):
-    if app_state.pause_requested:
-        # Same stale-update guard as _update_progress_ui.
-        return
-    progress_bar.set(percent / 100)
-    progress_label.configure(
-        text=(
-            f"{percent:.1f}%   |   {eta}\n"
-            f"{app_state.current_language['merging_message']}"
-        )
-    )
-
-
-def on_cancel_check() -> bool:
-    return app_state.cancel_requested
-
-
-def on_pause_check() -> bool:
-    return app_state.pause_requested
-
-
-def on_download_done(success_msg_key: str):
-    root.after(0, lambda: _finalize_download(success_msg_key))
-
-
-def _finalize_download(success_msg_key: str):
-    send_notification(
-        system_notification_enabled.get(),
-        app_state.current_language["operation_completed_message"],
-        app_state.current_language[success_msg_key],
-        NOTIFICATION_ICON,
-    )
-
-    queue_view.current_item = None
-    if queue_view.items:
-        process_next_in_queue()
-    else:
-        render_queue_list()  # clears the just-finished item from the queue list
-        hide_progress()
-        set_widgets_state("normal")
-        pause_button.pack_forget()
-        download_button.pack(side="left", padx=5)
-        download_button.configure(state="normal")
-        queue_add_button.pack_forget()
-        cancel_button.pack_forget()
-
-
-def on_download_error(msg: str):
-    root.after(0, lambda: _handle_error(msg))
-
-
-def _handle_error(msg: str):
-    if not app_state.closing:  # closing cancels the download on purpose — no error popup
-        messagebox.showerror(app_state.current_language["error_title"], msg)
-
-    queue_view.current_item = None
-    if queue_view.items:
-        process_next_in_queue()
-    else:
-        render_queue_list()  # clears the just-errored item from the queue list
-        hide_progress()
-        set_widgets_state("normal")
-        pause_button.pack_forget()
-        download_button.pack(side="left", padx=5)
-        download_button.configure(state="normal")
-        queue_add_button.pack_forget()
-        cancel_button.pack_forget()
 
 
 # ---------------------------------------------------------------------------
@@ -346,146 +212,14 @@ def _handle_error(msg: str):
 
 
 # ---------------------------------------------------------------------------
-# Queue management
+# Download queue + download lifecycle
 # ---------------------------------------------------------------------------
-# The queue's own state and rendering live in QueueView (ui/queue_view.py);
-# these are thin wrappers that supply the widgets/state QueueView needs and
-# don't own itself (theme color, icon factory, language strings), plus the
-# remove-then-redraw / preview-applied-then-redraw glue.
-
-def render_queue_list():
-    """Redraw the queue list. The currently-downloading item, if any, is
-    shown first as an active row (marked with ▶, no remove button —
-    cancel_button is used for that instead), followed by the waiting items."""
-    queue_view.render(
-        widgets={
-            "list_frame": queue_list_frame,
-            "header_label": queue_header_label,
-            "clear_button": clear_queue_button,
-        },
-        text_color=theme_manager.queue_item_text_color,
-        make_icon=_make_ctk_icon,
-        quality_label=lambda key: quality_label(key, app_state.current_language),
-        current_language=app_state.current_language,
-        on_remove=remove_from_queue,
-    )
-
-
-def fetch_queue_item_preview(item: dict):
-    """Fetches preview info in the background and updates the queued item.
-    Uses the item ID, so it can update while waiting in the queue."""
-    queue_view.fetch_preview(item, after=root.after, on_done=_apply_preview_and_render)
-
-
-def _apply_preview_and_render(item_id: int, info: dict, thumb_bytes):
-    queue_view.apply_preview(item_id, info, thumb_bytes)
-    render_queue_list()
-
-
-def remove_from_queue(item_id: int):
-    queue_view.remove(item_id)
-    render_queue_list()
-
-
-def clear_queue():
-    queue_view.clear()
-    render_queue_list()
-
-
-def add_to_queue():
-    raw_url = url_entry.get().strip()
-    error_key = validate_video_url(raw_url)
-    if error_key:
-        messagebox.showwarning(
-            app_state.current_language["warning_title"],
-            app_state.current_language[error_key],
-        )
-        return
-
-    quality_key = resolve_quality_key(option_var.get())
-    if not quality_key:
-        messagebox.showwarning(
-            app_state.current_language["warning_title"],
-            app_state.current_language["quality_error_message"],
-        )
-        return
-
-    url = clean_playlist_url(raw_url)
-    queued_item = queue_view.enqueue(url, quality_key)
-    url_entry.delete(0, "end")
-    render_queue_list()
-    fetch_queue_item_preview(queued_item)
-
-    if queue_view.current_item is None:
-        process_next_in_queue()
-
-
-def process_next_in_queue():
-    """Pop the next item off the queue and start downloading it. Assumes
-    queue_view.current_item is currently None (nothing else is in flight)."""
-    if queue_view.pop_next() is None:
-        return
-
-    render_queue_list()
-    app_state.cancel_requested = False
-    app_state.pause_requested = False
-
-    url = queue_view.current_item["url"]
-    quality_key = queue_view.current_item["quality_key"]
-    # Uses the current app_state.save_location;
-    # saves to the location selected when the download starts.
-
-    set_widgets_state("disabled")
-    download_button.pack_forget()
-    # Reset to its default "paused? no" look in case the previous item in
-    # the queue ended while paused.
-    pause_button.configure(
-        text=app_state.current_language["pause_button"],
-        fg_color="#e0a12e",
-        hover_color="#b87f1f",
-    )
-    pause_button.pack(side="left", padx=5)
-    queue_add_button.pack(side="left", padx=5)
-    cancel_button.pack(pady=5)
-
-    remaining = len(queue_view.items)
-    starting_text = app_state.current_language["download_starting_message"]
-    if remaining:
-        starting_text += f"  ({app_state.current_language['queue_remaining_label']}: {remaining})"
-    show_progress(starting_text)
-
-    if quality_key == "audio":
-        download_audio(
-            url=url,
-            save_location=app_state.save_location,
-            on_progress=on_progress,
-            on_cancel_check=on_cancel_check,
-            on_done=lambda: on_download_done("audio_download_complete_message"),
-            on_error=on_download_error,
-            lang=app_state.current_language,
-            on_merge_progress=on_merge_progress,
-            on_pause_check=on_pause_check,
-        )
-    else:
-        download_video(
-            url=url,
-            save_location=app_state.save_location,
-            target_resolution=quality_key,
-            on_progress=on_progress,
-            on_cancel_check=on_cancel_check,
-            on_done=lambda: on_download_done("download_complete_message"),
-            on_error=on_download_error,
-            lang=app_state.current_language,
-            on_merge_progress=on_merge_progress,
-            on_pause_check=on_pause_check,
-        )
-
-
-def cancel_download():
-    """Cancels only the item currently downloading. If more items are
-    queued, the next one starts automatically once this one stops."""
-    app_state.cancel_requested = True
-    progress_label.configure(text=app_state.current_language["download_canceling_message"])
+# Everything about "what happens when a video is queued/downloading/paused/
+# cancelled/finished/failed" now lives in DownloadController
+# (download_controller.py), which itself sits on top of QueueView's queue
+# state/rendering (ui/queue_view.py). See the "Download controller" section
+# below, right before the UI is built, for where it's constructed and wired
+# up to the widgets it needs.
 
 
 # ---------------------------------------------------------------------------
@@ -510,7 +244,7 @@ def toggle_theme():
         "clear_queue_button":  clear_queue_button,
     }
     theme_manager.toggle(widget_map, _make_ctk_icon)
-    render_queue_list()  # repaints any already-visible queue rows with the new color
+    download_controller.render_queue_list()  # repaints any already-visible queue rows with the new color
 
 
 # ---------------------------------------------------------------------------
@@ -568,7 +302,7 @@ def change_language(selected: str):
     if app_state.pause_requested:
         pause_button.configure(text=app_state.current_language["resume_button"])
 
-    render_queue_list()  # refreshes the "Queue (N)" header text in the new language
+    download_controller.render_queue_list()  # refreshes the "Queue (N)" header text in the new language
 
     dropdown_options = build_dropdown_options(app_state.current_language)
     quality_options_menu.configure(values=dropdown_options)
@@ -653,36 +387,6 @@ def preview_notification():
     )
 
 
-def pause_download():
-    """Toggles the paused state of the item currently downloading.
-
-    The background download thread polls on_pause_check() (see downloader.py's
-    _apply_pause_state) and suspends/resumes the yt-dlp or ffmpeg process
-    accordingly, so pausing genuinely stops network/CPU usage rather than
-    just freezing the progress bar.
-    """
-    app_state.pause_requested = not app_state.pause_requested
-
-    icon_file = RESUME_ICON_FILE if app_state.pause_requested else PAUSE_ICON_FILE
-    icon = _make_ctk_icon(icon_file, "#fbfbfb")
-
-    if app_state.pause_requested:
-        pause_button.configure(
-            text=app_state.current_language["resume_button"],
-            fg_color="#e0a12e",
-            hover_color="#b87f1f",
-            **({"image": icon} if icon is not None else {}),
-        )
-        progress_label.configure(text=app_state.current_language["operation_paused_message"])
-    else:
-        pause_button.configure(
-            text=app_state.current_language["pause_button"],
-            fg_color="#e0a12e",
-            hover_color="#b87f1f",
-            **({"image": icon} if icon is not None else {}),
-        )
-
-
 def retry_ytdlp_setup():
     """Called from the retry button after a failed first-run yt-dlp.exe
     download. Simply re-runs the same setup fetch_ytdlp_version already does
@@ -696,8 +400,27 @@ def retry_ytdlp_setup():
 
 
 # ---------------------------------------------------------------------------
-# Build UI
+# Download controller
 # ---------------------------------------------------------------------------
+# Constructed here — before the widgets it drives exist — because
+# build_app_window() below needs its bound methods (add_to_queue,
+# pause_download, ...) as button callbacks. _make_ctk_icon isn't defined
+# until after the UI is built either, and system_notification_enabled not
+# until build_app_window() returns it, so both are passed as thin lambdas
+# that resolve the name at call time — same forward-reference trick this
+# file already relies on elsewhere (e.g. url_var.trace_add above calling
+# url_changed before it's defined). The controller's own widget
+# attributes (progress_bar, download_button, ...) are filled in via
+# download_controller.bind_widgets(...) right after _ui is unpacked below.
+download_controller = DownloadController(
+    app_state=app_state,
+    theme_manager=theme_manager,
+    make_icon=lambda *args, **kwargs: _make_ctk_icon(*args, **kwargs),
+    send_notification=send_notification,
+    notification_icon=NOTIFICATION_ICON,
+    get_system_notification_enabled=lambda: system_notification_enabled.get(),
+)
+
 # ---------------------------------------------------------------------------
 # Build UI
 # ---------------------------------------------------------------------------
@@ -706,11 +429,11 @@ _ui = build_app_window(
         on_close_request=on_close_request,
         url_changed=url_changed,
         show_entry_context_menu=show_entry_context_menu,
-        clear_queue=clear_queue,
+        clear_queue=download_controller.clear_queue,
         retry_ytdlp_setup=retry_ytdlp_setup,
-        add_to_queue=add_to_queue,
-        pause_download=pause_download,
-        cancel_download=cancel_download,
+        add_to_queue=download_controller.add_to_queue,
+        pause_download=download_controller.pause_download,
+        cancel_download=download_controller.cancel_download,
         open_downloads_folder=open_downloads_folder,
         toggle_sidebar=toggle_sidebar,
         toggle_theme=toggle_theme,
@@ -767,6 +490,25 @@ check_updates_button = _ui.check_updates_button
 preview_notification_button = _ui.preview_notification_button
 uninstall_button = _ui.uninstall_button
 
+# Now that the real widgets exist, hand them to the controller — see the
+# "Download controller" section above for why it couldn't happen earlier.
+download_controller.bind_widgets(
+    root=root,
+    progress_bar=progress_bar,
+    progress_label=progress_label,
+    download_button=download_button,
+    pause_button=pause_button,
+    queue_add_button=queue_add_button,
+    cancel_button=cancel_button,
+    queue_list_frame=queue_list_frame,
+    queue_header_label=queue_header_label,
+    clear_queue_button=clear_queue_button,
+    url_entry=url_entry,
+    option_var=option_var,
+    uninstall_button=uninstall_button,
+    check_updates_button=check_updates_button,
+)
+
 # The initial populate needed save_location_value_label to already exist
 # as one of the names above — see the NOTE in build_app_window().
 update_save_location_label()
@@ -777,7 +519,7 @@ update_save_location_label()
 update_checker = UpdateChecker(
     root=root,
     get_language=lambda: app_state.current_language,
-    is_download_active=lambda: queue_view.current_item is not None,
+    is_download_active=lambda: download_controller.queue_view.current_item is not None,
     check_updates_button=check_updates_button,
     uninstall_button=uninstall_button,
     download_button=download_button,
@@ -807,8 +549,10 @@ BUTTON_ICONS = {
     downloads_button:             ("folder.png",   "black", (30, 30)),
 }
 # pause_button toggles between two icons depending on state, so it's kept
-# separate from the static dict above and wired up in pause_download().
-PAUSE_ICON_FILE, RESUME_ICON_FILE = "pause.png", "resume.png"
+# separate from the static dict above and wired up in
+# DownloadController.pause_download(). The filenames themselves live on
+# DownloadController (as PAUSE_ICON_FILE/RESUME_ICON_FILE) since that's the
+# only other place that needs them.
 
 
 def _make_ctk_icon(filename: str, color: str, size=BUTTON_ICON_SIZE):
@@ -826,7 +570,10 @@ def apply_button_icons():
         if icon is not None:
             widget.configure(image=icon, compound="left")
 
-    pause_icon_file = RESUME_ICON_FILE if app_state.pause_requested else PAUSE_ICON_FILE
+    pause_icon_file = (
+        DownloadController.RESUME_ICON_FILE if app_state.pause_requested
+        else DownloadController.PAUSE_ICON_FILE
+    )
     pause_icon = _make_ctk_icon(pause_icon_file, "#fbfbfb")
     if pause_icon is not None:
         pause_button.configure(image=pause_icon, compound="left")
@@ -867,7 +614,7 @@ def on_ytdlp_status(stage: str, detail):
             ytdlp_status_label.pack_forget()
             ytdlp_retry_button.pack_forget()
             url_entry.configure(state="normal")
-            if queue_view.current_item is None:  # don't steal control from an active download
+            if download_controller.queue_view.current_item is None:  # don't steal control from an active download
                 download_button.configure(state="normal")
             return
 
@@ -896,7 +643,7 @@ def on_ytdlp_status(stage: str, detail):
             ytdlp_status_label.configure(text=message)
             ytdlp_status_label.pack(pady=(0, 5), before=action_buttons_frame)
             url_entry.configure(state="normal")
-            if queue_view.current_item is None:
+            if download_controller.queue_view.current_item is None:
                 download_button.configure(state="normal")
             root.after(6000, ytdlp_status_label.pack_forget)
             return
