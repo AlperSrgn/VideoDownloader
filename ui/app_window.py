@@ -372,7 +372,7 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
         fg_color="#4c6a8c",
         hover_color="#3b556f",
         text_color="#fbfbfb",
-        width=35, height=35,
+        width=45, height=45,
     )
     preview_notification_button.place(x=10, y=-70, relx=0, rely=1, anchor="sw")
 
