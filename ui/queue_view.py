@@ -7,16 +7,17 @@ redraw it into a set of widgets and how to fetch/attach a preview (title,
 duration, thumbnail) for an item. The queue mutation methods below
 (enqueue/pop_next/remove/clear/find) and the current_item/items/total
 accessors are thin pass-throughs to that DownloadQueue, kept here so every
-existing call site (main.py's queue_view.current_item, queue_view.items,
-queue_view.enqueue(...), etc.) keeps working unchanged — only the state
-itself moved, not the interface.
+existing call site (DownloadController's queue_view.current_item,
+queue_view.items, queue_view.enqueue(...), etc.) keeps working
+unchanged — only the state itself moved, not the interface.
 
 It has no opinion on when items get added or when the next one should
-start downloading — that's still main.py's job (add_to_queue,
-process_next_in_queue), since it involves widgets and download state
-(pause/cancel, save location, etc.) this module knows nothing about.
-Those call into QueueView to read or mutate the queue and then trigger a
-redraw the same way the moved functions used to.
+start downloading — that's DownloadController's job (add_to_queue,
+process_next_in_queue, core/download_controller.py), since it involves
+widgets and download state (pause/cancel, save location, etc.) this
+module knows nothing about. DownloadController calls into QueueView to
+read or mutate the queue and then trigger a redraw the same way the
+functions this was split out of used to.
 """
 
 import io
@@ -38,9 +39,9 @@ class QueueView:
     def __init__(self):
         self.queue = DownloadQueue()
 
-    # -- pass-throughs to DownloadQueue, so existing call sites (main.py's
-    # queue_view.current_item / .items / .enqueue(...) etc.) don't need to
-    # change -----------------------------------------------------------
+    # -- pass-throughs to DownloadQueue, so existing call sites
+    # (DownloadController's queue_view.current_item / .items /
+    # .enqueue(...) etc.) don't need to change ---------------------------
 
     @property
     def current_item(self):
@@ -138,8 +139,8 @@ class QueueView:
     def render(self, widgets, text_color, make_icon, quality_label, current_language, on_remove) -> None:
         """Redraws the queue list. The active item (current_item), if any,
         is shown first — marked with ▶, no remove button (cancel_button,
-        owned by main.py, is used for that instead) — followed by the
-        waiting items in order.
+        owned by DownloadController, is used for that instead) — followed
+        by the waiting items in order.
 
         widgets: {"list_frame", "header_label", "clear_button"}
         make_icon(filename, color, size) -> CTkImage | None

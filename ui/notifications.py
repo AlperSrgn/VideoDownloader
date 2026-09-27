@@ -1,11 +1,11 @@
 """
 System notifications (Windows toast via plyer).
 
-Both call sites in main.py — a download finishing and the settings
-sidebar's "preview notification" button — share the same "only if the
-user's checkbox is on" guard, so it's centralized here rather than
-repeated at each call site. This is also the only place that imports
-plyer, so main.py doesn't need to know it exists.
+Both call sites — a download finishing (core/download_controller.py) and
+the sidebar's "preview notification" button (main.py) — share the same
+"only if the user's checkbox is on" guard, so it's centralized here
+rather than repeated at each call site. This is also the only place that
+imports plyer, so neither of those two callers needs to know it exists.
 """
 
 from plyer import notification

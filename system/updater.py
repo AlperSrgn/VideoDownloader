@@ -5,7 +5,7 @@ latest GitHub release, and offers to download/launch the installer.
 Split out of main.py as its own feature: it polls its own API, verifies
 and runs its own installer, and only needs a handful of UI widgets
 (passed in explicitly once they exist) rather than reaching into
-main.py's globals directly.
+main.py's App instance directly.
 """
 
 import json

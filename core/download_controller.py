@@ -48,8 +48,9 @@ class DownloadController:
         # Set by bind_widgets() once main.py's build_app_window() call has
         # returned and the real widgets exist. Nothing above can actually
         # be triggered by the user before that happens, so leaving these
-        # unset until then is safe — same assumption main.py's own
-        # forward-referenced globals already relied on.
+        # unset until then is safe — DownloadController itself is
+        # constructed before its widgets exist, the same two-step
+        # main.py's App class already uses for UpdateChecker.
         self.root = None
         self.progress_bar = None
         self.progress_label = None
@@ -66,8 +67,8 @@ class DownloadController:
         self.check_updates_button = None
 
     def bind_widgets(self, **widgets) -> None:
-        """Called once from main.py right after build_app_window() and its
-        result are unpacked, with the widgets this controller drives."""
+        """Called once from main.py right after build_app_window() returns
+        and self.ui is assigned, with the widgets this controller drives."""
         for name, widget in widgets.items():
             setattr(self, name, widget)
 

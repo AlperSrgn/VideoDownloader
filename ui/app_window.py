@@ -2,20 +2,24 @@
 Main window construction.
 
 build_app_window() creates every widget of the main window and the
-settings sidebar and returns them all as attributes of one object, for
-main.py to unpack into its own module-level names — main.py's business
-logic (add_to_queue, render_queue_list, toggle_theme, on_ytdlp_status,
-etc.) was written against those bare names and keeps working unchanged.
+settings sidebar and returns them all as attributes of one object
+(a SimpleNamespace), which main.py's App keeps as self.ui — no
+unpacking into separate names, so callers just use self.ui.download_button
+etc.
 
 This module owns none of the click-handling logic itself: every
 command=... callback it wires up is supplied by the caller via
 `callbacks` (an object with one attribute per callback, e.g.
-callbacks.add_to_queue), since those functions live in main.py and need
-things (state, other widgets, current_language) this module doesn't
-have. The one thing NOT wired up here is the "Check for Updates" button
-— its command depends on an UpdateChecker instance that itself needs
-several of these widgets, so main.py constructs and wires that right
-after calling this function.
+callbacks.add_to_queue), since those functions need things (state, other
+widgets, current_language) this module doesn't have. Some of them are
+App methods in main.py (toggle_theme, change_language, on_close_request,
+...); the queue/download ones (add_to_queue, pause_download,
+cancel_download, clear_queue) are DownloadController methods
+(core/download_controller.py) that main.py hands through unchanged. The
+one thing NOT wired up here is the "Check for Updates" button — its
+command depends on an UpdateChecker instance that itself needs several
+of these widgets, so main.py constructs and wires that right after
+calling this function.
 """
 
 from types import SimpleNamespace
@@ -343,9 +347,9 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
     )
     save_location_value_label.pack(anchor="w", pady=(2, 10), padx=10, fill="x")
     # NOTE: the initial update_save_location_label() call that used to happen
-    # right here now happens in main.py, right after unpacking this
-    # function's return value — that function is defined in main.py and
-    # needs save_location_value_label to already be one of its own globals.
+    # right here now happens in main.py, right after self.ui is assigned —
+    # that method is defined on main.py's App class and needs
+    # save_location_value_label to already be reachable via self.ui.
 
     # Check for Updates button
     check_updates_button = ctk.CTkButton(
