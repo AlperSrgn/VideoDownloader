@@ -268,7 +268,7 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
     light_dark.place(relx=0.0, rely=1.0, anchor="sw", x=10, y=-10)
 
     # Language selector
-    language_options = ["De", "En", "Es", "Fr", "It", "Tr"]
+    language_options = ["DE", "EN", "ES", "FR", "IT", "TR"]
     language_var = ctk.StringVar(value=language_options[0])
     language_menu = ctk.CTkOptionMenu(
         sidebar_content,

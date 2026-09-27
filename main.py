@@ -249,7 +249,7 @@ class App:
         if ui.dark_mode_enabled.get():
             self.toggle_theme()
 
-        saved_lang = load_setting("language", "En")
+        saved_lang = load_setting("language", "EN")
         ui.language_var.set(saved_lang)
         self.change_language(saved_lang)
         # keep the default selection in sync with the tagged dropdown text
@@ -401,7 +401,7 @@ class App:
     # -- Language ------------------------------------------------------------
     def change_language(self, selected: str) -> None:
         ui = self.ui
-        self.app_state.current_language = LANGUAGES.get(selected, LANGUAGES["En"])
+        self.app_state.current_language = LANGUAGES.get(selected, LANGUAGES["EN"])
 
         label_map = {
             ui.download_button:              "download_button",
@@ -554,7 +554,7 @@ class App:
         """
         def apply():
             ui = self.ui
-            lang = self.app_state.current_language or LANGUAGES.get("En", {})
+            lang = self.app_state.current_language or LANGUAGES.get("EN", {})
 
             if stage == "ready":
                 ui.ytdlp_status_label.pack_forget()

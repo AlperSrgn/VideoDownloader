@@ -1,5 +1,5 @@
 LANGUAGES = {
-    "Tr": {
+    "TR": {
         "download_button": "İndir",
         "cancel_button": "İptal Et",
         "pause_button": "Duraklat",
@@ -85,7 +85,7 @@ LANGUAGES = {
         "update_downloading_message": "Güncelleme indiriliyor...",
 
     },
-    "En": {
+    "EN": {
         "download_button": "Download",
         "cancel_button": "Cancel",
         "pause_button": "Pause",
@@ -174,7 +174,7 @@ LANGUAGES = {
         "update_downloading_message": "Downloading update...",
 
     },
-    "Es": {
+    "ES": {
         "download_button": "Descargar",
         "cancel_button": "Cancelar",
         "pause_button": "Pausar",
@@ -262,7 +262,7 @@ LANGUAGES = {
         "update_check_failed_message": "No se pudieron comprobar las actualizaciones.\n\nComprueba tu conexión a Internet e inténtalo de nuevo.",
         "update_downloading_message": "Descargando actualización...",
     },
-    "De": {
+    "DE": {
         "download_button": "Herunterladen",
         "cancel_button": "Abbrechen",
         "pause_button": "Pausieren",
@@ -350,7 +350,7 @@ LANGUAGES = {
         "update_check_failed_message": "Updates konnten nicht überprüft werden.\n\nBitte überprüfen Sie Ihre Internetverbindung und versuchen Sie es erneut.",
         "update_downloading_message": "Update wird heruntergeladen...",
     },
-    "It": {
+    "IT": {
         "download_button": "Scarica",
         "cancel_button": "Annulla",
         "pause_button": "Pausa",
@@ -438,7 +438,7 @@ LANGUAGES = {
         "update_check_failed_message": "Impossibile verificare la presenza di aggiornamenti.\n\nControlla la connessione Internet e riprova.",
         "update_downloading_message": "Download dell'aggiornamento...",
     },
-    "Fr": {
+    "FR": {
         "download_button": "Télécharger",
         "cancel_button": "Annuler",
         "pause_button": "Pause",
