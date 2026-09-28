@@ -457,6 +457,104 @@ def _run_ffmpeg_merge(cmd, total_duration, on_merge_progress, on_cancel_check, c
 
 
 # ---------------------------------------------------------------------------
+# Shared helpers for download_video / download_audio
+# ---------------------------------------------------------------------------
+# Both functions run the same shape of pipeline (one or more yt-dlp download
+# phases, then one ffmpeg phase), so the yt-dlp command itself and the
+# exception -> on_error mapping around _run_download/_run_ffmpeg_merge used
+# to be duplicated between them almost verbatim. Collected here instead.
+
+def _build_ytdlp_download_cmd(exe_path: str, format_id: str, client: str,
+                                output_template: str, url: str) -> list:
+    """Builds a yt-dlp download command for one phase (a video track, an
+    audio track, or an audio-only download) — only the format id and
+    output template differ between call sites, so this is the one place
+    that lists the flags all of them share.
+
+    --continue is explicit even though it's yt-dlp's default: relaunching
+    this exact command after a pause (see _run_download's docstring)
+    relies on it resuming the partial file via an HTTP Range request
+    instead of starting over, and this guards against a local yt-dlp
+    config overriding that default.
+    """
+    return [
+        exe_path,
+        "-f", format_id,
+        "--extractor-args", f"youtube:player_client={client}",
+        "--newline", "--no-warnings",
+        "--continue",
+        "-o", f"{output_template}.%(ext)s",
+        url,
+    ]
+
+
+def _run_ytdlp_download_phase(cmd, progress_fn, on_cancel_check, on_pause_check,
+                               on_error, lang: dict, known_total_mb=None) -> bool:
+    """Runs one yt-dlp download phase and reports any failure through
+    on_error. Returns True on success; on False the caller should just
+    `return` immediately — on_error has already been called.
+
+    Shared by download_video (its video and audio phases) and
+    download_audio (its single phase), which otherwise each caught
+    DownloadCancelled/DownloadStalled/YtDlpProcessError around
+    _run_download and mapped them to on_error identically.
+    """
+    try:
+        _run_download(
+            cmd, progress_fn, on_cancel_check,
+            lang["download_canceled_message"], lang["error_download_stalled"],
+            known_total_mb=known_total_mb, on_pause_check=on_pause_check,
+        )
+        return True
+    except DownloadCancelled as e:
+        on_error(str(e))
+    except DownloadStalled as e:
+        on_error(str(e))
+    except YtDlpProcessError as e:
+        on_error(classify_ytdlp_error(e.output, e.returncode, lang))
+    return False
+
+
+def _remove_if_exists(path: str) -> None:
+    """Best-effort delete. Used to remove a partial, unplayable file ffmpeg
+    may have written before being cancelled or before erroring out."""
+    if path and os.path.exists(path):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
+def _run_ffmpeg_merge_phase(cmd, duration, progress_fn, on_cancel_check, on_pause_check,
+                             on_error, lang: dict, output_path: str) -> bool:
+    """Runs the ffmpeg merge/convert step and reports any failure through
+    on_error, first removing `output_path` if ffmpeg left behind a
+    partial file (on cancellation or a non-zero exit) — a killed or
+    failed ffmpeg run can still have written a partial, unplayable file
+    before stopping. Returns True on success; on False the caller should
+    just `return` immediately — on_error has already been called.
+
+    Shared by download_video's video+audio merge and download_audio's mp3
+    conversion, which otherwise each caught DownloadCancelled/
+    FfmpegProcessError around _run_ffmpeg_merge and mapped them to
+    on_error identically.
+    """
+    try:
+        _run_ffmpeg_merge(
+            cmd, duration, progress_fn, on_cancel_check,
+            lang["download_canceled_message"], on_pause_check=on_pause_check,
+        )
+        return True
+    except DownloadCancelled as e:
+        _remove_if_exists(output_path)
+        on_error(str(e))
+    except FfmpegProcessError as e:
+        _remove_if_exists(output_path)
+        on_error(classify_ffmpeg_error(e.output, e.returncode, lang))
+    return False
+
+
+# ---------------------------------------------------------------------------
 # Video download (with merge)
 # ---------------------------------------------------------------------------
 
@@ -543,29 +641,12 @@ def download_video(
 
         temp_base = os.path.join(save_location, f".ytdlp_tmp_{temp_id}")
 
-        video_cmd = [
-            exe_path,
-            "-f", video_format["format_id"],
-            "--extractor-args", f"youtube:player_client={client}",
-            "--newline", "--no-warnings",
-            # Explicit even though it's yt-dlp's default: relaunching this
-            # exact command after a pause (see _run_download) relies on it
-            # resuming the partial file via an HTTP Range request instead
-            # of starting over, and this guards against a local yt-dlp
-            # config overriding that default.
-            "--continue",
-            "-o", f"{temp_base}_video.%(ext)s",
-            url,
-        ]
-        audio_cmd = [
-            exe_path,
-            "-f", audio_format["format_id"],
-            "--extractor-args", f"youtube:player_client={client}",
-            "--newline", "--no-warnings",
-            "--continue",
-            "-o", f"{temp_base}_audio.%(ext)s",
-            url,
-        ]
+        video_cmd = _build_ytdlp_download_cmd(
+            exe_path, video_format["format_id"], client, f"{temp_base}_video", url
+        )
+        audio_cmd = _build_ytdlp_download_cmd(
+            exe_path, audio_format["format_id"], client, f"{temp_base}_audio", url
+        )
 
         # Scales each phase's progress by *_PHASE_WEIGHT for the overall bar.
         # downloaded_mb/total_mb/eta remain unchanged as phase-specific values.
@@ -576,27 +657,15 @@ def download_video(
             overall = VIDEO_PHASE_WEIGHT + AUDIO_PHASE_WEIGHT * (percent / 100)
             on_progress(overall, downloaded_mb, total_mb, eta)
 
-        try:
-            _run_download(
-                video_cmd, _video_phase_progress, on_cancel_check,
-                lang["download_canceled_message"], lang["error_download_stalled"],
-                known_total_mb=_known_size_mb(video_format),
-                on_pause_check=on_pause_check,
-            )
-            _run_download(
-                audio_cmd, _audio_phase_progress, on_cancel_check,
-                lang["download_canceled_message"], lang["error_download_stalled"],
-                known_total_mb=_known_size_mb(audio_format),
-                on_pause_check=on_pause_check,
-            )
-        except DownloadCancelled as e:
-            on_error(str(e))
+        if not _run_ytdlp_download_phase(
+            video_cmd, _video_phase_progress, on_cancel_check, on_pause_check, on_error, lang,
+            known_total_mb=_known_size_mb(video_format),
+        ):
             return
-        except DownloadStalled as e:
-            on_error(str(e))
-            return
-        except YtDlpProcessError as e:
-            on_error(classify_ytdlp_error(e.output, e.returncode, lang))
+        if not _run_ytdlp_download_phase(
+            audio_cmd, _audio_phase_progress, on_cancel_check, on_pause_check, on_error, lang,
+            known_total_mb=_known_size_mb(audio_format),
+        ):
             return
 
         # Locate downloaded temp files
@@ -626,44 +695,16 @@ def download_video(
             overall = VIDEO_PHASE_WEIGHT + AUDIO_PHASE_WEIGHT + MERGE_PHASE_WEIGHT * (percent / 100)
             on_merge_progress(overall, elapsed_seconds, total_seconds, eta)
 
-        try:
-            _run_ffmpeg_merge(
-                ffmpeg_cmd,
-                info.get("duration"),
-                _merge_phase_progress if on_merge_progress else None,
-                on_cancel_check,
-                lang["download_canceled_message"],
-                on_pause_check=on_pause_check,
-            )
-        except DownloadCancelled as e:
-            # ffmpeg was killed mid-merge — output_path may contain a
-            # partially-written, unplayable file. Remove it so it doesn't
-            # look like a completed download.
-            if os.path.exists(output_path):
-                try:
-                    os.remove(output_path)
-                except OSError:
-                    pass
-            on_error(str(e))
+        success = _run_ffmpeg_merge_phase(
+            ffmpeg_cmd, info.get("duration"),
+            _merge_phase_progress if on_merge_progress else None,
+            on_cancel_check, on_pause_check, on_error, lang, output_path,
+        )
+        # Always clean up temporary video/audio files, regardless of merge result.
+        for path in [video_path, audio_path]:
+            _remove_if_exists(path)
+        if not success:
             return
-        except FfmpegProcessError as e:
-            # Same reasoning as the cancellation branch above: ffmpeg may
-            # have written a partial, unplayable file before erroring out.
-            if os.path.exists(output_path):
-                try:
-                    os.remove(output_path)
-                except OSError:
-                    pass
-            on_error(classify_ffmpeg_error(e.output, e.returncode, lang))
-            return
-        finally:
-            # Always clean up temporary video/audio files, regardless of merge result.
-            for path in [video_path, audio_path]:
-                if os.path.exists(path):
-                    try:
-                        os.remove(path)
-                    except Exception:
-                        pass
 
         logger.debug("Download completed: %s", output_path)
         on_done()
@@ -755,36 +796,15 @@ def download_audio(
         # Download the raw audio track only — no -x/--audio-format here.
         # The mp3 conversion is done ourselves below so its progress can be
         # reported instead of running invisibly inside yt-dlp.
-        cmd = [
-            exe_path,
-            "-f", chosen_audio["format_id"],
-            "--extractor-args", f"youtube:player_client={client}",
-            "--newline", "--no-warnings",
-            # See video_cmd above — kept explicit since relaunching this
-            # after a pause relies on it.
-            "--continue",
-            "-o", f"{output_template}.%(ext)s",
-            url,
-        ]
+        cmd = _build_ytdlp_download_cmd(exe_path, chosen_audio["format_id"], client, output_template, url)
 
         def _download_phase_progress(percent, downloaded_mb, total_mb, eta):
             on_progress(AUDIO_DOWNLOAD_WEIGHT * (percent / 100), downloaded_mb, total_mb, eta)
 
-        try:
-            _run_download(
-                cmd, _download_phase_progress, on_cancel_check,
-                lang["download_canceled_message"], lang["error_download_stalled"],
-                known_total_mb=_known_size_mb(chosen_audio),
-                on_pause_check=on_pause_check,
-            )
-        except DownloadCancelled as e:
-            on_error(str(e))
-            return
-        except DownloadStalled as e:
-            on_error(str(e))
-            return
-        except YtDlpProcessError as e:
-            on_error(classify_ytdlp_error(e.output, e.returncode, lang))
+        if not _run_ytdlp_download_phase(
+            cmd, _download_phase_progress, on_cancel_check, on_pause_check, on_error, lang,
+            known_total_mb=_known_size_mb(chosen_audio),
+        ):
             return
 
         try:
@@ -808,39 +828,14 @@ def download_audio(
             overall = AUDIO_DOWNLOAD_WEIGHT + AUDIO_CONVERT_WEIGHT * (percent / 100)
             on_merge_progress(overall, elapsed_seconds, total_seconds, eta)
 
-        try:
-            _run_ffmpeg_merge(
-                ffmpeg_cmd,
-                info.get("duration"),
-                _convert_phase_progress if on_merge_progress else None,
-                on_cancel_check,
-                lang["download_canceled_message"],
-                on_pause_check=on_pause_check,
-            )
-        except DownloadCancelled as e:
-            # Same reasoning as download_video: ffmpeg may have written a
-            # partial, unplayable file before being killed.
-            if os.path.exists(output_path):
-                try:
-                    os.remove(output_path)
-                except OSError:
-                    pass
-            on_error(str(e))
+        success = _run_ffmpeg_merge_phase(
+            ffmpeg_cmd, info.get("duration"),
+            _convert_phase_progress if on_merge_progress else None,
+            on_cancel_check, on_pause_check, on_error, lang, output_path,
+        )
+        _remove_if_exists(raw_audio_path)
+        if not success:
             return
-        except FfmpegProcessError as e:
-            if os.path.exists(output_path):
-                try:
-                    os.remove(output_path)
-                except OSError:
-                    pass
-            on_error(classify_ffmpeg_error(e.output, e.returncode, lang))
-            return
-        finally:
-            if os.path.exists(raw_audio_path):
-                try:
-                    os.remove(raw_audio_path)
-                except Exception:
-                    pass
 
         update_file_timestamp(output_path)
         on_done()
