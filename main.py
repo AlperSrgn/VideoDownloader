@@ -39,7 +39,7 @@ from tkinter import Menu, filedialog, messagebox
 from core.app_state import AppState
 from core.download_controller import DownloadController
 from core.quality_options import build_dropdown_options, quality_dropdown_text
-from downloading.downloader import cleanup_temp_files, TEMP_PREFIX
+from downloading.downloader import TEMP_PREFIX
 from downloading.error_classifier import classify_ytdlp_download_error, classify_ytdlp_update_error
 from languages import LANGUAGES
 from system.process_manager import acquire_single_instance, focus_existing_window
@@ -49,6 +49,7 @@ from ui.app_window import build_app_window
 from ui.notifications import notify as send_notification
 from ui.theme import ThemeManager
 from utils import (
+    cleanup_temp_files,
     copy_icons,
     format_save_location_display,
     get_icon_path,

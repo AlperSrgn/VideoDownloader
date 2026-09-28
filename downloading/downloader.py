@@ -72,9 +72,6 @@ AUDIO_CONVERT_WEIGHT = 15
 # rather than waiting forever, and kill the process.
 _STALL_TIMEOUT = 60  # seconds
 
-# Shared cancel flag — set to True from UI to abort an active download
-cancel_download = False
-
 
 # ---------------------------------------------------------------------------
 # Format selection: find_suitable_format / find_suitable_audio_format now
