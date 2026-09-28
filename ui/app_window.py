@@ -20,6 +20,14 @@ one thing NOT wired up here is the "Check for Updates" button — its
 command depends on an UpdateChecker instance that itself needs several
 of these widgets, so main.py constructs and wires that right after
 calling this function.
+
+Every widget starts out in light mode, so its colors are read from
+ui/theme.py's THEMES["light"] (aliased below as _LIGHT) instead of being
+retyped as literal hex strings here. That dict is the same one
+toggle_theme() applies later when the user switches themes. A few colors (e.g. the cancel/clear
+buttons' red text, some hover colors) aren't part of THEMES since they
+don't change between themes; those are still hardcoded here and marked
+with a comment saying so.
 """
 
 from types import SimpleNamespace
@@ -27,22 +35,28 @@ from types import SimpleNamespace
 import customtkinter as ctk
 
 from settings import load_setting, save_setting
+from ui.theme import THEMES
+
+_LIGHT = THEMES["light"]
 
 
 def build_app_window(callbacks, app_version: str, app_icon: str,
                       sidebar_width: int, sidebar_x: int) -> SimpleNamespace:
     root = ctk.CTk()
+    root.configure(fg_color=_LIGHT["root"]["fg_color"])
     root.title(f"Video Downloader v{app_version}")
     root.geometry("800x600")
     root.iconbitmap(app_icon)
     root.protocol("WM_DELETE_WINDOW", callbacks.on_close_request)
 
     # Main frame
-    frame = ctk.CTkFrame(root, fg_color="#ebebeb")
+    frame = ctk.CTkFrame(root, fg_color=_LIGHT["frame"]["fg_color"])
     frame.pack(pady=30, padx=30)
 
     # Quality label
-    download_option_label = ctk.CTkLabel(frame, font=ctk.CTkFont(size=16))
+    download_option_label = ctk.CTkLabel(
+        frame, font=ctk.CTkFont(size=16), text_color=_LIGHT["download_option_label"]["text_color"],
+    )
     download_option_label.grid(row=0, column=0, padx=10, pady=5)
 
     # Quality dropdown
@@ -50,21 +64,28 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
     quality_options_menu = ctk.CTkOptionMenu(
         frame,
         variable=option_var,
-        fg_color="#e0e0e0",
-        text_color="#333333",
-        button_color="#d0d0d0",
-        button_hover_color="#c0c0c0",
+        fg_color=_LIGHT["quality_options_menu"]["fg_color"],
+        text_color=_LIGHT["quality_options_menu"]["text_color"],
+        button_color=_LIGHT["quality_options_menu"]["button_color"],
+        button_hover_color=_LIGHT["quality_options_menu"]["button_hover_color"],
     )
     quality_options_menu.grid(row=0, column=1, padx=10, pady=5)
 
     # URL label
-    video_url_label = ctk.CTkLabel(frame, text="Video URL:", font=ctk.CTkFont(size=16))
+    video_url_label = ctk.CTkLabel(
+        frame, text="Video URL:", font=ctk.CTkFont(size=16),
+        text_color=_LIGHT["video_url_label"]["text_color"],
+    )
     video_url_label.grid(row=0, column=2, padx=10, pady=5)
 
     # URL entry
     url_var = ctk.StringVar()
     url_var.trace_add("write", callbacks.url_changed)
-    url_entry = ctk.CTkEntry(frame, width=300, textvariable=url_var)
+    url_entry = ctk.CTkEntry(
+        frame, width=300, textvariable=url_var,
+        fg_color=_LIGHT["url_entry"]["fg_color"],
+        text_color=_LIGHT["url_entry"]["text_color"],
+    )
     url_entry.grid(row=0, column=3, padx=10, pady=5)
     url_entry.bind("<Button-3>", lambda e: callbacks.show_entry_context_menu(e, url_entry))
 
@@ -78,15 +99,22 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
         checkbox_height=20,
         checkbox_width=20,
         border_width=2,
-        fg_color="#333333",
-        hover_color="#cccccc",
+        fg_color=_LIGHT["playlist_checkbox"]["fg_color"],
+        hover_color="#cccccc",  # not part of the light/dark theme, stays fixed
         corner_radius=4,
+        text_color=_LIGHT["playlist_checkbox"]["text_color"],
+        bg_color=_LIGHT["playlist_checkbox"]["bg_color"],
+        border_color=_LIGHT["playlist_checkbox"]["border_color"],
+        checkmark_color=_LIGHT["playlist_checkbox"]["checkmark_color"],
     )
     #playlist_checkbox.grid(row=1, column=3, sticky="w", padx=10, pady=5)
     #playlist_checkbox.grid_remove()
 
     # Queue header + clear button (row 2, hidden until something is queued)
-    queue_header_label = ctk.CTkLabel(frame, text="", font=ctk.CTkFont(size=13, weight="bold"))
+    queue_header_label = ctk.CTkLabel(
+        frame, text="", font=ctk.CTkFont(size=13, weight="bold"),
+        text_color=_LIGHT["queue_header_label"]["text_color"],
+    )
     queue_header_label.grid(row=2, column=0, columnspan=2, padx=10, pady=(4, 0), sticky="w")
     queue_header_label.grid_remove()
 
@@ -95,13 +123,17 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
         command=callbacks.clear_queue,
         width=100, height=24,
         font=("Helvetica", 13, "bold"),
-        fg_color="#ebebeb", hover_color="#dddddd", text_color="#d9534f",
+        fg_color=_LIGHT["clear_queue_button"]["fg_color"],
+        hover_color=_LIGHT["clear_queue_button"]["hover_color"],
+        text_color="#d9534f",  # not part of the light/dark theme, stays fixed
     )
     clear_queue_button.grid(row=2, column=2, columnspan=2, padx=10, pady=(1, 0), sticky="e")
     clear_queue_button.grid_remove()
 
     # Queue list (waiting items only — the active download shows in the progress area)
-    queue_list_frame = ctk.CTkScrollableFrame(frame, width=440, height=160, fg_color="#f5f5f5")
+    queue_list_frame = ctk.CTkScrollableFrame(
+        frame, width=440, height=160, fg_color=_LIGHT["queue_list_frame"]["fg_color"],
+    )
     queue_list_frame.grid(row=3, column=0, columnspan=4, padx=10, pady=(2, 10), sticky="ew")
     queue_list_frame.grid_remove()
 
@@ -189,10 +221,10 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
         width=120,
         height=45,
         font=("Helvetica", 14, "bold"),
-        fg_color="#ebebeb",
-        hover_color="#dddddd",
-        text_color="#d9534f",
-        border_color="#d9534f",
+        fg_color=_LIGHT["cancel_button"]["fg_color"],
+        hover_color=_LIGHT["cancel_button"]["hover_color"],
+        text_color="#d9534f",       # not part of the light/dark theme, stays fixed
+        border_color="#d9534f",     # same
         border_width=2,
         corner_radius=5,
     )
@@ -206,7 +238,11 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
     progress_bar.pack_forget()
 
     # Progress label
-    progress_label = ctk.CTkLabel(bottom_panel, text="", font=("Helvetica", 13))
+    progress_label = ctk.CTkLabel(
+        bottom_panel, text="", font=("Helvetica", 13),
+        text_color=_LIGHT["progress_label"]["text_color"],
+        bg_color=_LIGHT["progress_label"]["bg_color"],
+    )
     progress_label.pack()
     progress_label.pack_forget()
 
@@ -216,8 +252,8 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
         text="",
         command=callbacks.open_downloads_folder,
         width=50, height=50,
-        fg_color="#dddddd",
-        hover_color="#bbbbbb",
+        fg_color=_LIGHT["downloads_button"]["fg_color"],
+        hover_color="#bbbbbb",  # not part of the light/dark theme, stays fixed
         text_color="black",
         corner_radius=8,
     )
@@ -247,11 +283,11 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
         root,
         text="☰",
         font=("Helvetica", 30, "bold"),
-        fg_color="#ebebeb",
-        text_color="#333333",
+        fg_color=_LIGHT["menu_button"]["fg_color"],
+        text_color=_LIGHT["menu_button"]["text_color"],
         width=50, height=50,
         command=callbacks.toggle_sidebar,
-        hover_color="#d0d0d0",
+        hover_color=_LIGHT["menu_button"]["hover_color"],
     )
     menu_button.place(x=10, y=10)
 
