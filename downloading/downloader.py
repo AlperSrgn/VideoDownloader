@@ -485,8 +485,19 @@ def _build_ytdlp_download_cmd(exe_path: str, format_id: str, client: str,
     ]
 
 
+def _report_cancelled(on_cancelled, on_error, exc) -> None:
+    """A user cancellation is not an error. If the caller supplied
+    on_cancelled it gets a plain notification; otherwise (older callers)
+    fall back to the previous behaviour of reporting it through on_error."""
+    if on_cancelled is not None:
+        on_cancelled()
+    else:
+        on_error(str(exc))
+
+
 def _run_ytdlp_download_phase(cmd, progress_fn, on_cancel_check, on_pause_check,
-                               on_error, lang: dict, known_total_mb=None) -> bool:
+                               on_error, lang: dict, known_total_mb=None,
+                               on_cancelled=None) -> bool:
     """Runs one yt-dlp download phase and reports any failure through
     on_error. Returns True on success; on False the caller should just
     `return` immediately — on_error has already been called.
@@ -504,7 +515,7 @@ def _run_ytdlp_download_phase(cmd, progress_fn, on_cancel_check, on_pause_check,
         )
         return True
     except DownloadCancelled as e:
-        on_error(str(e))
+        _report_cancelled(on_cancelled, on_error, e)
     except DownloadStalled as e:
         on_error(str(e))
     except YtDlpProcessError as e:
@@ -523,7 +534,8 @@ def _remove_if_exists(path: str) -> None:
 
 
 def _run_ffmpeg_merge_phase(cmd, duration, progress_fn, on_cancel_check, on_pause_check,
-                             on_error, lang: dict, output_path: str) -> bool:
+                             on_error, lang: dict, output_path: str,
+                             on_cancelled=None) -> bool:
     """Runs the ffmpeg merge/convert step and reports any failure through
     on_error, first removing `output_path` if ffmpeg left behind a
     partial file (on cancellation or a non-zero exit) — a killed or
@@ -544,7 +556,7 @@ def _run_ffmpeg_merge_phase(cmd, duration, progress_fn, on_cancel_check, on_paus
         return True
     except DownloadCancelled as e:
         _remove_if_exists(output_path)
-        on_error(str(e))
+        _report_cancelled(on_cancelled, on_error, e)
     except FfmpegProcessError as e:
         _remove_if_exists(output_path)
         on_error(classify_ffmpeg_error(e.output, e.returncode, lang))
@@ -566,6 +578,7 @@ def download_video(
     lang: dict,
     on_merge_progress=None,
     on_pause_check=None,
+    on_cancelled=None,
 ) -> None:
     """
     Downloads video and audio separately, then merges them with ffmpeg.
@@ -656,12 +669,12 @@ def download_video(
 
         if not _run_ytdlp_download_phase(
             video_cmd, _video_phase_progress, on_cancel_check, on_pause_check, on_error, lang,
-            known_total_mb=_known_size_mb(video_format),
+            known_total_mb=_known_size_mb(video_format), on_cancelled=on_cancelled,
         ):
             return
         if not _run_ytdlp_download_phase(
             audio_cmd, _audio_phase_progress, on_cancel_check, on_pause_check, on_error, lang,
-            known_total_mb=_known_size_mb(audio_format),
+            known_total_mb=_known_size_mb(audio_format), on_cancelled=on_cancelled,
         ):
             return
 
@@ -696,6 +709,7 @@ def download_video(
             ffmpeg_cmd, info.get("duration"),
             _merge_phase_progress if on_merge_progress else None,
             on_cancel_check, on_pause_check, on_error, lang, output_path,
+            on_cancelled=on_cancelled,
         )
         # Always clean up temporary video/audio files, regardless of merge result.
         for path in [video_path, audio_path]:
@@ -722,6 +736,7 @@ def download_audio(
     lang: dict,
     on_merge_progress=None,
     on_pause_check=None,
+    on_cancelled=None,
 ) -> None:
     """Download audio only as mp3. Runs in a background thread.
 
@@ -800,7 +815,7 @@ def download_audio(
 
         if not _run_ytdlp_download_phase(
             cmd, _download_phase_progress, on_cancel_check, on_pause_check, on_error, lang,
-            known_total_mb=_known_size_mb(chosen_audio),
+            known_total_mb=_known_size_mb(chosen_audio), on_cancelled=on_cancelled,
         ):
             return
 
@@ -829,6 +844,7 @@ def download_audio(
             ffmpeg_cmd, info.get("duration"),
             _convert_phase_progress if on_merge_progress else None,
             on_cancel_check, on_pause_check, on_error, lang, output_path,
+            on_cancelled=on_cancelled,
         )
         _remove_if_exists(raw_audio_path)
         if not success:

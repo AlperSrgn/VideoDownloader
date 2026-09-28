@@ -169,6 +169,15 @@ class DownloadController:
     def on_download_error(self, msg: str) -> None:
         self.root.after(0, lambda: self._handle_error(msg))
 
+    def on_download_cancelled(self) -> None:
+        self.root.after(0, self._handle_cancelled)
+
+    def _handle_cancelled(self) -> None:
+        """User pressed Cancel (or closed the app mid-download). This is an
+        intended action, not a failure: no popup, just move on to the next
+        queued item (or back to idle)."""
+        self._advance_queue_or_reset()
+
     def _handle_error(self, msg: str) -> None:
         if not self.app_state.closing:  # closing cancels the download on purpose — no error popup
             messagebox.showerror(self.app_state.current_language["error_title"], msg)
@@ -299,6 +308,7 @@ class DownloadController:
                 on_cancel_check=self.on_cancel_check,
                 on_done=lambda: self.on_download_done("audio_download_complete_message"),
                 on_error=self.on_download_error,
+                on_cancelled=self.on_download_cancelled,
                 lang=lang,
                 on_merge_progress=self.on_merge_progress,
                 on_pause_check=self.on_pause_check,
@@ -312,6 +322,7 @@ class DownloadController:
                 on_cancel_check=self.on_cancel_check,
                 on_done=lambda: self.on_download_done("download_complete_message"),
                 on_error=self.on_download_error,
+                on_cancelled=self.on_download_cancelled,
                 lang=lang,
                 on_merge_progress=self.on_merge_progress,
                 on_pause_check=self.on_pause_check,
