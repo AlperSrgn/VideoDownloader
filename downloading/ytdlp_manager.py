@@ -5,9 +5,11 @@ at regular intervals.
 """
 
 
+import hashlib
 import json
 import logging
 import os
+import re
 import subprocess
 import time
 import urllib.request
@@ -20,7 +22,11 @@ YT_DLP_EXE_NAME = "yt-dlp.exe"
 # Using nightly instead of stable; YouTube-side issues are usually fixed faster.
 # Nightly is an official yt-dlp channel and is released more frequently.
 
-YT_DLP_DOWNLOAD_URL = "https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp.exe"
+# "latest" is resolved to a concrete release tag first, and both the binary and
+# its SHA2-256SUMS are then fetched from that same tag. This avoids a race
+# where a new nightly is published between the two requests.
+_RELEASES_LATEST_URL = "https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest"
+_RELEASE_ASSET_URL = "https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/download/{tag}/{name}"
 YT_DLP_UPDATE_CHANNEL = "nightly"
 
 # config.json key: Unix timestamp of the last GitHub update check.
@@ -74,17 +80,54 @@ def _write_last_update_check(ts: float) -> None:
     save_setting(_LAST_UPDATE_CHECK_SETTING_KEY, ts)
 
 
+def _resolve_latest_tag() -> str:
+    """Follows the /releases/latest redirect and returns the release tag."""
+    with urllib.request.urlopen(_RELEASES_LATEST_URL, timeout=_DOWNLOAD_TIMEOUT) as response:
+        final_url = response.geturl()  # .../releases/tag/<tag>
+    tag = final_url.rstrip("/").rsplit("/", 1)[-1]
+    if tag == "latest" or not re.fullmatch(r"[0-9A-Za-z._-]+", tag):
+        raise RuntimeError(f"Could not determine latest yt-dlp release tag from {final_url!r}")
+    return tag
+
+
+def _fetch_expected_sha256(tag: str, asset_name: str) -> str:
+    """Reads the release's SHA2-256SUMS file and returns the hex digest for asset_name."""
+    url = _RELEASE_ASSET_URL.format(tag=tag, name="SHA2-256SUMS")
+    with urllib.request.urlopen(url, timeout=_DOWNLOAD_TIMEOUT) as response:
+        text = response.read(1024 * 1024).decode("utf-8", "replace")
+    for line in text.splitlines():
+        parts = line.split()
+        # Format: "<hex digest>  <file name>" (a leading "*" marks binary mode)
+        if len(parts) == 2 and parts[1].lstrip("*") == asset_name:
+            digest = parts[0].lower()
+            if re.fullmatch(r"[0-9a-f]{64}", digest):
+                return digest
+    raise RuntimeError(f"No SHA-256 entry for {asset_name} in SHA2-256SUMS ({tag})")
+
+
 def download_ytdlp_exe(dest_path: str, on_progress=None) -> None:
-    """Downloads the latest yt-dlp.exe from GitHub. If on_progress is provided,
-    it reports download progress from 0-100%; otherwise, progress is indeterminate.
+    """Downloads the latest yt-dlp.exe from GitHub and verifies it before
+    installing it. If on_progress is provided, it reports download progress
+    from 0-100%; otherwise, progress is indeterminate.
+
+    Verification (fails closed - nothing is installed if any step fails):
+      * the byte count must match Content-Length (HTTPResponse.read(amt) does
+        NOT raise on an early EOF, so a dropped connection would otherwise
+        look like a normal end of file),
+      * the SHA-256 must match the release's SHA2-256SUMS.
 
     Uses an explicit timeout (applied to connecting AND each subsequent read),
     so a dropped or stalled connection raises promptly instead of hanging
-    forever — urlretrieve alone has no timeout support.
+    forever - urlretrieve alone has no timeout support.
     """
     tmp_path = dest_path + ".tmp"
     try:
-        with urllib.request.urlopen(YT_DLP_DOWNLOAD_URL, timeout=_DOWNLOAD_TIMEOUT) as response:
+        tag = _resolve_latest_tag()
+        expected_sha256 = _fetch_expected_sha256(tag, YT_DLP_EXE_NAME)
+        url = _RELEASE_ASSET_URL.format(tag=tag, name=YT_DLP_EXE_NAME)
+
+        sha256 = hashlib.sha256()
+        with urllib.request.urlopen(url, timeout=_DOWNLOAD_TIMEOUT) as response:
             total_size = int(response.headers.get("Content-Length", 0) or 0)
             downloaded = 0
             with open(tmp_path, "wb") as f:
@@ -93,11 +136,20 @@ def download_ytdlp_exe(dest_path: str, on_progress=None) -> None:
                     if not chunk:
                         break
                     f.write(chunk)
+                    sha256.update(chunk)
                     downloaded += len(chunk)
                     if on_progress and total_size > 0:
                         on_progress(min(100.0, downloaded * 100 / total_size))
+
+        if total_size > 0 and downloaded != total_size:
+            raise IOError(
+                f"Incomplete download: got {downloaded} of {total_size} bytes"
+            )
+        if sha256.hexdigest() != expected_sha256:
+            raise IOError("SHA-256 mismatch for downloaded yt-dlp.exe")
+
         os.replace(tmp_path, dest_path)
-        logger.info("yt-dlp.exe downloaded to %s", dest_path)
+        logger.info("yt-dlp.exe (%s) downloaded and verified: %s", tag, dest_path)
     except Exception:
         # Don't leave a partial/corrupt .tmp file lying around on failure.
         if os.path.exists(tmp_path):
@@ -106,6 +158,22 @@ def download_ytdlp_exe(dest_path: str, on_progress=None) -> None:
             except OSError:
                 pass
         raise
+
+
+def _is_runnable(exe_path: str) -> bool:
+    """True if the exe starts and answers --version. Used to detect a corrupt
+    yt-dlp.exe (e.g. one left over from an earlier truncated download) that
+    merely *exists*. A timeout is not treated as corruption."""
+    try:
+        result = _run_hidden(
+            [exe_path, "--version"],
+            capture_output=True, text=True, timeout=15,
+        )
+    except subprocess.TimeoutExpired:
+        return True
+    except OSError:
+        return False
+    return result.returncode == 0 and bool(result.stdout.strip())
 
 
 def ensure_ytdlp(appdata_dir: str, force_check: bool = False, on_status=None) -> str:
@@ -127,7 +195,14 @@ def ensure_ytdlp(appdata_dir: str, force_check: bool = False, on_status=None) ->
 
     exe_path = get_ytdlp_path(appdata_dir)
 
-    if not os.path.exists(exe_path):
+    needs_download = not os.path.exists(exe_path)
+    if not needs_download and not _session_checked and not _is_runnable(exe_path):
+        # File exists but doesn't run (corrupt/truncated) - os.path.exists()
+        # alone would keep it forever, so re-download it. Checked once per process.
+        logger.warning("Existing yt-dlp.exe is not runnable; re-downloading")
+        needs_download = True
+
+    if needs_download:
         _notify("downloading", 0.0)
         try:
             download_ytdlp_exe(exe_path, on_progress=lambda p: _notify("downloading", p))
