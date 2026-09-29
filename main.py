@@ -38,7 +38,7 @@ from tkinter import Menu, filedialog, messagebox
 
 from core.app_state import AppState
 from core.download_controller import DownloadController
-from core.quality_options import build_dropdown_options, quality_dropdown_text
+from core.quality_options import build_dropdown_options, quality_dropdown_text, resolve_quality_key
 from downloading.downloader import TEMP_PREFIX
 from downloading.error_classifier import classify_ytdlp_download_error, classify_ytdlp_update_error
 from languages import LANGUAGES
@@ -403,7 +403,19 @@ class App:
     # -- Language ------------------------------------------------------------
     def change_language(self, selected: str) -> None:
         ui = self.ui
+
+        # Dil değişmeden ÖNCE mevcut seçimi dilden bağımsız anahtara çevir.
+        selected_key = resolve_quality_key(ui.option_var.get())
+
         self.app_state.current_language = LANGUAGES.get(selected, LANGUAGES["EN"])
+        ...
+        dropdown_options = build_dropdown_options(self.app_state.current_language)
+        ui.quality_options_menu.configure(values=dropdown_options)
+        if selected_key is not None:
+            ui.option_var.set(
+                quality_dropdown_text(selected_key, self.app_state.current_language)
+            )
+        save_setting("language", selected)
 
         label_map = {
             ui.download_button:              "download_button",
