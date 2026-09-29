@@ -76,33 +76,44 @@ class UpdateChecker:
     """Wires the "Check for Updates" button to GitHub's releases API.
 
     Constructed once the widgets it needs already exist. `get_language`
-    and `is_download_active` are accessors (not values) because both the
-    current UI language and whether a download is running change over
-    the app's lifetime — the checker always wants the live value.
+    is an accessor (not a value) because the current UI language changes
+    over the app's lifetime — the checker always wants the live value.
+
+    The Download button is deliberately NOT touched directly here. Whether
+    it may be enabled depends on several independent things (yt-dlp is
+    ready, no download is running, no app update is in progress), and only
+    the owner of all of that state can decide. So this class just reports
+    "my lock changed" through `refresh_download_button()` and exposes
+    `is_locked` for that owner to read.
     """
 
-    def __init__(self, root, get_language, is_download_active,
-                 check_updates_button, uninstall_button, download_button,
+    def __init__(self, root, get_language, refresh_download_button,
+                 check_updates_button, uninstall_button,
                  ytdlp_status_label, action_buttons_frame):
         self.root = root
         self.get_language = get_language
-        self.is_download_active = is_download_active
+        self.refresh_download_button = refresh_download_button
         self.check_updates_button = check_updates_button
         self.uninstall_button = uninstall_button
-        self.download_button = download_button
         self.ytdlp_status_label = ytdlp_status_label
         self.action_buttons_frame = action_buttons_frame
+        self._locked = False
+
+    @property
+    def is_locked(self) -> bool:
+        """True while an update check or installer download is running —
+        one of the conditions that keeps the Download button disabled."""
+        return self._locked
 
     def _set_update_lock(self, state: str):
         """Disable/enable the buttons that must stay locked while checking
-        for or installing an update. download_button only re-enables if
-        nothing else (e.g. an active download) still needs it disabled."""
+        for or installing an update, then let the owner recompute the
+        Download button (which re-enables only if nothing else — yt-dlp not
+        ready, an active download — still needs it disabled)."""
+        self._locked = state == "disabled"
         self.check_updates_button.configure(state=state)
         self.uninstall_button.configure(state=state)
-        if state == "disabled":
-            self.download_button.configure(state="disabled")
-        elif not self.is_download_active():
-            self.download_button.configure(state="normal")
+        self.refresh_download_button()
 
     def check_for_updates(self):
         """Triggered by the sidebar's 'Check for Updates' button. Hits the

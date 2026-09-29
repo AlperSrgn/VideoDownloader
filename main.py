@@ -125,6 +125,15 @@ class App:
 
         self.app_state = AppState(save_location=initial_save_location, sidebar_width=SIDEBAR_WIDTH)
 
+        # True only while yt-dlp.exe is usable AND not being replaced. False
+        # at startup, during the first-run download, during the
+        # `--update-to` self-update (checking_update) and after a failed
+        # first-run download. The Download button is derived from this flag
+        # (see refresh_download_button) rather than being toggled ad hoc by
+        # each feature, so no code path can re-enable it while yt-dlp isn't
+        # ready.
+        self.ytdlp_ready = False
+
         # Temp files (.ytdlp_tmp_*) left behind if the app was closed or
         # killed mid-download. Each download uses a fresh UUID, so these
         # can never be resumed and are just garbage.
@@ -206,10 +215,9 @@ class App:
         self.update_checker = UpdateChecker(
             root=ui.root,
             get_language=lambda: self.app_state.current_language,
-            is_download_active=lambda: self.download_controller.queue_view.current_item is not None,
+            refresh_download_button=self.refresh_download_button,
             check_updates_button=ui.check_updates_button,
             uninstall_button=ui.uninstall_button,
-            download_button=ui.download_button,
             ytdlp_status_label=ui.ytdlp_status_label,
             action_buttons_frame=ui.action_buttons_frame,
         )
@@ -268,6 +276,22 @@ class App:
     def run(self) -> None:
         self.ui.root.mainloop()
 
+    # -- Download button gate -----------------------------------------------
+    def _download_allowed(self) -> bool:
+        return (
+            self.ytdlp_ready
+            and self.download_controller.queue_view.current_item is None
+            and not self.update_checker.is_locked
+        )
+
+    def refresh_download_button(self) -> None:
+        """Single place that decides whether the Download button is usable:
+        yt-dlp ready AND no active download AND no app update in progress.
+        Call this after any of those three changes."""
+        self.ui.download_button.configure(
+            state="normal" if self._download_allowed() else "disabled"
+        )
+
     # -- yt-dlp version (async) ------------------------------------------
     def fetch_ytdlp_version(self, on_status=None) -> None:
         """Runs ensure_ytdlp (first-run download / self-update) in the
@@ -276,6 +300,12 @@ class App:
         If provided, `on_status(stage, percent)` is called during progress.
         This lets the UI show status while yt-dlp.exe is being downloaded.
         """
+        # Set synchronously on the main thread, before the worker starts, so
+        # there is no window in which Download is enabled while ensure_ytdlp
+        # may already be replacing the exe. Also covers the retry button.
+        self.ytdlp_ready = False
+        self.refresh_download_button()
+
         def worker():
             try:
                 from settings import get_appdata_path
@@ -560,9 +590,11 @@ class App:
             self.ui.light_dark.configure(image=theme_icon)
 
     def on_ytdlp_status(self, stage: str, detail) -> None:
-        """Called during ensure_ytdlp to update preparation status. Locks
-        the download button and URL entry until yt-dlp.exe is ready,
-        preventing failed preview fetches and a stuck "Loading..." state.
+        """Called during ensure_ytdlp to update preparation status. Keeps
+        self.ytdlp_ready in sync and derives the download button from it
+        (see refresh_download_button); also locks the URL entry while
+        yt-dlp.exe is being downloaded, preventing failed preview fetches
+        and a stuck "Loading..." state.
 
         detail is the download percentage (0-100) or the failure exception.
         """
@@ -574,8 +606,8 @@ class App:
                 ui.ytdlp_status_label.pack_forget()
                 ui.ytdlp_retry_button.pack_forget()
                 ui.url_entry.configure(state="normal")
-                if self.download_controller.queue_view.current_item is None:  # don't steal control from an active download
-                    ui.download_button.configure(state="normal")
+                self.ytdlp_ready = True
+                self.refresh_download_button()  # stays disabled if a download/app update is active
                 return
 
             if stage == "error":
@@ -589,7 +621,8 @@ class App:
                 ui.ytdlp_status_label.pack(pady=(0, 5), before=ui.action_buttons_frame)
                 ui.ytdlp_retry_button.configure(text=lang["ytdlp_retry_button"])
                 ui.ytdlp_retry_button.pack(pady=(0, 5), before=ui.action_buttons_frame)
-                ui.download_button.configure(state="disabled")
+                self.ytdlp_ready = False
+                self.refresh_download_button()
                 ui.url_entry.configure(state="disabled")
                 return
 
@@ -605,14 +638,22 @@ class App:
                 ui.ytdlp_status_label.configure(text=message)
                 ui.ytdlp_status_label.pack(pady=(0, 5), before=ui.action_buttons_frame)
                 ui.url_entry.configure(state="normal")
-                if self.download_controller.queue_view.current_item is None:
-                    ui.download_button.configure(state="normal")
+                self.ytdlp_ready = True
+                self.refresh_download_button()
                 ui.root.after(6000, ui.ytdlp_status_label.pack_forget)
                 return
 
+            # Every stage below is transitional (checking_update, downloading,
+            # unknown): `--update-to` replaces yt-dlp.exe in place, so a
+            # download must not be able to start (or spawn its own
+            # ensure_ytdlp) until "ready" / "update_failed" arrives.
+            self.ytdlp_ready = False
+            self.refresh_download_button()
+
             if stage == "checking_update":
-                # exe already exists and works (this only runs on 2nd+ launch)
-                # — no need to lock anything, just show the status text.
+                # exe already exists and works (this only runs on 2nd+ launch),
+                # so the URL entry can stay usable — only Download is held
+                # back until the update check finishes.
                 text = lang["ytdlp_checking_message"]
                 ui.url_entry.configure(state="normal")
             elif stage == "downloading":
