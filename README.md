@@ -138,7 +138,7 @@ The build script handles the PyInstaller build process and automatically resolve
 | --------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | `main.py`             | Application entry point — builds the window via `ui/app_window.py`, constructs `core/app_state.py` and `core/download_controller.py`, and wires the remaining top-level UI behavior (theme/language switching, sidebar, save location, updater, uninstall) to their callbacks |
 | `core/app_state.py`        | Groups application-wide status flags (cancel/pause requests, closing state, current language, sidebar position, save location) that would otherwise be separate global variables |
-| `core/download_controller.py` | Owns the full download lifecycle on top of the queue — starting the next queued item, wiring `yt-dlp` progress into the progress bar, and reacting to a download pausing, finishing, or failing |
+| `core/download_controller.py` | Owns the full download lifecycle on top of the queue — starting the next queued item, wiring `yt-dlp` progress into the progress bar, and reacting to a download pausing, being cancelled (shown as a brief toast), finishing, or failing |
 | `core/download_queue.py`   | Pure download-queue state (items waiting to download, plus the one currently in flight) — no GUI or threading dependencies, so it can be tested on its own |
 | `downloading/downloader.py`       | Download logic — runs `yt-dlp.exe` as a subprocess, handles FFmpeg merging, and orchestrates video/audio downloads |
 | `system/process_manager.py`  | Windows process/window management — Job Object lifecycle for child processes, pause/resume, process-tree termination, background pipe reading, and single-instance mutex + window-focus handling |
@@ -149,7 +149,7 @@ The build script handles the PyInstaller build process and automatically resolve
 | `ui/app_window.py`       | Builds every widget of the main window and the settings sidebar                                        |
 | `ui/queue_view.py`       | Renders the download queue (on top of `core/download_queue.py`) into widgets, and fetches per-item preview info (title, duration, thumbnail) |
 | `ui/theme.py`            | Light/dark theme definitions and the `ThemeManager` that applies them to the widget set                |
-| `ui/notifications.py`    | Thin wrapper around Windows system notifications (via `plyer`), respecting the user's notification setting |
+| `ui/notifications.py`    | User notifications — a thin wrapper around Windows system notifications (via `plyer`, respecting the user's notification setting), plus `ToastNotifier`, which animates the in-app toast (e.g. the "download cancelled" notice) |
 | `utils.py`            | General helpers — filename sanitization, temp file cleanup, video URL validation/cleaning, duration/path display formatting, FFmpeg path handling, and icon copying                |
 | `settings.py`         | Configuration — reads and writes application settings to `AppData\Local\VideoDownloader\config.json`              |
 | `build.py`            | Builds the Windows executable with PyInstaller and automatically resolves the local FFmpeg binary path            |
