@@ -22,6 +22,7 @@ from tkinter import messagebox
 
 from downloading.downloader import download_video, download_audio
 from core.quality_options import quality_label, resolve_quality_key
+from ui.notifications import ToastNotifier
 from ui.queue_view import QueueView
 from utils import clean_playlist_url, validate_video_url
 
@@ -65,12 +66,17 @@ class DownloadController:
         self.option_var = None
         self.uninstall_button = None
         self.check_updates_button = None
+        self.toast = None  # ToastNotifier, created in bind_widgets() from the toast label
 
     def bind_widgets(self, **widgets) -> None:
         """Called once from main.py right after build_app_window() returns
         and self.ui is assigned, with the widgets this controller drives."""
+        # The toast label is not kept as an attribute of its own: ToastNotifier
+        # owns it and its animation (see ui/notifications.py).
+        toast_label = widgets.pop("toast_label")
         for name, widget in widgets.items():
             setattr(self, name, widget)
+        self.toast = ToastNotifier(self.root, toast_label)
 
     # -- generic UI helpers --------------------------------------------------
 
@@ -174,8 +180,10 @@ class DownloadController:
 
     def _handle_cancelled(self) -> None:
         """User pressed Cancel (or closed the app mid-download). This is an
-        intended action, not a failure: no popup, just move on to the next
-        queued item (or back to idle)."""
+        intended action, not a failure: no popup, just a brief toast, then
+        move on to the next queued item (or back to idle)."""
+        if not self.app_state.closing:  # window is withdrawn while closing — nothing to show
+            self.toast.show(self.app_state.current_language["download_canceled_message"])
         self._advance_queue_or_reset()
 
     def _handle_error(self, msg: str) -> None:

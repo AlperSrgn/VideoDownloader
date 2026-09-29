@@ -424,4 +424,23 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
     )
     uninstall_button.place(relx=1.0, rely=1.0, anchor="se", x=-10, y=-10)
 
+    # Toast (brief bottom-right notice, e.g. "download cancelled").
+    # Created hidden, like every other on-demand widget above (pause_button,
+    # cancel_button, ...) — shown/hidden via place()/place_forget(), with the
+    # animation owned by ToastNotifier (ui/notifications.py) and triggered by
+    # DownloadController, not by this module (see this file's
+    # docstring: build_app_window() only builds widgets, it doesn't decide
+    # when they appear). Parented directly to root and created last, so it
+    # stacks above every other widget placed on root, including the sidebar.
+    toast_label = ctk.CTkLabel(
+        root,
+        text="",
+        font=ctk.CTkFont(family="Helvetica", size=13, weight="bold"),
+        fg_color="#d9534f",
+        text_color="#ebebeb",
+        corner_radius=5,
+        padx=14,
+        pady=14,
+    )
+
     return SimpleNamespace(**locals())

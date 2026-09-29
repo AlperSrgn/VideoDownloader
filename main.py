@@ -193,6 +193,7 @@ class App:
             option_var=ui.option_var,
             uninstall_button=ui.uninstall_button,
             check_updates_button=ui.check_updates_button,
+            toast_label=ui.toast_label,
         )
 
         # The initial populate needs save_location_value_label to already
