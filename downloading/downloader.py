@@ -733,6 +733,7 @@ def download_video(
         if not success:
             return
 
+        update_file_timestamp(output_path)
         logger.debug("Download completed: %s", output_path)
         on_done()
 
