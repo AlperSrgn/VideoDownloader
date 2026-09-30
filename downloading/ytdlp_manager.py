@@ -42,8 +42,31 @@ MIN_UPDATE_CHECK_INTERVAL = 12 * 60 * 60  # 12 hours
 # of failing promptly.
 _DOWNLOAD_TIMEOUT = 30  # seconds
 
-# Player clients to try, in order, when extracting video info.
-CLIENT_LIST = ["web_mobile", "web", "ios", "android", "tv"]
+# Player clients to try in order when extracting video info.
+# None uses yt-dlp's built-in default clients.
+# yt-dlp is kept up to date, so its defaults stay current.
+# Add fallbacks only if needed, e.g.:
+#   CLIENT_LIST = [None, "tv"]
+# None is always tried first.
+
+CLIENT_LIST = [None]
+
+
+def youtube_extractor_args(client, extra=None) -> list:
+    """Builds the `--extractor-args` part of a yt-dlp command.
+
+    client=None -> no player_client key, so yt-dlp picks its own defaults.
+    `extra` is an additional youtube: option such as "skip=hls,dash".
+    Returns [] when there is nothing to pass.
+    """
+    parts = []
+    if client:
+        parts.append(f"player_client={client}")
+    if extra:
+        parts.append(extra)
+    if not parts:
+        return []
+    return ["--extractor-args", "youtube:" + ";".join(parts)]
 
 _NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
@@ -302,7 +325,7 @@ def extract_info(exe_path: str, url: str, client: str) -> dict:
         exe_path,
         "--dump-json",
         "--no-warnings",
-        "--extractor-args", f"youtube:player_client={client}",
+        *youtube_extractor_args(client),
         url,
     ]
     result = _run_hidden(cmd, capture_output=True, text=True, timeout=60)
@@ -331,7 +354,7 @@ def _extract_preview_info(exe_path: str, url: str, client: str) -> dict:
         exe_path,
         "--dump-json",
         "--no-warnings",
-        "--extractor-args", f"youtube:player_client={client};skip=hls,dash",
+        *youtube_extractor_args(client, extra="skip=hls,dash"),
         url,
     ]
     result = _run_hidden(cmd, capture_output=True, text=True, timeout=30)
@@ -363,7 +386,7 @@ def fetch_preview_info(exe_path: str, url: str) -> dict | None:
         try:
             return _extract_preview_info(exe_path, url, client)
         except YtDlpError as e:
-            logger.debug("Preview: client=%s failed: %s", client, e)
+            logger.debug("Preview: client=%s failed: %s", client or "default", e)
             continue
     return None
 
@@ -474,11 +497,11 @@ def find_info_with_compatible_format(exe_path: str, url: str, format_selector, c
     instead of showing a generic “no compatible format” error.
     """
     for client in CLIENT_LIST:
-        logger.debug("Trying client=%s", client)
+        logger.debug("Trying client=%s", client or "default")
         try:
             info = extract_info(exe_path, url, client)
         except YtDlpError as e:
-            logger.debug("Client %s failed to extract info: %s", client, e)
+            logger.debug("Client %s failed to extract info: %s", client or "default", e)
             if collected_errors is not None:
                 collected_errors.append(str(e))
             continue
@@ -486,12 +509,12 @@ def find_info_with_compatible_format(exe_path: str, url: str, format_selector, c
         formats = info.get("formats", [])
         result = format_selector(formats)
         if result and all(result):
-            logger.debug("Client %s: found compatible format(s)", client)
+            logger.debug("Client %s: found compatible format(s)", client or "default")
             return info, client, result
 
         logger.debug(
             "Client %s: extracted info but no compatible format among %d formats",
-            client, len(formats),
+            client or "default", len(formats),
         )
 
     return None, None, None

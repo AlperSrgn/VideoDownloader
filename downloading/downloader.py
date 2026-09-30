@@ -31,6 +31,7 @@ from downloading.ytdlp_manager import (
     find_info_with_compatible_format,
     find_suitable_audio_format,
     find_suitable_format,
+    youtube_extractor_args,
 )
 from downloading.error_classifier import (
     DownloadCancelled,
@@ -461,7 +462,7 @@ def _run_ffmpeg_merge(cmd, total_duration, on_merge_progress, on_cancel_check, c
 # exception -> on_error mapping around _run_download/_run_ffmpeg_merge used
 # to be duplicated between them almost verbatim. Collected here instead.
 
-def _build_ytdlp_download_cmd(exe_path: str, format_id: str, client: str,
+def _build_ytdlp_download_cmd(exe_path: str, format_id: str, client: str | None,
                                 output_template: str, url: str) -> list:
     """Builds a yt-dlp download command for one phase (a video track, an
     audio track, or an audio-only download) — only the format id and
@@ -477,7 +478,7 @@ def _build_ytdlp_download_cmd(exe_path: str, format_id: str, client: str,
     return [
         exe_path,
         "-f", format_id,
-        "--extractor-args", f"youtube:player_client={client}",
+        *youtube_extractor_args(client),
         "--newline", "--no-warnings",
         "--continue",
         "-o", f"{output_template}.%(ext)s",
@@ -641,7 +642,7 @@ def download_video(
         logger.info(
             "Selected client=%s video_format=%s (vcodec=%s, tbr=%s) "
             "audio_format=%s (acodec=%s, abr=%s)",
-            client,
+            client or "default",
             video_format.get("format_id"), video_format.get("vcodec"), video_format.get("tbr"),
             audio_format.get("format_id"), audio_format.get("acodec"), audio_format.get("abr"),
         )
@@ -794,7 +795,7 @@ def download_audio(
 
         logger.info(
             "Selected client=%s audio_format=%s (acodec=%s, abr=%s, language=%s)",
-            client, chosen_audio.get("format_id"), chosen_audio.get("acodec"),
+            client or "default", chosen_audio.get("format_id"), chosen_audio.get("acodec"),
             chosen_audio.get("abr"), chosen_audio.get("language"),
         )
 
