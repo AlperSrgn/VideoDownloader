@@ -43,11 +43,10 @@ class DownloadController:
         self.queue_view = QueueView()
 
         # Set by bind_widgets() once main.py's build_app_window() call has
-        # returned and the real widgets exist. Nothing above can actually
-        # be triggered by the user before that happens, so leaving these
-        # unset until then is safe — DownloadController itself is
-        # constructed before its widgets exist, the same two-step
-        # main.py's App class already uses for UpdateChecker.
+        # returned and the real widgets exist (see the module docstring for
+        # why the controller has to be constructed first). None of the
+        # methods that use these can be triggered by the user before that
+        # happens, so leaving them unset until then is safe.
         self.root = None
         self.progress_bar = None
         self.progress_label = None
@@ -151,9 +150,10 @@ class DownloadController:
         if self.app_state.pause_requested:
             # This update was queued (via root.after in on_progress) from a
             # yt-dlp line the background thread read just before it noticed
-            # the pause request — the download has already been stopped by
-            # the time we get here, so drop this stale update rather than
-            # overwriting the "paused" label with it.
+            # the pause request — the download (or, during the merge phase,
+            # ffmpeg) has already been stopped/suspended by the time we get
+            # here, so drop this stale update rather than overwriting the
+            # "paused" label with it.
             return
         self.progress_bar.set(percent / 100)
         self.progress_label.configure(
@@ -165,7 +165,9 @@ class DownloadController:
 
     def on_merge_progress(self, percent: float, elapsed_seconds: float, total_seconds: float, eta: str) -> None:
         """Separate from on_progress: merge progress is based on media time
-        processed by ffmpeg, not MB, so it uses a separate label format."""
+        processed by ffmpeg, not MB, so it uses a separate label format.
+        Covers both the video+audio merge and the audio-only mp3
+        conversion."""
         self.root.after(0, lambda: self._update_merge_progress_ui(percent, eta))
 
     def _update_merge_progress_ui(self, percent: float, eta: str) -> None:
@@ -307,8 +309,9 @@ class DownloadController:
         self.app_state.pause_requested = False
 
         # Keep the PC from going to sleep while an item is downloading or
-        # merging. Stays on across queued items; released in
-        # _advance_queue_or_reset() once the queue is idle, or while paused.
+        # merging. Stays on across queued items; released by
+        # pause_download() while paused, and in _advance_queue_or_reset()
+        # once the queue is idle.
         set_keep_awake(True)
 
         self._show_downloading_ui()
@@ -351,9 +354,13 @@ class DownloadController:
         """Toggles the paused state of the item currently downloading.
 
         The background download thread polls on_pause_check() (see
-        downloader.py's apply_pause_state) and suspends/resumes the yt-dlp
-        or ffmpeg process accordingly, so pausing genuinely stops
-        network/CPU usage rather than just freezing the progress bar.
+        downloader.py) and reacts differently per phase, so pausing
+        genuinely stops network/CPU usage rather than just freezing the
+        progress bar: during a yt-dlp download it stops yt-dlp (leaving the
+        partial file) and relaunches the same command on resume so it
+        continues from that file; during the ffmpeg merge/convert step it
+        suspends and later resumes the ffmpeg process in place
+        (apply_pause_state in system/process_manager.py).
         """
         self.app_state.pause_requested = not self.app_state.pause_requested
         self._set_pause_button_state(paused=self.app_state.pause_requested)

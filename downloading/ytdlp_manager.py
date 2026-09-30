@@ -1,7 +1,14 @@
 """
-Uses the standalone yt-dlp.exe binary.
-The binary is stored in the AppData folder and checked for updates
-at regular intervals.
+Everything that talks to the standalone yt-dlp.exe binary.
+
+  - Binary management: the exe is stored in the AppData folder, downloaded
+    and SHA-256-verified on first run, and checked for updates at regular
+    intervals (ensure_ytdlp).
+  - Info extraction: --dump-json wrappers for a full extraction
+    (extract_info / find_info_with_compatible_format) and a faster
+    preview-only one (fetch_preview_info).
+  - Format selection: picking the video/audio format for a requested
+    quality out of the extracted 'formats' list.
 """
 
 
@@ -19,9 +26,11 @@ from settings import load_setting, save_setting
 logger = logging.getLogger(__name__)
 
 YT_DLP_EXE_NAME = "yt-dlp.exe"
+
 # Using nightly instead of stable; YouTube-side issues are usually fixed faster.
 # Nightly is an official yt-dlp channel and is released more frequently.
-
+# The release URLs below and YT_DLP_UPDATE_CHANNEL must both stay on it.
+#
 # "latest" is resolved to a concrete release tag first, and both the binary and
 # its SHA2-256SUMS are then fetched from that same tag. This avoids a race
 # where a new nightly is published between the two requests.
@@ -37,7 +46,8 @@ _LAST_UPDATE_CHECK_SETTING_KEY = "ytdlp_last_update_check_ts"
 MIN_UPDATE_CHECK_INTERVAL = 12 * 60 * 60  # 12 hours
 
 # Applied to both connecting and each subsequent read while downloading
-# yt-dlp.exe. urllib.request.urlretrieve has no timeout support on its own,
+# yt-dlp.exe (and to the release-tag / checksum lookups before it).
+# urllib.request.urlretrieve has no timeout support on its own,
 # so without this a dropped/stalled connection would hang forever instead
 # of failing promptly.
 _DOWNLOAD_TIMEOUT = 30  # seconds
@@ -77,7 +87,7 @@ _cached_exe_path = None
 
 
 class YtDlpError(Exception):
-    """Raised when yt-dlp.exe cannot be run or returns no usable data."""
+    """Raised when yt-dlp.exe cannot be obtained or run, or returns no usable data."""
 
 
 def _run_hidden(cmd, **kwargs):
@@ -129,9 +139,10 @@ def _fetch_expected_sha256(tag: str, asset_name: str) -> str:
 
 
 def download_ytdlp_exe(dest_path: str, on_progress=None) -> None:
-    """Downloads the latest yt-dlp.exe from GitHub and verifies it before
-    installing it. If on_progress is provided, it reports download progress
-    from 0-100%; otherwise, progress is indeterminate.
+    """Downloads the latest nightly yt-dlp.exe from GitHub and verifies it
+    before installing it. If on_progress is provided (and the server sends
+    a Content-Length), it reports download progress from 0-100%; otherwise,
+    progress is indeterminate.
 
     Verification (fails closed - nothing is installed if any step fails):
       * the byte count must match Content-Length (HTTPResponse.read(amt) does
@@ -207,8 +218,15 @@ def ensure_ytdlp(appdata_dir: str, force_check: bool = False, on_status=None) ->
     check time persisted via settings. Pass force_check=True to bypass
     these limits and force an immediate check.
 
-    If provided, on_status(stage, detail) reports download progress,
-    fatal errors, or non-fatal update failures. Returns the executable path."""
+    If provided, on_status(stage, detail) is called with one of:
+      "downloading"     detail = percent 0-100 (first run, or corrupt exe)
+      "checking_update" detail = None (running `--update-to`)
+      "ready"           detail = None
+      "error"           detail = the exception; the download failed and
+                        YtDlpError is raised right after (fatal)
+      "update_failed"   detail = the exception; non-fatal, the existing exe
+                        is still returned and usable
+    Returns the executable path."""
 
     global _session_checked, _cached_exe_path
 
@@ -231,8 +249,9 @@ def ensure_ytdlp(appdata_dir: str, force_check: bool = False, on_status=None) ->
             download_ytdlp_exe(exe_path, on_progress=lambda p: _notify("downloading", p))
         except Exception as e:
             logger.error("Could not download yt-dlp.exe: %s", e)
-            # exe_path doesn't actually exist — don't cache it or report
-            # "ready" as if it does. Leaving _session_checked False means a
+            # There is no usable exe at exe_path (missing, or the corrupt one
+            # that triggered this re-download) — don't cache it or report
+            # "ready" as if there were. Leaving _session_checked False means a
             # later retry (e.g. after the user's connection is back) tries
             # the download again instead of silently reusing a broken state.
             _notify("error", e)
@@ -429,7 +448,12 @@ def _select_original_audio(audio_formats: list):
 def find_suitable_format(formats: list, video_height: int):
     """
     Return (video_format, audio_format) for the best available resolution
-    at or below video_height. Returns (None, None) if SABR-protected or unavailable.
+    at or below video_height. If nothing at or below video_height exists,
+    falls back to the highest resolution available. Within a resolution the
+    highest-tbr video and the original-language audio track are chosen.
+    Returns (None, None) if there are no usable (url-bearing) video or audio
+    formats — e.g. SABR-protected videos, whose formats come without a
+    direct URL.
     """
     video_formats = [
         f for f in formats
@@ -490,7 +514,9 @@ def find_suitable_audio_format(formats: list):
 
 def find_info_with_compatible_format(exe_path: str, url: str, format_selector, collected_errors=None):
     """
-    Tries each client in CLIENT_LIST until format_selector(formats) succeeds.
+    Tries each client in CLIENT_LIST until format_selector(formats) succeeds,
+    i.e. returns a non-empty tuple with no None in it (as
+    find_suitable_format / find_suitable_audio_format do).
     Returns (info, client, result) on success, or (None, None, None) if all clients fail.
     If collected_errors is provided,
     it stores each YtDlpError message so the caller can identify the actual failure reason

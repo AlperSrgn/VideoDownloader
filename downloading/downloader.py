@@ -76,7 +76,7 @@ _STALL_TIMEOUT = 60  # seconds
 
 # ---------------------------------------------------------------------------
 # Format selection: find_suitable_format / find_suitable_audio_format now
-# live in ytdlp_manager.py (imported below) — they operate purely on the
+# live in ytdlp_manager.py (imported at the top of this file) — they operate purely on the
 # 'formats' list shape yt-dlp's --dump-json produces, with no
 # download-orchestration logic of their own.
 # ---------------------------------------------------------------------------
@@ -150,7 +150,7 @@ def _run_download(cmd, on_progress, on_cancel_check, cancel_message, stall_messa
     Runs the yt-dlp.exe download, reports progress, and stops if cancelled.
     Cancellation is checked periodically even without output.
 
-    Known_total_mb: Pass the real file size when available to keep the total fixed.
+    known_total_mb: Pass the real file size when available to keep the total fixed.
     Without it, yt-dlp may re-estimate fragmented downloads on each fragment,
     causing the displayed total to jump. If unavailable, use a non-decreasing
     estimate so the total never shrinks due to estimation fluctuations.
@@ -335,8 +335,11 @@ def _format_duration(seconds: float) -> str:
     return f"{minutes:02d}:{secs:02d}"
 
 
-# Determines how often cancellation is checked while ffmpeg is waiting.
-# Cancellation won't be delayed beyond this interval, even without new output.
+# How often the yt-dlp download loop, the ffmpeg merge loop and the
+# paused-wait loop re-check cancel/pause while no new output arrives (defined
+# here, but also used by the yt-dlp code above — it is only looked up when
+# those functions run). Cancellation won't be delayed beyond this interval,
+# even without new output.
 _CANCEL_POLL_INTERVAL = 0.2  # seconds
 
 
@@ -352,8 +355,10 @@ def _run_ffmpeg_merge(cmd, total_duration, on_merge_progress, on_cancel_check, c
     Cancellation is checked on stdout lines and at regular intervals.
 
     on_pause_check: optional callable — while it returns True, the ffmpeg
-    process is suspended (see apply_pause_state), same as during the
-    yt-dlp download phase.
+    process is suspended in place (see apply_pause_state). Unlike the
+    yt-dlp download phase (which stops and relaunches yt-dlp — see
+    _run_download's docstring), no relaunch is needed here since ffmpeg
+    is local CPU work with no network buffering.
     """
     process = subprocess.Popen(
         cmd,
@@ -499,9 +504,11 @@ def _report_cancelled(on_cancelled, on_error, exc) -> None:
 def _run_ytdlp_download_phase(cmd, progress_fn, on_cancel_check, on_pause_check,
                                on_error, lang: dict, known_total_mb=None,
                                on_cancelled=None) -> bool:
-    """Runs one yt-dlp download phase and reports any failure through
-    on_error. Returns True on success; on False the caller should just
-    `return` immediately — on_error has already been called.
+    """Runs one yt-dlp download phase. Failures are reported through
+    on_error, and a user cancellation through on_cancelled (or through
+    on_error if no on_cancelled was supplied). Returns True on success; on
+    False the caller should just `return` immediately — one of those
+    callbacks has already been called.
 
     Shared by download_video (its video and audio phases) and
     download_audio (its single phase), which otherwise each caught
@@ -525,8 +532,10 @@ def _run_ytdlp_download_phase(cmd, progress_fn, on_cancel_check, on_pause_check,
 
 
 def _remove_if_exists(path: str) -> None:
-    """Best-effort delete. Used to remove a partial, unplayable file ffmpeg
-    may have written before being cancelled or before erroring out."""
+    """Best-effort delete. Used both to remove a partial, unplayable file
+    ffmpeg may have written before being cancelled or before erroring out,
+    and to remove the intermediate temp files (video/audio/raw audio) once
+    they've been merged or converted."""
     if path and os.path.exists(path):
         try:
             os.remove(path)
@@ -537,12 +546,14 @@ def _remove_if_exists(path: str) -> None:
 def _run_ffmpeg_merge_phase(cmd, duration, progress_fn, on_cancel_check, on_pause_check,
                              on_error, lang: dict, output_path: str,
                              on_cancelled=None) -> bool:
-    """Runs the ffmpeg merge/convert step and reports any failure through
-    on_error, first removing `output_path` if ffmpeg left behind a
-    partial file (on cancellation or a non-zero exit) — a killed or
+    """Runs the ffmpeg merge/convert step. Failures are reported through
+    on_error and a user cancellation through on_cancelled (or on_error if
+    none was supplied), first removing `output_path` if ffmpeg left behind
+    a partial file (on cancellation or a non-zero exit) — a killed or
     failed ffmpeg run can still have written a partial, unplayable file
     before stopping. Returns True on success; on False the caller should
-    just `return` immediately — on_error has already been called.
+    just `return` immediately — one of those callbacks has already been
+    called.
 
     Shared by download_video's video+audio merge and download_audio's mp3
     conversion, which otherwise each caught DownloadCancelled/
@@ -583,8 +594,11 @@ def download_video(
 ) -> None:
     """
     Downloads video and audio separately, then merges them with ffmpeg.
-    Calls on_done() or on_error(msg) when finished.
-    Merge progress is reported based on processed seconds.
+    Runs in a background thread. Calls on_done() on success, on_error(msg)
+    on failure, or on_cancelled() if the user cancelled (falls back to
+    on_error(msg) when on_cancelled isn't supplied).
+    Merge progress is reported via on_merge_progress, based on processed
+    seconds.
 
     on_pause_check: optional callable checked throughout every phase. The
     video and audio download phases pause by stopping yt-dlp and relaunching
@@ -603,7 +617,8 @@ def download_video(
         try:
             _worker_impl()
         except Exception as e:
-            # Safety net: # Unexpected errors can stop the thread and leave the UI stuck.
+            # Safety net: an unexpected error would otherwise kill the thread
+            # silently and leave the UI stuck.
             logger.exception("Unexpected error in download_video worker")
             on_error(classify_generic_exception(e, lang))
         finally:
@@ -650,7 +665,7 @@ def download_video(
         title = info.get("title", "video")
         safe_title = sanitize_filename(title)
 
-        temp_base = os.path.join(save_location, f".ytdlp_tmp_{temp_id}")
+        temp_base = os.path.join(save_location, f"{TEMP_PREFIX}{temp_id}")
 
         video_cmd = _build_ytdlp_download_cmd(
             exe_path, video_format["format_id"], client, f"{temp_base}_video", url
@@ -739,7 +754,9 @@ def download_audio(
     on_pause_check=None,
     on_cancelled=None,
 ) -> None:
-    """Download audio only as mp3. Runs in a background thread.
+    """Download audio only as mp3. Runs in a background thread. Completion,
+    failure and cancellation are reported through on_done / on_error /
+    on_cancelled exactly as in download_video.
 
     Downloads the raw audio track first, then converts it to mp3 with our
     own ffmpeg call (using -progress pipe:1, same as the video merge step).
@@ -804,7 +821,7 @@ def download_audio(
         output_filename = unique_filename(save_location, f"{safe_title}.mp3")
         output_path = os.path.join(save_location, output_filename)
 
-        output_template = os.path.join(save_location, f".ytdlp_tmp_{temp_id}")
+        output_template = os.path.join(save_location, f"{TEMP_PREFIX}{temp_id}")
 
         # Download the raw audio track only — no -x/--audio-format here.
         # The mp3 conversion is done ourselves below so its progress can be

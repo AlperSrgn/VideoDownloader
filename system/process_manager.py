@@ -1,10 +1,13 @@
 """
 Windows process/window management helpers.
 
-Two related concerns live here:
+Three related concerns live here:
   - Managing yt-dlp/ffmpeg child processes: keeping them tied to this
-    app's lifetime (Job Object), pausing/resuming them, and terminating
-    them together with their own children.
+    app's lifetime (Job Object), suspending/resuming ffmpeg (the yt-dlp
+    download phase pauses differently — see downloader.py), and
+    terminating processes together with their own children.
+  - Sleep prevention: keeping Windows from idling into sleep while a
+    download is running (set_keep_awake).
   - Single-instance enforcement: claiming a named mutex on startup and,
     if another copy already holds it, finding and focusing that copy's
     window instead of opening a second one.
@@ -130,10 +133,14 @@ def apply_pause_state(process: subprocess.Popen, on_pause_check, suspended: bool
     """Suspends or resumes `process` based on on_pause_check(), and returns
     the updated suspended state.
 
-    Used by both the yt-dlp download loop and the ffmpeg merge loop, so
-    pausing genuinely stops network/CPU usage instead of just freezing the
-    progress bar. Callers reset their own "no output" timer while this
-    returns True, so a pause is never mistaken for a stall.
+    Used by the ffmpeg merge/convert loop in downloader.py, so pausing
+    genuinely stops CPU usage instead of just freezing the progress bar.
+    The yt-dlp download loop does NOT use this: suspending a process can't
+    freeze an in-flight HTTP download (the OS keeps filling the socket
+    buffer), so downloader.py stops yt-dlp and relaunches it on resume
+    instead (see _run_download's docstring there). The ffmpeg loop has no
+    "no output" stall timer, so a suspended ffmpeg is never mistaken for
+    a stalled one.
     """
     if on_pause_check is None:
         return False
@@ -182,7 +189,9 @@ def enqueue_lines(pipe, line_queue) -> None:
 def resume_if_suspended(process: subprocess.Popen, suspended: bool) -> None:
     """Best-effort resume before terminating a process that may currently be
     suspended — a suspended process can't process its own termination signal
-    cleanly on Windows. Used right before cancelling a paused download/merge."""
+    cleanly on Windows. Used right before cancelling a paused ffmpeg
+    merge/convert step (a paused yt-dlp download has no suspended process
+    to resume — it was already stopped)."""
     if not suspended:
         return
     try:

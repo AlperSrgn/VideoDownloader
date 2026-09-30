@@ -21,8 +21,10 @@ This class does NOT own the download queue or its lifecycle — that's
 DownloadController's job (core/download_controller.py). App owns what
 main.py's own globals used to cover: building the window, sidebar
 animation, theme/language switching, save-location/settings wiring, and
-constructing DownloadController and UpdateChecker once the widgets they
-need exist.
+constructing DownloadController (before the window, since the window's
+button callbacks are its bound methods; its widgets are attached afterwards
+via bind_widgets) and UpdateChecker (after the window, once the widgets it
+needs exist).
 """
 
 import logging
@@ -63,7 +65,7 @@ from utils import (
 # The app shares config.json, the save folder, the startup temp-file sweep and
 # the yt-dlp binary, so a second copy would interfere with the first. A named
 # mutex marks the running copy; a second launch just brings the first window
-# to the front and exits. "Local\\" scopes it to the current Windows session,
+# to the front and exits. "Local\" scopes it to the current Windows session,
 # matching the per-user config. The actual mutex/window-enumeration logic
 # lives in system/process_manager.py — these two values are the only
 # app-specific bits it needs.
@@ -241,10 +243,13 @@ class App:
             ui.downloads_button:            ("folder.png",  "black", (30, 30)),
         }
         # pause_button toggles between two icons depending on state, so it's
-        # kept separate from the static dict above and wired up in
-        # DownloadController.pause_download(). The filenames themselves live
-        # on DownloadController (PAUSE_ICON_FILE/RESUME_ICON_FILE) since
-        # that's the only other place that needs them.
+        # kept separate from the static dict above: apply_button_icons()
+        # paints it the first time, and
+        # DownloadController._set_pause_button_state() (called by
+        # pause_download() and when a new item starts) swaps it afterwards.
+        # The filenames themselves live on DownloadController
+        # (PAUSE_ICON_FILE/RESUME_ICON_FILE) since it and
+        # apply_button_icons() are the only places that need them.
         self.apply_button_icons()
 
         # yt-dlp version label (populated asynchronously)
@@ -297,8 +302,11 @@ class App:
         """Runs ensure_ytdlp (first-run download / self-update) in the
         background and updates yt_dlp_version_label with the result.
 
-        If provided, `on_status(stage, percent)` is called during progress.
-        This lets the UI show status while yt-dlp.exe is being downloaded.
+        If provided, `on_status(stage, detail)` is called as ensure_ytdlp
+        progresses (detail is the percentage while downloading, or the
+        exception on failure — see ensure_ytdlp's docstring for the stages).
+        This lets the UI show status while yt-dlp.exe is being downloaded
+        or updated.
         """
         # Set synchronously on the main thread, before the worker starts, so
         # there is no window in which Download is enabled while ensure_ytdlp
@@ -310,8 +318,9 @@ class App:
             try:
                 from settings import get_appdata_path
                 from downloading.ytdlp_manager import ensure_ytdlp, get_ytdlp_version
-                # ensure_ytdlp downloads on first run and updates on later
-                # launches. The auto-update runs once each time the app starts.
+                # ensure_ytdlp downloads on first run and, on later launches,
+                # checks for an update — at most once per
+                # MIN_UPDATE_CHECK_INTERVAL (12 h) and once per app session.
                 exe_path = ensure_ytdlp(get_appdata_path(), on_status=on_status)
                 version_text = f"yt-dlp v{get_ytdlp_version(exe_path)}"
             except Exception:
@@ -362,7 +371,8 @@ class App:
             self.ui.root.after(100, lambda: self._finish_close(attempt + 1))
             return
         if self.app_state.closing:
-            # All processes are stopped by now; remove whatever temp files remain.
+            # Processes should be stopped by now (any that aren't are killed
+            # by the job object as we exit); remove whatever temp files remain.
             cleanup_temp_files(self.app_state.save_location, TEMP_PREFIX)
         self.ui.root.destroy()
 
@@ -646,9 +656,10 @@ class App:
             self.refresh_download_button()
 
             if stage == "checking_update":
-                # exe already exists and works (this only runs on 2nd+ launch),
-                # so the URL entry can stay usable — only Download is held
-                # back until the update check finishes.
+                # exe already exists and works (this stage only occurs when
+                # an exe was already there), so the URL entry can stay
+                # usable — only Download is held back until the update
+                # check finishes.
                 text = lang["ytdlp_checking_message"]
                 ui.url_entry.configure(state="normal")
             elif stage == "downloading":
