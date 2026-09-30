@@ -434,11 +434,10 @@ class App:
     def change_language(self, selected: str) -> None:
         ui = self.ui
 
-        # Dil değişmeden ÖNCE mevcut seçimi dilden bağımsız anahtara çevir.
+        # Convert the current selection to a language-independent key BEFORE the language changes.
         selected_key = resolve_quality_key(ui.option_var.get())
 
         self.app_state.current_language = LANGUAGES.get(selected, LANGUAGES["EN"])
-        ...
         dropdown_options = build_dropdown_options(self.app_state.current_language)
         ui.quality_options_menu.configure(values=dropdown_options)
         if selected_key is not None:
@@ -472,10 +471,6 @@ class App:
             ui.pause_button.configure(text=self.app_state.current_language["resume_button"])
 
         self.download_controller.render_queue_list()  # refreshes the "Queue (N)" header text in the new language
-
-        dropdown_options = build_dropdown_options(self.app_state.current_language)
-        ui.quality_options_menu.configure(values=dropdown_options)
-        save_setting("language", selected)
 
     # -- URL change handler ------------------------------------------------
     def url_changed(self, *_) -> None:
