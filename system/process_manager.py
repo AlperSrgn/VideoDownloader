@@ -79,6 +79,10 @@ if os.name == "nt":
     _k32.CreateMutexW.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR]
     _k32.CloseHandle.argtypes = [wintypes.HANDLE]
 
+    # Used only by set_keep_awake() below.
+    _k32.SetThreadExecutionState.restype = wintypes.DWORD
+    _k32.SetThreadExecutionState.argtypes = [wintypes.DWORD]
+
     # Used only by focus_existing_window() below.
     _user32 = ctypes.WinDLL("user32", use_last_error=True)
     _user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
@@ -216,6 +220,38 @@ def terminate_process_tree(process: subprocess.Popen) -> None:
             child.kill()
         except psutil.Error:
             pass
+
+
+# ---------------------------------------------------------------------------
+# Sleep prevention
+# ---------------------------------------------------------------------------
+# Windows may put the PC to sleep when the idle timeout expires,
+# even during a long download, because network activity isn't considered user input.
+# SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED) prevents idle sleep.
+# ES_DISPLAY_REQUIRED is not used, so the screen can still turn off.
+#
+# The state is tied to the calling thread and is cleared automatically when
+# the thread or process ends. It does not prevent manual sleep, lid-close sleep,
+# or sleep caused by critically low battery.
+
+
+_ES_CONTINUOUS = 0x80000000
+_ES_SYSTEM_REQUIRED = 0x00000001
+
+
+def set_keep_awake(enabled: bool) -> None:
+    """Blocks (True) or re-allows (False) idle sleep. Best-effort, never
+    raises, no-op outside Windows. Safe to call repeatedly with the same
+    value. Call it only from the main (Tk) thread so set and clear always
+    happen on the same thread."""
+    if os.name != "nt":
+        return
+    try:
+        flags = _ES_CONTINUOUS | (_ES_SYSTEM_REQUIRED if enabled else 0)
+        if not _k32.SetThreadExecutionState(flags):
+            logger.debug("SetThreadExecutionState(%s) failed", hex(flags))
+    except Exception as e:
+        logger.debug("Could not change keep-awake state: %s", e)
 
 
 # ---------------------------------------------------------------------------

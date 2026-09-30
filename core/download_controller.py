@@ -23,6 +23,7 @@ from tkinter import messagebox
 from downloading.downloader import download_video, download_audio
 from core.quality_options import quality_label, resolve_quality_key
 from ui.notifications import ToastNotifier
+from system.process_manager import set_keep_awake
 from ui.queue_view import QueueView
 from utils import clean_playlist_url, validate_video_url
 
@@ -200,6 +201,7 @@ class DownloadController:
         if self.queue_view.items:
             self.process_next_in_queue()
         else:
+            set_keep_awake(False)  # nothing left to download: allow sleep again
             self.render_queue_list()  # clears the just-ended item from the queue list
             self.hide_progress()
             self.set_widgets_state("normal")
@@ -287,6 +289,11 @@ class DownloadController:
         self.app_state.cancel_requested = False
         self.app_state.pause_requested = False
 
+        # Keep the PC from going to sleep while an item is downloading or
+        # merging. Stays on across queued items; released in
+        # _advance_queue_or_reset() once the queue is idle, or while paused.
+        set_keep_awake(True)
+
         url = self.queue_view.current_item["url"]
         quality_key = self.queue_view.current_item["quality_key"]
         # Uses the current app_state.save_location;
@@ -352,6 +359,8 @@ class DownloadController:
         """
         self.app_state.pause_requested = not self.app_state.pause_requested
         self._set_pause_button_state(paused=self.app_state.pause_requested)
+        # A paused download isn't using the system, so don't hold it awake.
+        set_keep_awake(not self.app_state.pause_requested)
 
         if self.app_state.pause_requested:
             self.progress_label.configure(text=self.app_state.current_language["operation_paused_message"])
