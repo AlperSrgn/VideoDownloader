@@ -1,12 +1,7 @@
 """
-Owns the download queue and the full lifecycle of "what happens when a
-video is queued, downloading, paused, cancelled, finishes, or fails".
+Owns the download queue and the lifecycle of each item: queued,
+downloading, paused, cancelled, finished or failed.
 
-Before this, that lifecycle was about a dozen loosely related
-module-level functions in main.py, all sharing state through globals
-(queue_view, app_state, and the various progress/queue widgets) — the
-same "package everything into one place" move already made for the
-queue's own state (download_queue.py) and its rendering (ui/queue_view.py).
 This class is the layer above QueueView: it decides *when* the next item
 starts, wires yt-dlp progress into the progress bar, and reacts to a
 download finishing or failing.
@@ -22,8 +17,8 @@ from tkinter import messagebox
 
 from downloading.downloader import download_video, download_audio
 from core.quality_options import quality_label, resolve_quality_key
-from ui.notifications import ToastNotifier
 from system.process_manager import set_keep_awake
+from ui.notifications import ToastNotifier
 from ui.queue_view import QueueView
 from utils import clean_playlist_url, validate_video_url
 
@@ -79,6 +74,11 @@ class DownloadController:
             setattr(self, name, widget)
         self.toast = ToastNotifier(self.root, toast_label)
 
+    @property
+    def lang(self) -> dict:
+        """The current UI language dict (changes when the user switches language)."""
+        return self.app_state.current_language
+
     # -- generic UI helpers --------------------------------------------------
 
     def set_widgets_state(self, state: str) -> None:
@@ -95,20 +95,45 @@ class DownloadController:
         self.progress_bar.pack_forget()
         self.progress_label.pack_forget()
 
+    def _show_downloading_ui(self) -> None:
+        """Switch the buttons and progress area to the "download in
+        progress" layout."""
+        self.set_widgets_state("disabled")
+        self.download_button.pack_forget()
+        # Reset to its default "paused? no" look (text, color AND icon) in
+        # case the previous item in the queue ended while paused.
+        self._set_pause_button_state(paused=False)
+        self.pause_button.pack(side="left", padx=5)
+        self.queue_add_button.pack(side="left", padx=5)
+        self.cancel_button.pack(pady=5)
+
+        remaining = len(self.queue_view.items)
+        starting_text = self.lang["download_starting_message"]
+        if remaining:
+            starting_text += f"  ({self.lang['queue_remaining_label']}: {remaining})"
+        self.show_progress(starting_text)
+
+    def _show_idle_ui(self) -> None:
+        """Back to the idle layout once the queue has run out."""
+        self.render_queue_list()  # clears the just-ended item from the queue list
+        self.hide_progress()
+        self.set_widgets_state("normal")
+        self.pause_button.pack_forget()
+        self.download_button.pack(side="left", padx=5)
+        self.download_button.configure(state="normal")
+        self.queue_add_button.pack_forget()
+        self.cancel_button.pack_forget()
+
     # -- pause button appearance ----------------------------------------------
     # Single place that sets the pause button's text/color/icon together, so
-    # the three can never drift out of sync (pause_download() and
-    # process_next_in_queue() both used to set these separately, and a
-    # previous version of process_next_in_queue() forgot the icon — leaving
-    # a "Pause" label with a leftover resume icon after a paused item was
-    # cancelled and the next one started).
+    # the three can never drift out of sync.
 
     def _set_pause_button_state(self, paused: bool) -> None:
         icon_file = self.RESUME_ICON_FILE if paused else self.PAUSE_ICON_FILE
         icon = self.make_icon(icon_file, "#fbfbfb")
         text_key = "resume_button" if paused else "pause_button"
         self.pause_button.configure(
-            text=self.app_state.current_language[text_key],
+            text=self.lang[text_key],
             fg_color="#e0a12e",
             hover_color="#b87f1f",
             **({"image": icon} if icon is not None else {}),
@@ -134,7 +159,7 @@ class DownloadController:
         self.progress_label.configure(
             text=(
                 f"{percent:.1f}%   |   {downloaded_mb:.2f} / {total_mb:.2f} MB   |   {eta}\n"
-                f"{self.app_state.current_language['operation_in_progress_message']}"
+                f"{self.lang['operation_in_progress_message']}"
             )
         )
 
@@ -149,7 +174,7 @@ class DownloadController:
             return
         self.progress_bar.set(percent / 100)
         self.progress_label.configure(
-            text=f"{percent:.1f}%   |   {eta}\n{self.app_state.current_language['merging_message']}"
+            text=f"{percent:.1f}%   |   {eta}\n{self.lang['merging_message']}"
         )
 
     def on_cancel_check(self) -> bool:
@@ -164,7 +189,7 @@ class DownloadController:
         self.root.after(0, lambda: self._finalize_download(success_msg_key))
 
     def _finalize_download(self, success_msg_key: str) -> None:
-        lang = self.app_state.current_language
+        lang = self.lang
         self.send_notification(
             self.get_system_notification_enabled(),
             lang["operation_completed_message"],
@@ -184,32 +209,24 @@ class DownloadController:
         intended action, not a failure: no popup, just a brief toast, then
         move on to the next queued item (or back to idle)."""
         if not self.app_state.closing:  # window is withdrawn while closing — nothing to show
-            self.toast.show(self.app_state.current_language["download_canceled_message"])
+            self.toast.show(self.lang["download_canceled_message"])
         self._advance_queue_or_reset()
 
     def _handle_error(self, msg: str) -> None:
         if not self.app_state.closing:  # closing cancels the download on purpose — no error popup
-            messagebox.showerror(self.app_state.current_language["error_title"], msg)
+            messagebox.showerror(self.lang["error_title"], msg)
         self._advance_queue_or_reset()
 
     def _advance_queue_or_reset(self) -> None:
-        """Shared by a finished and a failed download alike: drop the item
+        """Shared by finished, failed and cancelled downloads: drop the item
         that just ended, then either start the next queued one or reset the
-        action buttons/progress area back to idle. Used to be duplicated
-        almost verbatim between _finalize_download and _handle_error."""
+        action buttons/progress area back to idle."""
         self.queue_view.current_item = None
         if self.queue_view.items:
             self.process_next_in_queue()
         else:
             set_keep_awake(False)  # nothing left to download: allow sleep again
-            self.render_queue_list()  # clears the just-ended item from the queue list
-            self.hide_progress()
-            self.set_widgets_state("normal")
-            self.pause_button.pack_forget()
-            self.download_button.pack(side="left", padx=5)
-            self.download_button.configure(state="normal")
-            self.queue_add_button.pack_forget()
-            self.cancel_button.pack_forget()
+            self._show_idle_ui()
 
     # -- queue rendering / preview -------------------------------------------
 
@@ -226,8 +243,8 @@ class DownloadController:
             },
             text_color=self.theme_manager.queue_item_text_color,
             make_icon=self.make_icon,
-            quality_label=lambda key: quality_label(key, self.app_state.current_language),
-            current_language=self.app_state.current_language,
+            quality_label=lambda key: quality_label(key, self.lang),
+            current_language=self.lang,
             on_remove=self.remove_from_queue,
         )
 
@@ -256,16 +273,16 @@ class DownloadController:
         error_key = validate_video_url(raw_url)
         if error_key:
             messagebox.showwarning(
-                self.app_state.current_language["warning_title"],
-                self.app_state.current_language[error_key],
+                self.lang["warning_title"],
+                self.lang[error_key],
             )
             return
 
         quality_key = resolve_quality_key(self.option_var.get())
         if not quality_key:
             messagebox.showwarning(
-                self.app_state.current_language["warning_title"],
-                self.app_state.current_language["quality_error_message"],
+                self.lang["warning_title"],
+                self.lang["quality_error_message"],
             )
             return
 
@@ -294,60 +311,41 @@ class DownloadController:
         # _advance_queue_or_reset() once the queue is idle, or while paused.
         set_keep_awake(True)
 
-        url = self.queue_view.current_item["url"]
-        quality_key = self.queue_view.current_item["quality_key"]
+        self._show_downloading_ui()
+        self._start_download(self.queue_view.current_item)
+
+    def _start_download(self, item: dict) -> None:
+        quality_key = item["quality_key"]
         # Uses the current app_state.save_location;
         # saves to the location selected when the download starts.
-
-        self.set_widgets_state("disabled")
-        self.download_button.pack_forget()
-        # Reset to its default "paused? no" look (text, color AND icon) in
-        # case the previous item in the queue ended while paused.
-        self._set_pause_button_state(paused=False)
-        self.pause_button.pack(side="left", padx=5)
-        self.queue_add_button.pack(side="left", padx=5)
-        self.cancel_button.pack(pady=5)
-
-        remaining = len(self.queue_view.items)
-        starting_text = self.app_state.current_language["download_starting_message"]
-        if remaining:
-            starting_text += f"  ({self.app_state.current_language['queue_remaining_label']}: {remaining})"
-        self.show_progress(starting_text)
-
-        lang = self.app_state.current_language
+        common = dict(
+            url=item["url"],
+            save_location=self.app_state.save_location,
+            on_progress=self.on_progress,
+            on_cancel_check=self.on_cancel_check,
+            on_error=self.on_download_error,
+            on_cancelled=self.on_download_cancelled,
+            lang=self.lang,
+            on_merge_progress=self.on_merge_progress,
+            on_pause_check=self.on_pause_check,
+        )
         if quality_key == "audio":
             download_audio(
-                url=url,
-                save_location=self.app_state.save_location,
-                on_progress=self.on_progress,
-                on_cancel_check=self.on_cancel_check,
+                **common,
                 on_done=lambda: self.on_download_done("audio_download_complete_message"),
-                on_error=self.on_download_error,
-                on_cancelled=self.on_download_cancelled,
-                lang=lang,
-                on_merge_progress=self.on_merge_progress,
-                on_pause_check=self.on_pause_check,
             )
         else:
             download_video(
-                url=url,
-                save_location=self.app_state.save_location,
+                **common,
                 target_resolution=quality_key,
-                on_progress=self.on_progress,
-                on_cancel_check=self.on_cancel_check,
                 on_done=lambda: self.on_download_done("download_complete_message"),
-                on_error=self.on_download_error,
-                on_cancelled=self.on_download_cancelled,
-                lang=lang,
-                on_merge_progress=self.on_merge_progress,
-                on_pause_check=self.on_pause_check,
             )
 
     def cancel_download(self) -> None:
         """Cancels only the item currently downloading. If more items are
         queued, the next one starts automatically once this one stops."""
         self.app_state.cancel_requested = True
-        self.progress_label.configure(text=self.app_state.current_language["download_canceling_message"])
+        self.progress_label.configure(text=self.lang["download_canceling_message"])
 
     def pause_download(self) -> None:
         """Toggles the paused state of the item currently downloading.
@@ -363,4 +361,4 @@ class DownloadController:
         set_keep_awake(not self.app_state.pause_requested)
 
         if self.app_state.pause_requested:
-            self.progress_label.configure(text=self.app_state.current_language["operation_paused_message"])
+            self.progress_label.configure(text=self.lang["operation_paused_message"])
