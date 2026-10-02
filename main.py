@@ -47,7 +47,7 @@ from languages import LANGUAGES
 from system.process_manager import acquire_single_instance, focus_existing_window
 from system.updater import UpdateChecker, APP_VERSION
 from settings import load_setting, save_setting
-from ui.app_window import build_app_window
+from ui.app_window import WINDOW_TITLE_PREFIX, build_app_window
 from ui.notifications import notify as send_notification
 from ui.theme import ThemeManager
 from utils import (
@@ -62,22 +62,19 @@ from utils import (
 # ---------------------------------------------------------------------------
 # Single instance
 # ---------------------------------------------------------------------------
-# The app shares config.json, the save folder, the startup temp-file sweep and
-# the yt-dlp binary, so a second copy would interfere with the first. A named
-# mutex marks the running copy; a second launch just brings the first window
-# to the front and exits. "Local\" scopes it to the current Windows session,
-# matching the per-user config. The actual mutex/window-enumeration logic
-# lives in system/process_manager.py — these two values are the only
-# app-specific bits it needs.
+# The app shares config.json, the save folder, startup cleanup, and yt-dlp,
+# so only one copy can run at a time. A mutex identifies the active copy;
+# a second launch brings the first window to the front and exits. "Local\"
+# limits it to the current Windows session. Mutex and window handling are
+# in system/process_manager.py; only the app-specific mutex name and
+# WINDOW_TITLE_PREFIX are defined here.
 #
-# This has to run before anything else (before even Tk is touched) since a
-# second launch must exit without ever building a window — so it stays at
-# module scope rather than inside App.__init__.
+# Must run before anything else, including Tk; a second launch must exit
+# without creating a window. So it stays at module scope, not App.__init__.
 _SINGLE_INSTANCE_MUTEX_NAME = "Local\\VideoDownloader_SingleInstance"
-_WINDOW_TITLE_PREFIX = "Video Downloader v"
 
 if not acquire_single_instance(_SINGLE_INSTANCE_MUTEX_NAME):
-    focus_existing_window(_WINDOW_TITLE_PREFIX)
+    focus_existing_window(WINDOW_TITLE_PREFIX)
     sys.exit(0)
 
 

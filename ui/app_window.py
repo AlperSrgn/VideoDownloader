@@ -40,12 +40,17 @@ from ui.theme import THEMES
 
 _LIGHT = THEMES["light"]
 
+# Window title = WINDOW_TITLE_PREFIX + app version. main.py's single-instance
+# check finds an already-running copy by this same prefix, so it is defined
+# once here and imported there — never retype it as a literal.
+WINDOW_TITLE_PREFIX = "Video Downloader v"
+
 
 def build_app_window(callbacks, app_version: str, app_icon: str,
                       sidebar_width: int, sidebar_x: int) -> SimpleNamespace:
     root = ctk.CTk()
     root.configure(fg_color=_LIGHT["root"]["fg_color"])
-    root.title(f"Video Downloader v{app_version}")
+    root.title(f"{WINDOW_TITLE_PREFIX}{app_version}")
     root.geometry("800x600")
     root.iconbitmap(app_icon)
     root.protocol("WM_DELETE_WINDOW", callbacks.on_close_request)
