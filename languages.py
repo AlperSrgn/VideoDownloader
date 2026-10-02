@@ -83,6 +83,11 @@ LANGUAGES = {
         "update_no_installer_message": "Yeni bir sürüm ({version}) mevcut ancak indirilebilir bir kurulum dosyası bulunamadı.\n\nGitHub'daki sürüm sayfası tarayıcıda açılsın mı?",
         "update_check_failed_message": "Güncellemeler kontrol edilemedi.\n\nLütfen internet bağlantınızı kontrol edip tekrar deneyin.",
         "update_downloading_message": "Güncelleme indiriliyor...",
+        "update_download_progress_message": "Güncelleme indiriliyor... %{percent}",
+        "update_download_failed_message": "Güncelleme dosyası indirilemedi.\n\nLütfen internet bağlantınızı kontrol edip tekrar deneyin.",
+        "update_invalid_installer_message": "İndirilen güncelleme dosyası geçersiz veya bozuk göründüğü için çalıştırılmadı.\n\nLütfen daha sonra tekrar deneyin.",
+        "update_launch_failed_message": "Güncelleme kurulumu başlatılamadı.\n\nHata: {error}",
+        "update_rate_limited_message": "GitHub istek sınırına ulaşıldı.\n\nLütfen biraz sonra tekrar deneyin.",
 
     },
     "EN": {
@@ -172,6 +177,11 @@ LANGUAGES = {
         "update_no_installer_message": "A new version ({version}) is available, but no downloadable installer was found.\n\nOpen the release page on GitHub in your browser?",
         "update_check_failed_message": "Could not check for updates.\n\nPlease check your internet connection and try again.",
         "update_downloading_message": "Downloading update...",
+        "update_download_progress_message": "Downloading update... {percent}%",
+        "update_download_failed_message": "The update file could not be downloaded.\n\nPlease check your internet connection and try again.",
+        "update_invalid_installer_message": "The downloaded update file looks invalid or corrupted, so it was not run.\n\nPlease try again later.",
+        "update_launch_failed_message": "Could not start the update installer.\n\nError: {error}",
+        "update_rate_limited_message": "GitHub's request limit was reached.\n\nPlease try again in a little while.",
 
     },
     "ES": {
@@ -261,6 +271,11 @@ LANGUAGES = {
         "update_no_installer_message": "Hay una nueva versión ({version}) disponible, pero no se encontró un instalador descargable.\n\n¿Quieres abrir la página de la versión en GitHub en tu navegador?",
         "update_check_failed_message": "No se pudieron comprobar las actualizaciones.\n\nComprueba tu conexión a Internet e inténtalo de nuevo.",
         "update_downloading_message": "Descargando actualización...",
+        "update_download_progress_message": "Descargando actualización... {percent}%",
+        "update_download_failed_message": "No se pudo descargar el archivo de actualización.\n\nComprueba tu conexión a Internet e inténtalo de nuevo.",
+        "update_invalid_installer_message": "El archivo de actualización descargado parece no ser válido o estar dañado, por lo que no se ejecutó.\n\nInténtalo de nuevo más tarde.",
+        "update_launch_failed_message": "No se pudo iniciar el instalador de la actualización.\n\nError: {error}",
+        "update_rate_limited_message": "Se alcanzó el límite de solicitudes de GitHub.\n\nInténtalo de nuevo en un rato.",
     },
     "DE": {
         "download_button": "Herunterladen",
@@ -349,6 +364,11 @@ LANGUAGES = {
         "update_no_installer_message": "Eine neue Version ({version}) ist verfügbar, aber es wurde kein herunterladbarer Installer gefunden.\n\nSoll die Release-Seite auf GitHub in Ihrem Browser geöffnet werden?",
         "update_check_failed_message": "Updates konnten nicht überprüft werden.\n\nBitte überprüfen Sie Ihre Internetverbindung und versuchen Sie es erneut.",
         "update_downloading_message": "Update wird heruntergeladen...",
+        "update_download_progress_message": "Update wird heruntergeladen... {percent} %",
+        "update_download_failed_message": "Die Update-Datei konnte nicht heruntergeladen werden.\n\nBitte überprüfen Sie Ihre Internetverbindung und versuchen Sie es erneut.",
+        "update_invalid_installer_message": "Die heruntergeladene Update-Datei scheint ungültig oder beschädigt zu sein und wurde daher nicht ausgeführt.\n\nBitte versuchen Sie es später erneut.",
+        "update_launch_failed_message": "Das Update-Installationsprogramm konnte nicht gestartet werden.\n\nFehler: {error}",
+        "update_rate_limited_message": "Das Anfragelimit von GitHub wurde erreicht.\n\nBitte versuchen Sie es in Kürze erneut.",
     },
     "IT": {
         "download_button": "Scarica",
@@ -437,6 +457,11 @@ LANGUAGES = {
         "update_no_installer_message": "È disponibile una nuova versione ({version}), ma non è stato trovato alcun programma di installazione scaricabile.\n\nVuoi aprire la pagina della release su GitHub nel browser?",
         "update_check_failed_message": "Impossibile verificare la presenza di aggiornamenti.\n\nControlla la connessione Internet e riprova.",
         "update_downloading_message": "Download dell'aggiornamento...",
+        "update_download_progress_message": "Download dell'aggiornamento... {percent}%",
+        "update_download_failed_message": "Impossibile scaricare il file di aggiornamento.\n\nControlla la connessione Internet e riprova.",
+        "update_invalid_installer_message": "Il file di aggiornamento scaricato sembra non valido o danneggiato, quindi non è stato eseguito.\n\nRiprova più tardi.",
+        "update_launch_failed_message": "Impossibile avviare il programma di installazione dell'aggiornamento.\n\nErrore: {error}",
+        "update_rate_limited_message": "È stato raggiunto il limite di richieste di GitHub.\n\nRiprova tra poco.",
     },
     "FR": {
         "download_button": "Télécharger",
@@ -525,5 +550,10 @@ LANGUAGES = {
         "update_no_installer_message": "Une nouvelle version ({version}) est disponible, mais aucun programme d'installation téléchargeable n'a été trouvé.\n\nVoulez-vous ouvrir la page de la version sur GitHub dans votre navigateur ?",
         "update_check_failed_message": "Impossible de vérifier les mises à jour.\n\nVérifiez votre connexion Internet et réessayez.",
         "update_downloading_message": "Téléchargement de la mise à jour...",
+        "update_download_progress_message": "Téléchargement de la mise à jour... {percent} %",
+        "update_download_failed_message": "Le fichier de mise à jour n'a pas pu être téléchargé.\n\nVeuillez vérifier votre connexion Internet et réessayer.",
+        "update_invalid_installer_message": "Le fichier de mise à jour téléchargé semble invalide ou corrompu ; il n'a donc pas été exécuté.\n\nVeuillez réessayer plus tard.",
+        "update_launch_failed_message": "Impossible de lancer le programme d'installation de la mise à jour.\n\nErreur : {error}",
+        "update_rate_limited_message": "La limite de requêtes de GitHub a été atteinte.\n\nVeuillez réessayer dans un instant.",
     },
 }

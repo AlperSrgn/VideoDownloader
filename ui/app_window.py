@@ -16,10 +16,11 @@ App methods in main.py (toggle_theme, change_language, on_close_request,
 ...); the queue/download ones (add_to_queue, pause_download,
 cancel_download, clear_queue) are DownloadController methods
 (core/download_controller.py) that main.py hands through unchanged. The
-one thing NOT wired up here is the "Check for Updates" button — its
-command depends on an UpdateChecker instance that itself needs several
-of these widgets, so main.py constructs and wires that right after
-calling this function.
+things NOT wired up here are the "Check for Updates" button and the
+update-download Cancel button (update_cancel_button) — their commands
+depend on an UpdateChecker instance that itself needs several of these
+widgets, so main.py constructs and wires those right after calling this
+function.
 
 Every widget starts out in light mode, so its colors are read from
 ui/theme.py's THEMES["light"] (aliased below as _LIGHT) instead of being
@@ -149,6 +150,27 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
     )
     ytdlp_status_label.pack(pady=(0, 5))
     ytdlp_status_label.pack_forget()
+
+    # Cancel button for the app-update installer download (see updater.py).
+    # Shown/hidden by UpdateChecker (packed just below ytdlp_status_label,
+    # which shows the "%" progress) — separate from `cancel_button` below,
+    # which belongs to normal video downloads. command= is wired up by
+    # main.py once its UpdateChecker exists (see this module's docstring);
+    # its text is set by UpdateChecker from the current language.
+    update_cancel_button = ctk.CTkButton(
+        bottom_panel,
+        width=120,
+        height=32,
+        font=("Helvetica", 13, "bold"),
+        fg_color=_LIGHT["cancel_button"]["fg_color"],
+        hover_color=_LIGHT["cancel_button"]["hover_color"],
+        text_color="#d9534f",       # not part of the light/dark theme, stays fixed
+        border_color="#d9534f",     # same
+        border_width=2,
+        corner_radius=5,
+    )
+    update_cancel_button.pack(pady=(0, 5))
+    update_cancel_button.pack_forget()
 
     # Shown only if the first-run yt-dlp.exe download fails (e.g. no internet).
     # Lets the user retry without having to restart the whole app.

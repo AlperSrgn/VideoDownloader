@@ -222,8 +222,10 @@ class App:
             uninstall_button=ui.uninstall_button,
             ytdlp_status_label=ui.ytdlp_status_label,
             action_buttons_frame=ui.action_buttons_frame,
+            update_cancel_button=ui.update_cancel_button,
         )
         ui.check_updates_button.configure(command=self.update_checker.check_for_updates)
+        ui.update_cancel_button.configure(command=self.update_checker.cancel_download)
 
         # -- Button icons --------------------------------------------------
         # Each entry's color matches that button's own text_color, so the
@@ -234,6 +236,7 @@ class App:
             ui.download_button:             ("download.png",     "#fbfbfb"),
             ui.queue_add_button:            ("add.png",          "#fbfbfb"),
             ui.cancel_button:               ("cancel.png",       "#d9534f"),
+            ui.update_cancel_button:        ("cancel.png",       "#d9534f"),
             ui.save_location_button:        ("folder.png",       "#fbfbfb"),
             ui.check_updates_button:        ("refresh.png",      "#fbfbfb"),
             ui.ytdlp_retry_button:          ("refresh.png",      "#fbfbfb"),
@@ -362,12 +365,22 @@ class App:
             self.app_state.cancel_requested = True
             self.ui.root.withdraw()  # window disappears immediately
 
+        # An app-update installer download in progress: cancel it so its
+        # partial .part file gets deleted (_finish_close waits for that).
+        if self.update_checker.is_downloading:
+            self.update_checker.cancel_download()
+            self.ui.root.withdraw()
+
         self._finish_close(0)
 
     def _finish_close(self, attempt: int) -> None:
         """Waits (max ~10 s) for the cancelled worker to finish, then closes.
         Anything still alive after that is killed by the job object."""
-        if self.download_controller.queue_view.current_item is not None and attempt < 100:
+        busy = (
+            self.download_controller.queue_view.current_item is not None
+            or self.update_checker.is_downloading
+        )
+        if busy and attempt < 100:
             self.ui.root.after(100, lambda: self._finish_close(attempt + 1))
             return
         if self.app_state.closing:
@@ -417,6 +430,12 @@ class App:
             "clear_queue_button":    ui.clear_queue_button,
         }
         self.theme_manager.toggle(widget_map, self.make_icon)
+        # update_cancel_button isn't in THEMES; it just mirrors cancel_button's
+        # freshly-themed colors (same look, shown only during an app update).
+        ui.update_cancel_button.configure(
+            fg_color=ui.cancel_button.cget("fg_color"),
+            hover_color=ui.cancel_button.cget("hover_color"),
+        )
         self.download_controller.render_queue_list()  # repaints any already-visible queue rows with the new color
 
     # -- Sidebar animation -----------------------------------------------
@@ -460,6 +479,7 @@ class App:
             ui.download_button:              "download_button",
             ui.pause_button:                 "pause_button",
             ui.cancel_button:                "cancel_button",
+            ui.update_cancel_button:         "cancel_button",
             ui.download_option_label:        "download_option_label",
             ui.system_notification_checkbox: "system_notification_checkbox",
             ui.start_in_dark_mode_checkbox:  "start_in_dark_mode_checkbox",
@@ -607,8 +627,13 @@ class App:
             ui = self.ui
             lang = self.app_state.current_language or LANGUAGES.get("EN", {})
 
+            # While the app-update installer is downloading, ytdlp_status_label
+            # is showing its "%" progress — don't hide/overwrite it.
+            updating = self.update_checker.is_downloading
+
             if stage == "ready":
-                ui.ytdlp_status_label.pack_forget()
+                if not updating:
+                    ui.ytdlp_status_label.pack_forget()
                 ui.ytdlp_retry_button.pack_forget()
                 ui.url_entry.configure(state="normal")
                 self.ytdlp_ready = True
@@ -640,12 +665,14 @@ class App:
                     detail if isinstance(detail, Exception) else Exception("unknown"), lang
                 )
                 ui.ytdlp_retry_button.pack_forget()
-                ui.ytdlp_status_label.configure(text=message)
-                ui.ytdlp_status_label.pack(pady=(0, 5), before=ui.action_buttons_frame)
+                if not updating:
+                    ui.ytdlp_status_label.configure(text=message)
+                    ui.ytdlp_status_label.pack(pady=(0, 5), before=ui.action_buttons_frame)
                 ui.url_entry.configure(state="normal")
                 self.ytdlp_ready = True
                 self.refresh_download_button()
-                ui.root.after(6000, ui.ytdlp_status_label.pack_forget)
+                if not updating:
+                    ui.root.after(6000, ui.ytdlp_status_label.pack_forget)
                 return
 
             # Every stage below is transitional (checking_update, downloading,

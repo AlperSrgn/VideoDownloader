@@ -8,17 +8,22 @@ and runs its own installer, and only needs a handful of UI widgets
 main.py's App instance directly.
 """
 
+import http.client
 import json
 import logging
 import os
 import re
+import socket
 import subprocess
 import sys
 import tempfile
 import threading
+import urllib.error
 import urllib.request
 import webbrowser
-from tkinter import messagebox
+from tkinter import TclError, messagebox
+
+from downloading.error_classifier import classify_generic_exception
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +39,21 @@ GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/release
 EXPECTED_INSTALLER_NAME = "VideoDownloaderSetup.exe"
 
 _USER_AGENT = "VideoDownloader-UpdateCheck"
+
+# Installer check: Smaller files are treated as invalid downloads.
+INSTALLER_MIN_SIZE_BYTES = 50 * 1024 * 1024
+
+API_TIMEOUT_SECONDS = 10
+DOWNLOAD_TIMEOUT_SECONDS = 30
+DOWNLOAD_CHUNK_BYTES = 256 * 1024
+
+
+class _DownloadCancelled(Exception):
+    """The user pressed Cancel while the installer was downloading."""
+
+
+class _InstallerInvalid(Exception):
+    """The downloaded file failed the size / MZ-signature checks."""
 
 
 def _github_request(url: str, extra_headers: dict = None) -> urllib.request.Request:
@@ -58,11 +78,15 @@ def _parse_version(v: str):
     return tuple(parts)
 
 
-def _looks_like_valid_installer(path: str, min_size_bytes: int = 500_000) -> bool:
+def _looks_like_valid_installer(
+    path: str,
+    min_size_bytes: int = INSTALLER_MIN_SIZE_BYTES,
+) -> bool:
     """Cheap sanity check: real Windows executables start with the "MZ"
-    signature and Inno Setup installers are always well over 500 KB. This
-    catches e.g. an HTML error/redirect page that got saved with a .exe
-    name, before we ever try to run it."""
+    signature and the Inno Setup installer is always larger than
+    INSTALLER_MIN_SIZE_BYTES. This catches e.g. an HTML error/redirect page
+    saved with a .exe name, or a truncated file, before we ever try to run
+    it."""
     try:
         if os.path.getsize(path) < min_size_bytes:
             return False
@@ -72,24 +96,45 @@ def _looks_like_valid_installer(path: str, min_size_bytes: int = 500_000) -> boo
         return False
 
 
+def _safe_remove(path: str):
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        logger.debug("Could not remove %s: %s", path, e)
+
+
+def _is_network_failure(exc: Exception) -> bool:
+    """True for connectivity-type failures (DNS, refused/reset/timeout,
+    truncated response) as opposed to local file-system errors."""
+    return isinstance(exc, (
+        urllib.error.URLError, socket.timeout, TimeoutError,
+        ConnectionError, http.client.HTTPException,
+    ))
+
+
+def _short_detail(exc: Exception, max_len: int = 160) -> str:
+    text = str(exc).strip().replace("\n", " ")
+    if len(text) > max_len:
+        text = text[:max_len - 1].rstrip() + "…"
+    return text or exc.__class__.__name__
+
+
 class UpdateChecker:
-    """Wires the "Check for Updates" button to GitHub's releases API.
-
-    Constructed once the widgets it needs already exist. `get_language`
-    is an accessor (not a value) because the current UI language changes
-    over the app's lifetime — the checker always wants the live value.
-
-    The Download button is deliberately NOT touched directly here. Whether
-    it may be enabled depends on several independent things (yt-dlp is
-    ready, no download is running, no app update is in progress), and only
-    the owner of all of that state can decide. So this class just reports
-    "my lock changed" through `refresh_download_button()` and exposes
-    `is_locked` for that owner to read.
+    """Wires the “Check for Updates” button to GitHub’s Releases API.
+    Initialized after the required widgets exist.
+    get_language is used as an accessor so the checker always gets the current UI language.
+    The Download button is not controlled directly here, since its state depends on multiple conditions.
+    This class only reports lock changes through refresh_download_button() and exposes is_locked.
+    While the installer is downloading, update_cancel_button is shown below the progress label.
+    If the window closes during the download, cancel_download() should be called to remove the partial file.
     """
 
     def __init__(self, root, get_language, refresh_download_button,
                  check_updates_button, uninstall_button,
-                 ytdlp_status_label, action_buttons_frame):
+                 ytdlp_status_label, action_buttons_frame,
+                 update_cancel_button):
         self.root = root
         self.get_language = get_language
         self.refresh_download_button = refresh_download_button
@@ -97,13 +142,21 @@ class UpdateChecker:
         self.uninstall_button = uninstall_button
         self.ytdlp_status_label = ytdlp_status_label
         self.action_buttons_frame = action_buttons_frame
+        self.update_cancel_button = update_cancel_button
         self._locked = False
+        self._downloading = False
+        self._cancel_event = threading.Event()
 
     @property
     def is_locked(self) -> bool:
         """True while an update check or installer download is running —
         one of the conditions that keeps the Download button disabled."""
         return self._locked
+
+    @property
+    def is_downloading(self) -> bool:
+        """True only while the installer file itself is being downloaded."""
+        return self._downloading
 
     def _set_update_lock(self, state: str):
         """Disable/enable the buttons that must stay locked while checking
@@ -115,6 +168,17 @@ class UpdateChecker:
         self.uninstall_button.configure(state=state)
         self.refresh_download_button()
 
+    def _post(self, fn, *args):
+        """Schedule `fn(*args)` on the Tk main thread from a worker thread.
+        Silently ignored if the window is already gone."""
+        try:
+            self.root.after(0, lambda: fn(*args))
+        except (RuntimeError, TclError):
+            pass
+
+    # ------------------------------------------------------------------
+    # Update check
+    # ------------------------------------------------------------------
     def check_for_updates(self):
         """Triggered by the sidebar's 'Check for Updates' button. Hits the
         GitHub releases API in the background so the UI never freezes, then
@@ -127,7 +191,7 @@ class UpdateChecker:
                     GITHUB_LATEST_RELEASE_API,
                     extra_headers={"Accept": "application/vnd.github+json"},
                 )
-                with urllib.request.urlopen(req, timeout=10) as resp:
+                with urllib.request.urlopen(req, timeout=API_TIMEOUT_SECONDS) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
 
                 latest_tag = data.get("tag_name", "")
@@ -141,10 +205,17 @@ class UpdateChecker:
                      if a.get("name", "").lower() == EXPECTED_INSTALLER_NAME.lower()),
                     None,
                 )
-                self.root.after(0, lambda: self._on_update_check_done(latest_tag, installer_url))
+                self._post(self._on_update_check_done, latest_tag, installer_url)
+            except urllib.error.HTTPError as e:
+                logger.warning("Update check failed (HTTP %s): %s", e.code, e)
+                # Anonymous GitHub API calls are limited to 60/hour per IP;
+                # 403/429 is almost always that limit.
+                key = ("update_rate_limited_message" if e.code in (403, 429)
+                       else "update_check_failed_message")
+                self._post(self._on_update_check_failed, key)
             except Exception as e:
-                logger.debug("Update check failed: %s", e)
-                self.root.after(0, self._on_update_check_failed)
+                logger.warning("Update check failed: %s", e, exc_info=True)
+                self._post(self._on_update_check_failed, "update_check_failed_message")
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -165,6 +236,7 @@ class UpdateChecker:
             messagebox.showinfo(
                 lang["update_check_title"],
                 lang["already_latest_message"].replace("{version}", APP_VERSION),
+                parent=self.root,
             )
             return
 
@@ -177,6 +249,7 @@ class UpdateChecker:
             wants_browser = messagebox.askyesno(
                 lang["update_available_title"],
                 lang["update_no_installer_message"].replace("{version}", latest_tag),
+                parent=self.root,
             )
             if wants_browser:
                 webbrowser.open(f"https://github.com/{GITHUB_REPO}/releases/tag/{latest_tag}")
@@ -185,55 +258,141 @@ class UpdateChecker:
         wants_update = messagebox.askyesno(
             lang["update_available_title"],
             lang["update_available_message"].replace("{version}", latest_tag),
+            parent=self.root,
         )
         if wants_update:
             self._download_and_run_installer(installer_url)
 
-    def _on_update_check_failed(self):
+    def _on_update_check_failed(self, message_key: str = "update_check_failed_message"):
         self._set_update_lock("normal")
         lang = self.get_language()
-        messagebox.showerror(lang["error_title"], lang["update_check_failed_message"])
+        messagebox.showerror(
+            lang["error_title"],
+            lang.get(message_key, lang["update_check_failed_message"]),
+            parent=self.root,
+        )
+
+    # ------------------------------------------------------------------
+    # Installer download
+    # ------------------------------------------------------------------
+    def cancel_download(self):
+        """Cancel button handler (also safe to call from the app's close
+        handler). The worker stops at the next chunk and deletes the
+        partial .part file."""
+        if not self._downloading or self._cancel_event.is_set():
+            return
+        self._cancel_event.set()
+        lang = self.get_language()
+        self.update_cancel_button.configure(state="disabled")
+        self.ytdlp_status_label.configure(text=lang["download_canceling_message"])
+
+    def _show_download_ui(self):
+        lang = self.get_language()
+        self.ytdlp_status_label.configure(text=lang["update_downloading_message"])
+        self.ytdlp_status_label.pack(pady=(0, 5), before=self.action_buttons_frame)
+        self.update_cancel_button.configure(text=lang["cancel_button"], state="normal")
+        self.update_cancel_button.pack(pady=(0, 5), before=self.action_buttons_frame)
+
+    def _hide_download_ui(self):
+        """Idempotent: safe to call from every end-of-download path."""
+        self._downloading = False
+        self.ytdlp_status_label.pack_forget()
+        self.update_cancel_button.pack_forget()
+
+    def _show_progress(self, percent: int):
+        if self._cancel_event.is_set():
+            return  # keep showing the "canceling..." text
+        lang = self.get_language()
+        self.ytdlp_status_label.configure(
+            text=lang["update_download_progress_message"].replace("{percent}", str(percent))
+        )
+
+    def _on_download_cancelled(self):
+        self._hide_download_ui()
+        self._set_update_lock("normal")
+
+    def _on_download_error(self, message: str):
+        self._hide_download_ui()
+        self._set_update_lock("normal")
+        lang = self.get_language()
+        messagebox.showerror(lang["error_title"], message, parent=self.root)
 
     def _download_and_run_installer(self, installer_url: str):
         """Downloads the installer .exe to a temp folder, then launches it
         and closes the app — the same Inno Setup installer already
         overwrites the existing install in place, matching the manual
-        update flow that was already tested."""
+        update flow that was already tested.
+
+        The file is written to "<name>.part" first and only renamed to its
+        final name once it is complete AND passes the size/MZ checks, so a
+        half-finished or invalid download can never be mistaken for (or
+        launched as) the installer."""
         self._set_update_lock("disabled")
-        lang = self.get_language()
-        self.ytdlp_status_label.configure(text=lang["update_downloading_message"])
-        self.ytdlp_status_label.pack(pady=(0, 5), before=self.action_buttons_frame)
+        self._downloading = True
+        self._cancel_event.clear()
+        self._show_download_ui()
 
         def worker():
+            lang = self.get_language()
+            final_path = os.path.join(tempfile.gettempdir(), "VideoDownloaderSetup_update.exe")
+            part_path = final_path + ".part"
             try:
-                installer_path = os.path.join(tempfile.gettempdir(), "VideoDownloaderSetup_update.exe")
                 req = _github_request(installer_url)
-                with urllib.request.urlopen(req, timeout=30) as resp, open(installer_path, "wb") as f:
-                    while True:
-                        chunk = resp.read(1024 * 256)
-                        if not chunk:
-                            break
-                        f.write(chunk)
+                with urllib.request.urlopen(req, timeout=DOWNLOAD_TIMEOUT_SECONDS) as resp:
+                    total = int(resp.headers.get("Content-Length") or 0)
+                    # Reject early if the server already tells us the file
+                    # is too small to be the installer — no point downloading.
+                    if total and total < INSTALLER_MIN_SIZE_BYTES:
+                        raise _InstallerInvalid(f"Content-Length {total} too small")
 
-                # Sanity check before executing anything: a valid Windows PE
-                # binary starts with the "MZ" signature and Inno Setup
-                # installers are never a few KB. Without this check, a bad
-                # download (e.g. an HTML error page saved with a .exe name)
-                # would get handed straight to subprocess.Popen().
-                if not _looks_like_valid_installer(installer_path):
-                    try:
-                        os.remove(installer_path)
-                    except OSError:
-                        pass
-                    self.root.after(0, self._on_update_check_failed)
-                    self.root.after(0, self.ytdlp_status_label.pack_forget)
-                    return
+                    written = 0
+                    last_percent = -1
+                    with open(part_path, "wb") as f:
+                        while True:
+                            if self._cancel_event.is_set():
+                                raise _DownloadCancelled()
+                            chunk = resp.read(DOWNLOAD_CHUNK_BYTES)
+                            if not chunk:
+                                break
+                            written += len(chunk)
+                            f.write(chunk)
+                            if total:
+                                percent = min(100, written * 100 // total)
+                                if percent != last_percent:  # only repaint on change
+                                    last_percent = percent
+                                    self._post(self._show_progress, percent)
 
-                self.root.after(0, lambda: self._launch_installer_and_exit(installer_path))
+                if total and written != total:
+                    raise ConnectionError(f"incomplete download ({written}/{total} bytes)")
+                if self._cancel_event.is_set():
+                    raise _DownloadCancelled()
+
+                # Validate BEFORE the file gets its final name / is executed.
+                if not _looks_like_valid_installer(part_path):
+                    raise _InstallerInvalid("size or MZ signature check failed")
+
+                os.replace(part_path, final_path)
+                if self._cancel_event.is_set():
+                    raise _DownloadCancelled()
+
+                self._post(self._launch_installer_and_exit, final_path)
+
+            except _DownloadCancelled:
+                _safe_remove(final_path)
+                self._post(self._on_download_cancelled)
+            except _InstallerInvalid as e:
+                logger.warning("Installer rejected: %s", e)
+                self._post(self._on_download_error, lang["update_invalid_installer_message"])
             except Exception as e:
-                logger.debug("Installer download failed: %s", e)
-                self.root.after(0, self._on_update_check_failed)
-                self.root.after(0, self.ytdlp_status_label.pack_forget)
+                logger.warning("Installer download failed: %s", e, exc_info=True)
+                if _is_network_failure(e) or not isinstance(e, OSError):
+                    message = lang["update_download_failed_message"]
+                else:
+                    # Local file problem: disk full, permission denied, ...
+                    message = classify_generic_exception(e, lang)
+                self._post(self._on_download_error, message)
+            finally:
+                _safe_remove(part_path)  # never leave a partial file behind
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -242,6 +401,22 @@ class UpdateChecker:
             k: v for k, v in os.environ.items()
             if not k.startswith("_PYI_") and k != "_MEIPASS2"
         }
-        subprocess.Popen([installer_path], env=clean_env)
+        try:
+            try:
+                subprocess.Popen([installer_path], env=clean_env)
+            except OSError as e:
+                if getattr(e, "winerror", None) == 740:
+                    # Installer requires elevation: let the shell show UAC.
+                    os.startfile(installer_path)
+                else:
+                    raise
+        except OSError as e:
+            logger.warning("Installer launch failed: %s", e, exc_info=True)
+            lang = self.get_language()
+            self._on_download_error(
+                lang["update_launch_failed_message"].replace("{error}", _short_detail(e))
+            )
+            return
+
         self.root.destroy()
         sys.exit()
