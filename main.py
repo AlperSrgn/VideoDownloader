@@ -25,6 +25,12 @@ constructing DownloadController (before the window, since the window's
 button callbacks are its bound methods; its widgets are attached afterwards
 via bind_widgets) and UpdateChecker (after the window, once the widgets it
 needs exist).
+
+Which widgets get a translated label, a button icon or theme colors is not
+listed here: each widget declares that where it is created, in
+build_app_window() (via ui/registry.py), and toggle_theme(),
+change_language() and apply_button_icons() below just loop over
+self.ui.registry.
 """
 
 import logging
@@ -225,26 +231,16 @@ class App:
         ui.update_cancel_button.configure(command=self.update_checker.cancel_download)
 
         # -- Button icons --------------------------------------------------
-        # Each entry's color matches that button's own text_color, so the
-        # icon reads the same as the label. A missing file just leaves that
-        # button text-only — see load_button_icon() — so icons can be added
-        # one at a time.
-        self.button_icons = {
-            ui.download_button:             ("download.png",     "#fbfbfb"),
-            ui.queue_add_button:            ("add.png",          "#fbfbfb"),
-            ui.cancel_button:               ("cancel.png",       "#d9534f"),
-            ui.update_cancel_button:        ("cancel.png",       "#d9534f"),
-            ui.save_location_button:        ("folder.png",       "#fbfbfb"),
-            ui.check_updates_button:        ("refresh.png",      "#fbfbfb"),
-            ui.ytdlp_retry_button:          ("refresh.png",      "#fbfbfb"),
-            ui.preview_notification_button: ("notification.png", "#fbfbfb"),
-            ui.clear_queue_button:          ("clear.png",        "#d9534f"),
-            ui.uninstall_button:            ("uninstall.png",    "#fbfbfb"),
-            ui.downloads_button:            ("folder.png",  "black", (30, 30)),
-        }
-        # pause_button toggles between two icons depending on state, so it's
-        # kept separate from the static dict above: apply_button_icons()
-        # paints it the first time, and
+        # Which widget gets which icon is declared next to the widget itself
+        # in build_app_window() (registry.add(..., icon=("file.png", color))),
+        # and apply_button_icons() paints them from ui.registry.icons. The
+        # color matches that button's own text_color, so the icon reads the
+        # same as the label. A missing file just leaves that button
+        # text-only — see load_button_icon() — so icons can be added one at
+        # a time.
+        #
+        # pause_button toggles between two icons depending on state, so
+        # apply_button_icons() paints it the first time and
         # DownloadController._set_pause_button_state() (called by
         # pause_download() and when a new item starts) swaps it afterwards.
         # The filenames themselves live on DownloadController
@@ -409,23 +405,9 @@ class App:
     # -- Theme toggle --------------------------------------------------------
     def toggle_theme(self) -> None:
         ui = self.ui
-        widget_map = {
-            "root":                  ui.root,
-            "frame":                 ui.frame,
-            "video_url_label":       ui.video_url_label,
-            "download_option_label": ui.download_option_label,
-            "light_dark":            ui.light_dark,
-            "downloads_button":      ui.downloads_button,
-            "menu_button":           ui.menu_button,
-            "progress_label":        ui.progress_label,
-            "cancel_button":         ui.cancel_button,
-            "url_entry":             ui.url_entry,
-            "playlist_checkbox":     ui.playlist_checkbox,
-            "quality_options_menu":  ui.quality_options_menu,
-            "queue_header_label":    ui.queue_header_label,
-            "queue_list_frame":      ui.queue_list_frame,
-            "clear_queue_button":    ui.clear_queue_button,
-        }
+        # Every widget that follows the light/dark theme registers itself in
+        # build_app_window() (registry.add(..., theme="<THEMES key>")).
+        widget_map = ui.registry.themed
         self.theme_manager.toggle(widget_map, self.make_icon)
         # update_cancel_button isn't in THEMES; it just mirrors cancel_button's
         # freshly-themed colors (same look, shown only during an app update).
@@ -472,23 +454,9 @@ class App:
             )
         save_setting("language", selected)
 
-        label_map = {
-            ui.download_button:              "download_button",
-            ui.pause_button:                 "pause_button",
-            ui.cancel_button:                "cancel_button",
-            ui.update_cancel_button:         "cancel_button",
-            ui.download_option_label:        "download_option_label",
-            ui.system_notification_checkbox: "system_notification_checkbox",
-            ui.start_in_dark_mode_checkbox:  "start_in_dark_mode_checkbox",
-            ui.preview_notification_button:  "preview_notification_button",
-            ui.playlist_checkbox:            "playlist_checkbox",
-            ui.uninstall_button:             "uninstall_button",
-            ui.clear_queue_button:           "clear_queue_button",
-            ui.queue_add_button:             "queue_add_button",
-            ui.save_location_button:         "save_location_button",
-            ui.ytdlp_retry_button:           "ytdlp_retry_button",
-            ui.check_updates_button:         "check_updates_button",
-        }
+        # widget -> language key, registered in build_app_window()
+        # (registry.add(..., text="<language key>")).
+        label_map = ui.registry.texts
         for widget, key in label_map.items():
             widget.configure(text=self.app_state.current_language[key])
 
@@ -587,7 +555,7 @@ class App:
         return ctk.CTkImage(light_image=img, dark_image=img, size=size)
 
     def apply_button_icons(self) -> None:
-        for widget, spec in self.button_icons.items():
+        for widget, spec in self.ui.registry.icons.items():
             filename, color = spec[0], spec[1]
             size = spec[2] if len(spec) > 2 else BUTTON_ICON_SIZE
             icon = self.make_icon(filename, color, size)

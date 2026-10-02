@@ -22,6 +22,12 @@ depend on an UpdateChecker instance that itself needs several of these
 widgets, so main.py constructs and wires those right after calling this
 function.
 
+Every widget that needs a translated label, a button icon and/or theme
+colors is registered right where it is created (registry.add(...), see
+ui/registry.py) and the registry is returned as self.ui.registry. main.py
+loops over it in change_language(), apply_button_icons() and toggle_theme(),
+so adding a widget no longer means editing three separate dicts there.
+
 Every widget starts out in light mode, so its colors are read from
 ui/theme.py's THEMES["light"] (aliased below as _LIGHT) instead of being
 retyped as literal hex strings here. That dict is the same one
@@ -36,6 +42,7 @@ from types import SimpleNamespace
 import customtkinter as ctk
 
 from settings import load_setting, save_setting
+from ui.registry import UiRegistry
 from ui.theme import THEMES
 
 _LIGHT = THEMES["light"]
@@ -48,22 +55,27 @@ WINDOW_TITLE_PREFIX = "Video Downloader v"
 
 def build_app_window(callbacks, app_version: str, app_icon: str,
                       sidebar_width: int, sidebar_x: int) -> SimpleNamespace:
+    registry = UiRegistry()
+
     root = ctk.CTk()
     root.configure(fg_color=_LIGHT["root"]["fg_color"])
     root.title(f"{WINDOW_TITLE_PREFIX}{app_version}")
     root.geometry("800x600")
     root.iconbitmap(app_icon)
     root.protocol("WM_DELETE_WINDOW", callbacks.on_close_request)
+    registry.add(root, theme="root")
 
     # Main frame
     frame = ctk.CTkFrame(root, fg_color=_LIGHT["frame"]["fg_color"])
     frame.pack(pady=30, padx=30)
+    registry.add(frame, theme="frame")
 
     # Quality label
     download_option_label = ctk.CTkLabel(
         frame, font=ctk.CTkFont(size=16), text_color=_LIGHT["download_option_label"]["text_color"],
     )
     download_option_label.grid(row=0, column=0, padx=10, pady=5)
+    registry.add(download_option_label, text="download_option_label", theme="download_option_label")
 
     # Quality dropdown
     option_var = ctk.StringVar(value="1080p ᴴᴰ")
@@ -76,6 +88,7 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
         button_hover_color=_LIGHT["quality_options_menu"]["button_hover_color"],
     )
     quality_options_menu.grid(row=0, column=1, padx=10, pady=5)
+    registry.add(quality_options_menu, theme="quality_options_menu")
 
     # URL label
     video_url_label = ctk.CTkLabel(
@@ -83,6 +96,7 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
         text_color=_LIGHT["video_url_label"]["text_color"],
     )
     video_url_label.grid(row=0, column=2, padx=10, pady=5)
+    registry.add(video_url_label, theme="video_url_label")
 
     # URL entry
     url_var = ctk.StringVar()
@@ -93,9 +107,12 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
         text_color=_LIGHT["url_entry"]["text_color"],
     )
     url_entry.grid(row=0, column=3, padx=10, pady=5)
+    registry.add(url_entry, theme="url_entry")
     url_entry.bind("<Button-3>", lambda e: callbacks.show_entry_context_menu(e, url_entry))
 
-    # Playlist checkbox (hidden until list= detected)
+    # Playlist checkbox — playlist support is pending, so it is created and
+    # registered (text/theme) but never gridded for now; see url_changed() in
+    # main.py and the commented-out grid()/variable= lines below.
     frame.grid_rowconfigure(1, minsize=20)
     playlist_checkbox_var = ctk.BooleanVar()
     playlist_checkbox = ctk.CTkCheckBox(
@@ -115,6 +132,7 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
     )
     #playlist_checkbox.grid(row=1, column=3, sticky="w", padx=10, pady=5)
     #playlist_checkbox.grid_remove()
+    registry.add(playlist_checkbox, text="playlist_checkbox", theme="playlist_checkbox")
 
     # Queue header + clear button (row 2, hidden until something is queued)
     queue_header_label = ctk.CTkLabel(
@@ -123,6 +141,7 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
     )
     queue_header_label.grid(row=2, column=0, columnspan=2, padx=10, pady=(4, 0), sticky="w")
     queue_header_label.grid_remove()
+    registry.add(queue_header_label, theme="queue_header_label")
 
     clear_queue_button = ctk.CTkButton(
         frame,
@@ -135,6 +154,7 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
     )
     clear_queue_button.grid(row=2, column=2, columnspan=2, padx=10, pady=(1, 0), sticky="e")
     clear_queue_button.grid_remove()
+    registry.add(clear_queue_button, text="clear_queue_button", icon=("clear.png", "#d9534f"), theme="clear_queue_button")
 
     # Queue list (waiting items only — the active download shows in the progress area)
     queue_list_frame = ctk.CTkScrollableFrame(
@@ -142,6 +162,7 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
     )
     queue_list_frame.grid(row=3, column=0, columnspan=4, padx=10, pady=(2, 10), sticky="ew")
     queue_list_frame.grid_remove()
+    registry.add(queue_list_frame, theme="queue_list_frame")
 
     # Bottom action panel: fixed to the bottom with place().
     # Its contents use pack() among themselves.
@@ -161,7 +182,8 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
     # which shows the "%" progress) — separate from `cancel_button` below,
     # which belongs to normal video downloads. command= is wired up by
     # main.py once its UpdateChecker exists (see this module's docstring);
-    # its text is set by UpdateChecker from the current language.
+    # its text comes from the current language (registered below, so
+    # change_language() sets it, and UpdateChecker refreshes it when shown).
     update_cancel_button = ctk.CTkButton(
         bottom_panel,
         width=120,
@@ -176,6 +198,7 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
     )
     update_cancel_button.pack(pady=(0, 5))
     update_cancel_button.pack_forget()
+    registry.add(update_cancel_button, text="cancel_button", icon=("cancel.png", "#d9534f"))
 
     # Shown only if the first-run yt-dlp.exe download fails (e.g. no internet).
     # Lets the user retry without having to restart the whole app.
@@ -192,9 +215,11 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
     )
     ytdlp_retry_button.pack(pady=(0, 5))
     ytdlp_retry_button.pack_forget()
+    registry.add(ytdlp_retry_button, text="ytdlp_retry_button", icon=("refresh.png", "#fbfbfb"))
 
-    # Action buttons: "Download" is always visible,
-    # "➕ Add to Queue" is shown only while downloading.
+    # Action buttons: idle -> only "Download". While a download is active,
+    # DownloadController hides "Download" and shows "Pause" and "Add to Queue"
+    # in its place (see _show_downloading_ui / _show_idle_ui).
     action_buttons_frame = ctk.CTkFrame(bottom_panel, fg_color="transparent")
     action_buttons_frame.pack(pady=(0, 10))
 
@@ -211,6 +236,7 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
         state="disabled",  # re-enabled once on_ytdlp_status reports "ready"
     )
     download_button.pack(side="left", padx=5)
+    registry.add(download_button, text="download_button", icon=("download.png", "#fbfbfb"))
 
     # Shown in place of "download_button" while a download is active.
     pause_button = ctk.CTkButton(
@@ -226,6 +252,8 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
     )
     pause_button.pack(side="left", padx=5)
     pause_button.pack_forget()
+    # icon is swapped between pause/resume at runtime (DownloadController), so only text is registered
+    registry.add(pause_button, text="pause_button")
 
     queue_add_button = ctk.CTkButton(
         action_buttons_frame,
@@ -240,6 +268,7 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
     )
     queue_add_button.pack(side="left", padx=5)
     queue_add_button.pack_forget()
+    registry.add(queue_add_button, text="queue_add_button", icon=("add.png", "#fbfbfb"))
 
     # Cancel button
     cancel_button = ctk.CTkButton(
@@ -257,6 +286,7 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
     )
     cancel_button.pack(pady=0)
     cancel_button.pack_forget()
+    registry.add(cancel_button, text="cancel_button", icon=("cancel.png", "#d9534f"), theme="cancel_button")
 
     # Progress bar
     progress_bar = ctk.CTkProgressBar(bottom_panel, orientation="horizontal", width=300, height=15)
@@ -272,6 +302,7 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
     )
     progress_label.pack()
     progress_label.pack_forget()
+    registry.add(progress_label, theme="progress_label")
 
     # Downloads folder button
     downloads_button = ctk.CTkButton(
@@ -285,6 +316,7 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
         corner_radius=8,
     )
     downloads_button.place(relx=0, rely=1, anchor="sw", x=10, y=-10)
+    registry.add(downloads_button, icon=("folder.png", "black", (30, 30)), theme="downloads_button")
 
     # Sidebar
     sidebar_frame = ctk.CTkFrame(root, width=sidebar_width, fg_color="#95aec9", corner_radius=0)
@@ -317,6 +349,7 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
         hover_color=_LIGHT["menu_button"]["hover_color"],
     )
     menu_button.place(x=10, y=10)
+    registry.add(menu_button, theme="menu_button")
 
     # Light/dark toggle inside sidebar
     light_dark = ctk.CTkButton(
@@ -329,6 +362,8 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
         command=callbacks.toggle_theme,
     )
     light_dark.place(relx=0.0, rely=1.0, anchor="sw", x=10, y=-10)
+    # icon (sun/moon) depends on the current theme, so it's handled by apply_button_icons()/ThemeManager
+    registry.add(light_dark, theme="light_dark")
 
     # Language selector
     language_options = ["DE", "EN", "ES", "FR", "IT", "TR"]
@@ -367,6 +402,7 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
         checkmark_color="black",
     )
     system_notification_checkbox.pack(anchor="w", pady=(60, 20), padx=10, fill="x")
+    registry.add(system_notification_checkbox, text="system_notification_checkbox")
 
     # Start in dark mode checkbox
     dark_mode_enabled = ctk.BooleanVar(value=load_setting("start_in_dark_mode", False))
@@ -389,6 +425,7 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
         checkmark_color="black",
     )
     start_in_dark_mode_checkbox.pack(anchor="w", pady=10, padx=10, fill="x")
+    registry.add(start_in_dark_mode_checkbox, text="start_in_dark_mode_checkbox")
 
     # Save location picker
     save_location_button = ctk.CTkButton(
@@ -401,6 +438,7 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
         height=30,
     )
     save_location_button.pack(anchor="w", pady=(10, 0), padx=10, fill="x")
+    registry.add(save_location_button, text="save_location_button", icon=("folder.png", "#fbfbfb"))
 
     save_location_value_label = ctk.CTkLabel(
         sidebar_content,
@@ -424,6 +462,7 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
         height=30,
     )
     check_updates_button.pack(anchor="w", pady=(0, 10), padx=10, fill="x")
+    registry.add(check_updates_button, text="check_updates_button", icon=("refresh.png", "#fbfbfb"))
     # command= is wired up by main.py once its UpdateChecker exists (see
     # this module's docstring).
 
@@ -438,6 +477,7 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
         width=45, height=45,
     )
     preview_notification_button.place(x=10, y=-70, relx=0, rely=1, anchor="sw")
+    registry.add(preview_notification_button, text="preview_notification_button", icon=("notification.png", "#fbfbfb"))
 
     # Uninstall button
     uninstall_button = ctk.CTkButton(
@@ -450,6 +490,7 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
         text_color="#fbfbfb",
     )
     uninstall_button.place(relx=1.0, rely=1.0, anchor="se", x=-10, y=-10)
+    registry.add(uninstall_button, text="uninstall_button", icon=("uninstall.png", "#fbfbfb"))
 
     # Toast (brief bottom-right notice, e.g. "download cancelled").
     # Created hidden, like every other on-demand widget above (pause_button,
