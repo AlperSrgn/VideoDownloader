@@ -74,7 +74,7 @@ This section is for developers who want to clone the repository, run the project
 ### Requirements
 
 - Windows 10+
-- Python 3.x
+- Python 3.10+
 - Internet connection
 - A Python virtual environment
 
@@ -136,7 +136,7 @@ The build script handles the PyInstaller build process and automatically resolve
 
 | File                  | Description                                                                                                       |
 | --------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `main.py`             | Application entry point — builds the window via `ui/app_window.py`, constructs `core/app_state.py` and `core/download_controller.py`, and wires the remaining top-level UI behavior (theme/language switching, sidebar, save location, updater, uninstall) to their callbacks |
+| `main.py`             | Application entry point — builds the window via `ui/app_window.py`, constructs `core/app_state.py` and `core/download_controller.py`, and wires the remaining top-level UI behavior (theme/language switching, sidebar, save location, updater, uninstall) to their callbacks; applies language, icon and theme changes by looping over the widget registry |
 | `core/app_state.py`        | Groups application-wide status flags (cancel/pause requests, closing state, current language, sidebar position, save location) that would otherwise be separate global variables |
 | `core/download_controller.py` | Owns the full download lifecycle on top of the queue — starting the next queued item, wiring `yt-dlp` progress into the progress bar, and reacting to a download pausing, being cancelled (shown as a brief toast), finishing, or failing |
 | `core/download_queue.py`   | Pure download-queue state (items waiting to download, plus the one currently in flight) — no GUI or threading dependencies, so it can be tested on its own |
@@ -146,7 +146,8 @@ The build script handles the PyInstaller build process and automatically resolve
 | `core/quality_options.py`  | Centralizes available quality and format options, including resolutions, container formats, and dropdown labels   |
 | `downloading/error_classifier.py` | Converts raw `yt-dlp` / FFmpeg errors and process results into clear, localized, user-facing messages             |
 | `downloading/ytdlp_manager.py`    | Manages the standalone `yt-dlp.exe` binary — first-run download, rate-limited update checks, and selecting the best available video/audio format from extracted info |
-| `ui/app_window.py`       | Builds every widget of the main window and the settings sidebar                                        |
+| `ui/app_window.py`       | Builds every widget of the main window and the settings sidebar, and registers each one that needs a translated label, icon or theme colors in the registry |
+| `ui/registry.py`         | `UiRegistry` — the single place where a widget declares its language key, button icon and theme key |
 | `ui/queue_view.py`       | Renders the download queue (on top of `core/download_queue.py`) into widgets, and fetches per-item preview info (title, duration, thumbnail) |
 | `ui/theme.py`            | Light/dark theme definitions and the `ThemeManager` that applies them to the widget set                |
 | `ui/notifications.py`    | User notifications — a thin wrapper around Windows system notifications (via `plyer`, respecting the user's notification setting), plus `ToastNotifier`, which animates the in-app toast (e.g. the "download cancelled" notice) |
