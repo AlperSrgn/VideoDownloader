@@ -28,13 +28,29 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # App version & "Check for Updates"
 # ---------------------------------------------------------------------------
-# Bump this on every release — must match the Inno Setup AppVersion so the
-# comparison against GitHub's latest release tag is meaningful.
+# Update on every release — must match Inno Setup AppVersion for accurate GitHub tag comparison.
 APP_VERSION = "3.9.0"
 
 GITHUB_REPO = "AlperSrgn/VideoDownloader"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 EXPECTED_INSTALLER_NAME = "VideoDownloaderSetup.exe"
+
+# ---------------------------------------------------------------------------
+# Update channel — developer switch
+# ---------------------------------------------------------------------------
+# "stable": normal behaviour. Uses GitHub's *latest release* and only offers
+#           the update if its version is newer than APP_VERSION.
+# "test":   uses the release tagged TEST_RELEASE_TAG instead and ALWAYS offers
+#           it, whatever its version. Meant for trying the update flow with a
+#           test installer without publishing a real release.
+#
+# The test release on GitHub must be marked "Set as a pre-release", otherwise
+# it could become the "latest release" that real users receive.
+# Set this back to "stable" before building a release.
+UPDATE_CHANNEL = "stable"
+
+TEST_RELEASE_TAG = "test-build"
+TEST_INSTALLER_NAME = EXPECTED_INSTALLER_NAME  # change if the test asset is named differently
 
 _USER_AGENT = "VideoDownloader-UpdateCheck"
 
@@ -52,6 +68,22 @@ class _DownloadCancelled(Exception):
 
 class _InstallerInvalid(Exception):
     """The downloaded file failed the size / MZ-signature checks."""
+
+
+def _is_test_channel() -> bool:
+    return str(UPDATE_CHANNEL).strip().lower() == "test"
+
+
+def _release_api_url() -> str:
+    """API endpoint for the active channel (read at call time, so changing
+    UPDATE_CHANNEL is all that's needed to switch)."""
+    if _is_test_channel():
+        return f"https://api.github.com/repos/{GITHUB_REPO}/releases/tags/{TEST_RELEASE_TAG}"
+    return GITHUB_LATEST_RELEASE_API
+
+
+def _expected_installer_name() -> str:
+    return TEST_INSTALLER_NAME if _is_test_channel() else EXPECTED_INSTALLER_NAME
 
 
 def _github_request(url: str, extra_headers: dict = None) -> urllib.request.Request:
@@ -194,8 +226,12 @@ class UpdateChecker:
 
         def worker():
             try:
+                api_url = _release_api_url()
+                installer_name = _expected_installer_name()
+                if _is_test_channel():
+                    logger.warning("Update channel = TEST (release tag '%s')", TEST_RELEASE_TAG)
                 req = _github_request(
-                    GITHUB_LATEST_RELEASE_API,
+                    api_url,
                     extra_headers={"Accept": "application/vnd.github+json"},
                 )
                 with urllib.request.urlopen(req, timeout=API_TIMEOUT_SECONDS) as resp:
@@ -209,7 +245,7 @@ class UpdateChecker:
                 # if used as the "installer" to download and run.
                 installer_url = next(
                     (a["browser_download_url"] for a in assets
-                     if a.get("name", "").lower() == EXPECTED_INSTALLER_NAME.lower()),
+                     if a.get("name", "").lower() == installer_name.lower()),
                     None,
                 )
                 self._post(self._on_update_check_done, latest_tag, installer_url)
@@ -234,10 +270,14 @@ class UpdateChecker:
             self._on_update_check_failed()
             return
 
-        try:
-            is_newer = _parse_version(latest_tag) > _parse_version(APP_VERSION)
-        except Exception:
-            is_newer = latest_tag.lstrip("vV") != APP_VERSION
+        if _is_test_channel():
+            # Test builds are always offered, regardless of version number.
+            is_newer = True
+        else:
+            try:
+                is_newer = _parse_version(latest_tag) > _parse_version(APP_VERSION)
+            except Exception:
+                is_newer = latest_tag.lstrip("vV") != APP_VERSION
 
         if not is_newer:
             messagebox.showinfo(
@@ -262,9 +302,12 @@ class UpdateChecker:
                 webbrowser.open(f"https://github.com/{GITHUB_REPO}/releases/tag/{latest_tag}")
             return
 
+        message = lang["update_available_message"].replace("{version}", latest_tag)
+        if _is_test_channel():
+            message = f"[TEST CHANNEL]\n\n{message}"
         wants_update = messagebox.askyesno(
             lang["update_available_title"],
-            lang["update_available_message"].replace("{version}", latest_tag),
+            message,
             parent=self.root,
         )
         if wants_update:
