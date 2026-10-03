@@ -194,10 +194,13 @@ class App:
             uninstall_button=ui.uninstall_button,
             ytdlp_status_label=ui.ytdlp_status_label,
             action_buttons_frame=ui.action_buttons_frame,
+            update_buttons_frame=ui.update_buttons_frame,
             update_cancel_button=ui.update_cancel_button,
+            update_install_button=ui.update_install_button,
         )
         ui.check_updates_button.configure(command=self.update_checker.check_for_updates)
         ui.update_cancel_button.configure(command=self.update_checker.cancel_download)
+        ui.update_install_button.configure(command=self.update_checker.install_update)
 
         # -- Button icons --------------------------------------------------
         # Icons are declared next to their widgets in build_app_window()

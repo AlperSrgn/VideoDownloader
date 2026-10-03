@@ -7,9 +7,10 @@ main.py's App keeps as self.ui (self.ui.download_button, ...).
 
 Click handling is not implemented here: every command=... callback is
 supplied by the caller via `callbacks` (one attribute per callback, e.g.
-callbacks.add_to_queue). Two commands are wired up by main.py afterwards,
+callbacks.add_to_queue). Three commands are wired up by main.py afterwards,
 because they need an UpdateChecker, which itself needs several of these
-widgets: the "Check for Updates" button and update_cancel_button.
+widgets: the "Check for Updates" button, update_cancel_button and
+update_install_button.
 
 Every widget that needs a translated label, a button icon and/or theme
 colors is registered where it is created (registry.add(...), see
@@ -162,13 +163,18 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
     ytdlp_status_label.pack(pady=(0, 5))
     ytdlp_status_label.pack_forget()
 
-    # Cancel button for the app-update installer download (see updater.py),
-    # packed by UpdateChecker just below ytdlp_status_label (which shows the
-    # "%" progress). Separate from `cancel_button` below, which belongs to
-    # video downloads. command= is wired up by main.py; its text is set by
+    # Buttons for the app-update installer download (see updater.py). Both sit
+    # side by side in update_buttons_frame, which UpdateChecker packs just
+    # below ytdlp_status_label (which shows the "%" progress / ready message).
+    # Separate from `cancel_button` below, which belongs to video downloads.
+    # command= for both is wired up by main.py; their texts are set by
     # change_language() and refreshed by UpdateChecker when shown.
+    update_buttons_frame = ctk.CTkFrame(bottom_panel, fg_color="transparent")
+    update_buttons_frame.pack(pady=(0, 5))
+    update_buttons_frame.pack_forget()
+
     update_cancel_button = ctk.CTkButton(
-        bottom_panel,
+        update_buttons_frame,
         width=120,
         height=32,
         font=("Helvetica", 13, "bold"),
@@ -179,10 +185,26 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
         border_width=2,
         corner_radius=5,
     )
-    update_cancel_button.pack(pady=(0, 5))
+    update_cancel_button.pack(side="left", padx=5)
     update_cancel_button.pack_forget()
     registry.add(update_cancel_button, text="cancel_button", icon=("cancel.png", "#d9534f"))
 
+    # Shown next to update_cancel_button once the installer is fully
+    # downloaded; pressing it starts the installation. Fixed colors: it is not
+    # part of the light/dark theme, so it is not registered with theme=.
+    update_install_button = ctk.CTkButton(
+        update_buttons_frame,
+        width=200,
+        height=32,
+        font=("Helvetica", 13, "bold"),
+        fg_color="#5cb85c",
+        hover_color="#449d44",
+        text_color="#fbfbfb",
+        corner_radius=5,
+    )
+    update_install_button.pack(side="left", padx=5)
+    update_install_button.pack_forget()
+    registry.add(update_install_button, text="update_install_button", icon=("install.png", "#fbfbfb"))
     # Shown only if the first-run yt-dlp.exe download fails (e.g. no internet).
     # Lets the user retry without having to restart the whole app.
     ytdlp_retry_button = ctk.CTkButton(

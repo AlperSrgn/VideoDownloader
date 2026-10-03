@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Bump this on every release — must match the Inno Setup AppVersion so the
 # comparison against GitHub's latest release tag is meaningful.
-APP_VERSION = "3.8.0"
+APP_VERSION = "3.9.0"
 
 GITHUB_REPO = "AlperSrgn/VideoDownloader"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
@@ -126,13 +126,17 @@ class UpdateChecker:
     The Download button is not controlled directly here, since its state depends on multiple conditions.
     This class only reports lock changes through refresh_download_button() and exposes is_locked.
     While the installer is downloading, update_cancel_button is shown below the progress label.
-    If the window closes during the download, cancel_download() should be called to remove the partial file.
+    Once the download is done, update_install_button appears next to it; the
+    installer only runs when the user presses that button (install_update()).
+    If the window closes during the download (or while the finished installer
+    is waiting for the install button), cancel_download() should be called to
+    remove the partial/finished file.
     """
 
     def __init__(self, root, get_language, refresh_download_button,
                  check_updates_button, uninstall_button,
                  ytdlp_status_label, action_buttons_frame,
-                 update_cancel_button):
+                 update_buttons_frame, update_cancel_button, update_install_button):
         self.root = root
         self.get_language = get_language
         self.refresh_download_button = refresh_download_button
@@ -140,9 +144,12 @@ class UpdateChecker:
         self.uninstall_button = uninstall_button
         self.ytdlp_status_label = ytdlp_status_label
         self.action_buttons_frame = action_buttons_frame
+        self.update_buttons_frame = update_buttons_frame
         self.update_cancel_button = update_cancel_button
+        self.update_install_button = update_install_button
         self._locked = False
         self._downloading = False
+        self._ready_installer_path = None  # set once the installer is downloaded and validated
         self._cancel_event = threading.Event()
 
     @property
@@ -153,7 +160,9 @@ class UpdateChecker:
 
     @property
     def is_downloading(self) -> bool:
-        """True only while the installer file itself is being downloaded."""
+        """True from the start of the installer download until it is installed,
+        cancelled or fails — including the time the finished installer waits
+        for the user to press the install button."""
         return self._downloading
 
     def _set_update_lock(self, state: str):
@@ -259,7 +268,7 @@ class UpdateChecker:
             parent=self.root,
         )
         if wants_update:
-            self._download_and_run_installer(installer_url)
+            self._download_installer(installer_url)
 
     def _on_update_check_failed(self, message_key: str = "update_check_failed_message"):
         self._set_update_lock("normal")
@@ -275,9 +284,18 @@ class UpdateChecker:
     # ------------------------------------------------------------------
     def cancel_download(self):
         """Cancel button handler (also safe to call from the app's close
-        handler). The worker stops at the next chunk and deletes the
-        partial .part file."""
-        if not self._downloading or self._cancel_event.is_set():
+        handler). While downloading, the worker stops at the next chunk and
+        deletes the partial .part file. If the download already finished and
+        is waiting for the install button, the finished installer is deleted."""
+        if not self._downloading:
+            return
+
+        if self._ready_installer_path:
+            _safe_remove(self._ready_installer_path)
+            self._on_download_cancelled()
+            return
+
+        if self._cancel_event.is_set():
             return
         self._cancel_event.set()
         lang = self.get_language()
@@ -289,13 +307,18 @@ class UpdateChecker:
         self.ytdlp_status_label.configure(text=lang["update_downloading_message"])
         self.ytdlp_status_label.pack(pady=(0, 5), before=self.action_buttons_frame)
         self.update_cancel_button.configure(text=lang["cancel_button"], state="normal")
-        self.update_cancel_button.pack(pady=(0, 5), before=self.action_buttons_frame)
+        self.update_cancel_button.pack(side="left", padx=5)
+        self.update_install_button.pack_forget()  # appears only once the download is done
+        self.update_buttons_frame.pack(pady=(0, 5), before=self.action_buttons_frame)
 
     def _hide_download_ui(self):
         """Idempotent: safe to call from every end-of-download path."""
         self._downloading = False
+        self._ready_installer_path = None
         self.ytdlp_status_label.pack_forget()
         self.update_cancel_button.pack_forget()
+        self.update_install_button.pack_forget()
+        self.update_buttons_frame.pack_forget()
 
     def _show_progress(self, percent: int):
         if self._cancel_event.is_set():
@@ -315,11 +338,34 @@ class UpdateChecker:
         lang = self.get_language()
         messagebox.showerror(lang["error_title"], message, parent=self.root)
 
-    def _download_and_run_installer(self, installer_url: str):
-        """Downloads the installer .exe to a temp folder, then launches it
-        and closes the app — the same Inno Setup installer already
-        overwrites the existing install in place, matching the manual
-        update flow that was already tested.
+    def _on_download_ready(self, installer_path: str):
+        """The installer is fully downloaded and validated. Nothing is launched
+        yet: show the install button next to Cancel and wait for the user."""
+        self._ready_installer_path = installer_path
+        lang = self.get_language()
+        self.ytdlp_status_label.configure(text=lang["update_ready_message"])
+        self.update_cancel_button.configure(state="normal")
+        self.update_install_button.configure(text=lang["update_install_button"], state="normal")
+        self.update_install_button.pack(side="left", padx=5)
+
+    def install_update(self):
+        """Install button handler: launches the downloaded installer and
+        closes the app."""
+        path = self._ready_installer_path
+        if not path:
+            return
+        if not os.path.exists(path):
+            lang = self.get_language()
+            self._on_download_error(lang["update_download_failed_message"])
+            return
+        self._launch_installer_and_exit(path)
+
+    def _download_installer(self, installer_url: str):
+        """Downloads the installer .exe to a temp folder. It is NOT launched
+        automatically: once the download is complete and validated, the
+        install button appears and the user starts the installation (the
+        same Inno Setup installer already overwrites the existing install in
+        place, matching the manual update flow that was already tested).
 
         The file is written to "<name>.part" first and only renamed to its
         final name once it is complete AND passes the size/MZ checks, so a
@@ -373,7 +419,7 @@ class UpdateChecker:
                 if self._cancel_event.is_set():
                     raise _DownloadCancelled()
 
-                self._post(self._launch_installer_and_exit, final_path)
+                self._post(self._on_download_ready, final_path)
 
             except _DownloadCancelled:
                 _safe_remove(final_path)
