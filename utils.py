@@ -64,14 +64,12 @@ def get_icon_path(name: str) -> str:
 # ---------------------------------------------------------------------------
 # Button icons (PNG icons)
 # ---------------------------------------------------------------------------
-# These are read straight from the bundled "icons" folder into memory once
-# at startup — unlike the .ico files above, nothing needs the OS/notification
-# system to see them again later, so there's no need to copy them to AppData.
+# Read straight from the bundled "icons" folder; unlike the .ico files
+# above, nothing outside the app needs them, so they are not copied to AppData.
 
 def get_bundled_resource_path(*parts: str) -> str:
-    """Path to a file bundled with the app, working both in dev mode and in
-    the packaged .exe (mirrors the pattern already used for src_dir above,
-    which PyInstaller's --add-data resolves correctly in both cases)."""
+    """Path to a file bundled with the app, in dev mode and in the packaged
+    .exe alike (PyInstaller's --add-data keeps this relative layout)."""
     base = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(base, *parts)
 
@@ -108,15 +106,12 @@ def load_button_icon(filename: str, color: str = "#fbfbfb", size=(18, 18)):
 def get_ffmpeg_path() -> str:
     """Return the correct ffmpeg binary path for both dev and packaged modes.
 
-    Dev mode: asks imageio_ffmpeg for its bundled binary directly, instead
-    of assuming the venv folder is named ".venv" and hardcoding the exact
-    ffmpeg build version (e.g. "v7.1") — both of which broke as soon as
-    either changed. This also means build.py and this function always
-    agree on which binary to use, since both go through the same call.
+    Dev mode: asks imageio_ffmpeg for its bundled binary. build.py goes
+    through the same call, so both always agree on which binary is used.
 
     Packaged mode: matches "ffmpeg*.exe" inside the PyInstaller bundle by
-    pattern rather than an exact filename, so an imageio_ffmpeg update that
-    bumps the bundled ffmpeg version doesn't silently break the frozen exe.
+    pattern, so an imageio_ffmpeg update that bumps the ffmpeg version
+    doesn't break the frozen exe.
     """
     if getattr(sys, "frozen", False):
         return find_glob_file(os.path.join(sys._MEIPASS, "ffmpeg*.exe"))

@@ -1,23 +1,13 @@
 """
 On-screen rendering of the download queue, on top of a DownloadQueue.
 
-QueueView owns one DownloadQueue instance (see download_queue.py — items
-waiting to download, plus the one currently in flight) and knows how to
-redraw it into a set of widgets and how to fetch/attach a preview (title,
-duration, thumbnail) for an item. The queue mutation methods below
-(enqueue/pop_next/remove/clear/find) and the current_item/items/total
-accessors are thin pass-throughs to that DownloadQueue, kept here so every
-existing call site (DownloadController's queue_view.current_item,
-queue_view.items, queue_view.enqueue(...), etc.) keeps working
-unchanged — only the state itself moved, not the interface.
+QueueView owns one DownloadQueue (core/download_queue.py: waiting items plus
+the one in flight), redraws it into a set of widgets, and fetches/attaches
+a preview (title, duration, thumbnail) for an item. The queue methods are
+thin pass-throughs to DownloadQueue.
 
-It has no opinion on when items get added or when the next one should
-start downloading — that's DownloadController's job (add_to_queue,
-process_next_in_queue, core/download_controller.py), since it involves
-widgets and download state (pause/cancel, save location, etc.) this
-module knows nothing about. DownloadController calls into QueueView to
-read or mutate the queue and then trigger a redraw the same way the
-functions this was split out of used to.
+It does not decide when items are added or started; that is
+DownloadController's job (core/download_controller.py).
 """
 
 import io
@@ -39,9 +29,7 @@ class QueueView:
     def __init__(self):
         self.queue = DownloadQueue()
 
-    # -- pass-throughs to DownloadQueue, so existing call sites
-    # (DownloadController's queue_view.current_item / .items /
-    # .enqueue(...) etc.) don't need to change ---------------------------
+    # -- pass-throughs to DownloadQueue --------------------------------------
 
     @property
     def current_item(self):
@@ -82,9 +70,9 @@ class QueueView:
         on_done(item_id, info, thumb_bytes) back onto the UI thread via
         after(delay_ms, func) — pass root.after for that.
 
-        info is None and nothing is scheduled if yt-dlp isn't ready yet, or
-        the link is invalid/unsupported/unreachable — the item is simply
-        left without a preview, same as before.
+        Nothing is scheduled if yt-dlp isn't ready yet, or the link is
+        invalid/unsupported/unreachable — the item is simply left without
+        a preview.
         """
         def worker():
             from settings import get_appdata_path
@@ -210,8 +198,7 @@ class QueueView:
                 subtitle += f"  {preview['duration']}"
 
             if is_active:
-                # Active item: show the status as a small download.png icon
-                # next to the subtitle text instead of the old text label.
+                # Active item: a small download.png icon next to the subtitle.
                 subtitle_row = ctk.CTkFrame(text_frame, fg_color="transparent")
                 subtitle_row.pack(anchor="w", fill="x")
 
@@ -235,8 +222,7 @@ class QueueView:
                 )
                 subtitle_label.pack(anchor="w", fill="x")
         else:
-            # Preview not fetched yet (or fetch failed/timed out) — same
-            # plain [quality] url line as before, so nothing looks broken.
+            # Preview not fetched yet (or the fetch failed): plain [quality] url line.
             display_url = item["url"] if len(item["url"]) <= 60 else item["url"][:57] + "..."
             label = ctk.CTkLabel(
                 text_frame,

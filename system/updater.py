@@ -2,10 +2,8 @@
 App self-update checking: compares the installed version against the
 latest GitHub release, and offers to download/launch the installer.
 
-Split out of main.py as its own feature: it polls its own API, verifies
-and runs its own installer, and only needs a handful of UI widgets
-(passed in explicitly once they exist) rather than reaching into
-main.py's App instance directly.
+UpdateChecker only needs a handful of UI widgets, passed in explicitly
+once they exist.
 """
 
 import http.client

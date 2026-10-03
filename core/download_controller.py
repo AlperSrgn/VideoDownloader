@@ -1,16 +1,16 @@
 """
-Owns the download queue and the lifecycle of each item: queued,
+Drives the download queue and the lifecycle of each item: queued,
 downloading, paused, cancelled, finished or failed.
 
-This class is the layer above QueueView: it decides *when* the next item
-starts, wires yt-dlp progress into the progress bar, and reacts to a
-download finishing or failing.
+It sits on top of QueueView (which holds the queue state and draws the
+list): it decides *when* the next item starts, wires download progress
+into the progress bar, and reacts to a download finishing, failing or
+being cancelled.
 
-Widgets don't exist yet when main.py constructs this (build_app_window()
-needs bound methods of this class as its button callbacks, so the
-controller has to exist before the widgets it will use do). They're
-attached afterwards via bind_widgets(), once build_app_window() has run —
-the same build-then-wire two-step main.py already uses for UpdateChecker.
+Widgets don't exist yet when main.py constructs this, because
+build_app_window() needs this class's bound methods as button callbacks.
+They are attached afterwards via bind_widgets() — the same build-then-wire
+two-step main.py uses for UpdateChecker.
 """
 
 from tkinter import messagebox
@@ -24,10 +24,9 @@ from utils import clean_playlist_url, validate_video_url
 
 
 class DownloadController:
-    # pause_button toggles between these two depending on state — kept as
-    # class constants rather than a static dict entry since main.py's own
-    # apply_button_icons() also needs them for the very first paint,
-    # before any pause/resume has happened yet.
+    # pause_button's icon depends on the paused state, so it is not in the
+    # UI registry. Public constants because App.apply_button_icons() (main.py)
+    # also uses them for the first paint.
     PAUSE_ICON_FILE = "pause.png"
     RESUME_ICON_FILE = "resume.png"
 
@@ -42,11 +41,9 @@ class DownloadController:
 
         self.queue_view = QueueView()
 
-        # Set by bind_widgets() once main.py's build_app_window() call has
-        # returned and the real widgets exist (see the module docstring for
-        # why the controller has to be constructed first). None of the
-        # methods that use these can be triggered by the user before that
-        # happens, so leaving them unset until then is safe.
+        # Assigned by bind_widgets() once the real widgets exist (see the
+        # module docstring). The user can't trigger any method that uses
+        # them before that, so None until then is safe.
         self.root = None
         self.progress_bar = None
         self.progress_label = None
@@ -64,10 +61,11 @@ class DownloadController:
         self.toast = None  # ToastNotifier, created in bind_widgets() from the toast label
 
     def bind_widgets(self, **widgets) -> None:
-        """Called once from main.py right after build_app_window() returns
-        and self.ui is assigned, with the widgets this controller drives."""
-        # The toast label is not kept as an attribute of its own: ToastNotifier
-        # owns it and its animation (see ui/notifications.py).
+        """Called once from main.py right after build_app_window() returns.
+        Each keyword becomes an attribute of the same name, so the names
+        must match the ones initialised to None in __init__."""
+        # The toast label is not stored directly: ToastNotifier owns it and
+        # its animation (see ui/notifications.py).
         toast_label = widgets.pop("toast_label")
         for name, widget in widgets.items():
             setattr(self, name, widget)
@@ -99,8 +97,8 @@ class DownloadController:
         progress" layout."""
         self.set_widgets_state("disabled")
         self.download_button.pack_forget()
-        # Reset to its default "paused? no" look (text, color AND icon) in
-        # case the previous item in the queue ended while paused.
+        # Reset to the non-paused look (text, color and icon), in case the
+        # previous queue item ended while paused.
         self._set_pause_button_state(paused=False)
         self.pause_button.pack(side="left", padx=5)
         self.queue_add_button.pack(side="left", padx=5)
@@ -139,21 +137,19 @@ class DownloadController:
         )
 
     # -- progress callbacks --------------------------------------------------
-    # Called from the background download thread (see downloader.py) — must
-    # not touch Tkinter widgets directly, so the actual UI update is
-    # marshaled onto the main thread via root.after().
+    # Called from the background download thread (see downloader.py), which
+    # must not touch Tkinter widgets, so each callback hands the actual UI
+    # update to the main thread via root.after().
 
     def on_progress(self, percent: float, downloaded_mb: float, total_mb: float, eta: str) -> None:
         self.root.after(0, lambda: self._update_progress_ui(percent, downloaded_mb, total_mb, eta))
 
     def _update_progress_ui(self, percent: float, downloaded_mb: float, total_mb: float, eta: str) -> None:
         if self.app_state.pause_requested:
-            # This update was queued (via root.after in on_progress) from a
-            # yt-dlp line the background thread read just before it noticed
-            # the pause request — the download (or, during the merge phase,
-            # ffmpeg) has already been stopped/suspended by the time we get
-            # here, so drop this stale update rather than overwriting the
-            # "paused" label with it.
+            # Stale update: it was queued via root.after() just before the
+            # download thread noticed the pause request. By now the
+            # download (or ffmpeg) is already stopped/suspended, so drop it
+            # instead of overwriting the "paused" label.
             return
         self.progress_bar.set(percent / 100)
         self.progress_label.configure(
@@ -233,10 +229,9 @@ class DownloadController:
     # -- queue rendering / preview -------------------------------------------
 
     def render_queue_list(self) -> None:
-        """Redraw the queue list. The currently-downloading item, if any, is
-        shown first as an active row (marked with ▶, no remove button —
-        cancel_button is used for that instead), followed by the waiting
-        items."""
+        """Redraws the queue list with the current theme color and language
+        (see QueueView.render for the row layout). Call it after any change
+        to the queue, the theme or the language."""
         self.queue_view.render(
             widgets={
                 "list_frame": self.queue_list_frame,
@@ -251,9 +246,9 @@ class DownloadController:
         )
 
     def fetch_queue_item_preview(self, item: dict) -> None:
-        """Fetches preview info in the background and updates the queued
-        item. Uses the item ID, so it can update while waiting in the
-        queue."""
+        """Fetches preview info in the background and attaches it to the
+        queued item. The item is looked up by ID when the result arrives,
+        so it is skipped if the item was removed in the meantime."""
         self.queue_view.fetch_preview(item, after=self.root.after, on_done=self._apply_preview_and_render)
 
     def _apply_preview_and_render(self, item_id: int, info: dict, thumb_bytes) -> None:
@@ -319,8 +314,8 @@ class DownloadController:
 
     def _start_download(self, item: dict) -> None:
         quality_key = item["quality_key"]
-        # Uses the current app_state.save_location;
-        # saves to the location selected when the download starts.
+        # save_location is read when the item starts, not when it was
+        # queued, so a folder changed in the meantime applies.
         common = dict(
             url=item["url"],
             save_location=self.app_state.save_location,

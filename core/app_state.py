@@ -1,18 +1,10 @@
 """
-Groups the small set of "current application status" flags that used to be
-individual module-level globals in main.py, each mutated via `global` from
-many different functions.
-
-This is a structural change only: every read/write below is the exact same
-statement as before, just as an attribute of an AppState instance instead of
-a bare module-level name. Because attributes are mutated in place rather
-than rebound, callers no longer need `global` to write to them — only a
-reference to the one shared `state` instance.
+Application-wide status flags shared between App, DownloadController and
+the update/close logic.
 
 Not included here: `dark_mode` (owned by ThemeManager, ui/theme.py) and the
-download queue / currently-downloading item (owned by QueueView,
-ui/queue_view.py) — both were already encapsulated in their own classes
-before this refactor, so AppState only needed to pick up what was left.
+download queue / currently-downloading item (owned by DownloadQueue,
+core/download_queue.py).
 """
 
 

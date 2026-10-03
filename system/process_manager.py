@@ -1,20 +1,14 @@
 """
 Windows process/window management helpers.
 
-Three related concerns live here:
-  - Managing yt-dlp/ffmpeg child processes: keeping them tied to this
-    app's lifetime (Job Object), suspending/resuming ffmpeg (the yt-dlp
-    download phase pauses differently — see downloader.py), and
-    terminating processes together with their own children.
-  - Sleep prevention: keeping Windows from idling into sleep while a
-    download is running (set_keep_awake).
-  - Single-instance enforcement: claiming a named mutex on startup and,
-    if another copy already holds it, finding and focusing that copy's
-    window instead of opening a second one.
-
-Both are generic "talk to the Windows API via ctypes" plumbing that
-doesn't belong to any one feature, which is why they're split out of
-downloader.py / main.py into their own module.
+Generic "talk to the Windows API via ctypes" plumbing, three concerns:
+  - Child processes (yt-dlp/ffmpeg): tying them to this app's lifetime
+    (Job Object), suspending/resuming ffmpeg (the yt-dlp download phase
+    pauses differently — see downloader.py), and terminating a process
+    together with its children.
+  - Sleep prevention while a download is running (set_keep_awake).
+  - Single-instance enforcement: a named mutex on startup and, if another
+    copy already holds it, focusing that copy's window.
 """
 
 import logging
@@ -173,11 +167,7 @@ def enqueue_lines(pipe, line_queue) -> None:
     """Runs in the background, pushing `pipe` lines to `line_queue` and adding
     None at the end. This allows the main loop to use a timeout; `readline()`
     has no timeout support, and Windows pipes can't be used with `select()`.
-
-    Generic pipe-reading with no download-specific logic, used by
-    downloader.py's yt-dlp download loop and its ffmpeg merge loop alike —
-    moved here from downloader.py since it's process/IO plumbing rather
-    than anything specific to a download.
+    Used by both the yt-dlp download loop and the ffmpeg merge loop.
     """
     try:
         for line in pipe:

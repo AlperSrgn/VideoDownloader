@@ -1,36 +1,19 @@
 """
 Application entry point.
 
-Used to be a flat script: every piece of state (cancel/pause flags, the
-current language, sidebar position, ...) was a module-level global,
-mutated via `global` from a dozen loosely related top-level functions —
-and several of those functions (e.g. url_var's trace_add callback, the
-lambdas passed into DownloadController) referenced names that were only
-defined *later* in the file, relying on Python not resolving a closure's
-names until it's actually called. That worked, but made the file hard to
-reorder or split further, and easy to break by moving something to the
-"wrong" place.
+App owns the main window and everything that is not download- or
+update-specific: building the window, sidebar animation, theme/language
+switching, save-location settings, the yt-dlp status display and closing.
 
-Everything that used to be one of those globals is now an attribute of
-one App instance. Methods can call `self.whatever` regardless of the
-order they're defined in, the same way DownloadController's own methods
-already could — this file just adopts the pattern the rest of the
-refactor was already using.
+It constructs DownloadController (core/download_controller.py) before the
+window, because the window's button callbacks are its bound methods; its
+widgets are attached afterwards via bind_widgets(). UpdateChecker is
+constructed after the window, once the widgets it needs exist.
 
-This class does NOT own the download queue or its lifecycle — that's
-DownloadController's job (core/download_controller.py). App owns what
-main.py's own globals used to cover: building the window, sidebar
-animation, theme/language switching, save-location/settings wiring, and
-constructing DownloadController (before the window, since the window's
-button callbacks are its bound methods; its widgets are attached afterwards
-via bind_widgets) and UpdateChecker (after the window, once the widgets it
-needs exist).
-
-Which widgets get a translated label, a button icon or theme colors is not
-listed here: each widget declares that where it is created, in
-build_app_window() (via ui/registry.py), and toggle_theme(),
-change_language() and apply_button_icons() below just loop over
-self.ui.registry.
+Which widgets get a translated label, a button icon or theme colors is
+declared where each widget is created, in build_app_window() (via
+ui/registry.py); toggle_theme(), change_language() and apply_button_icons()
+just loop over self.ui.registry.
 """
 
 import logging
@@ -71,12 +54,11 @@ from utils import (
 # The app shares config.json, the save folder, startup cleanup, and yt-dlp,
 # so only one copy can run at a time. A mutex identifies the active copy;
 # a second launch brings the first window to the front and exits. "Local\"
-# limits it to the current Windows session. Mutex and window handling are
-# in system/process_manager.py; only the app-specific mutex name and
-# WINDOW_TITLE_PREFIX are defined here.
+# limits it to the current Windows session. The mutex and window handling
+# live in system/process_manager.py.
 #
-# Must run before anything else, including Tk; a second launch must exit
-# without creating a window. So it stays at module scope, not App.__init__.
+# Must run before anything else, including Tk, so a second launch exits
+# without creating a window; hence module scope, not App.__init__.
 _SINGLE_INSTANCE_MUTEX_NAME = "Local\\VideoDownloader_SingleInstance"
 
 if not acquire_single_instance(_SINGLE_INSTANCE_MUTEX_NAME):
@@ -105,9 +87,8 @@ SIDEBAR_WIDTH = 300
 # Can be changed by the user and is saved to config.json.
 DEFAULT_SAVE_LOCATION = os.path.join(os.path.expanduser("~"), "Downloads")
 
-# Button icons (PNG files in icons/, downloaded from an icon site such as
-# Flaticon and dropped in next to appIcon.ico etc.) default to this size
-# unless a call site overrides it.
+# Button icons (PNG files in icons/) default to this size unless a call site
+# overrides it.
 BUTTON_ICON_SIZE = (18, 18)
 
 
@@ -130,27 +111,20 @@ class App:
 
         self.app_state = AppState(save_location=initial_save_location, sidebar_width=SIDEBAR_WIDTH)
 
-        # True only while yt-dlp.exe is usable AND not being replaced. False
-        # at startup, during the first-run download, during the
-        # `--update-to` self-update (checking_update) and after a failed
-        # first-run download. The Download button is derived from this flag
-        # (see refresh_download_button) rather than being toggled ad hoc by
-        # each feature, so no code path can re-enable it while yt-dlp isn't
-        # ready.
+        # True while yt-dlp.exe is available and not being replaced. False at startup,
+        # during the initial download or `--update-to` update (checking_update), or
+        # after a failed initial download. The Download button is derived from this
+        # flag (see refresh_download_button), so it cannot be enabled before yt-dlp is ready.
         self.ytdlp_ready = False
 
-        # Temp files (.ytdlp_tmp_*) left behind if the app was closed or
-        # killed mid-download. Each download uses a fresh UUID, so these
-        # can never be resumed and are just garbage.
+        # Temp files (.ytdlp_tmp_*) left if the app closes during a download.
+        # Each download uses a new UUID, so they cannot be resumed and can be deleted.
         cleanup_temp_files(self.app_state.save_location, TEMP_PREFIX)
 
         # -- Download controller -----------------------------------------
-        # Constructed here — before the widgets it drives exist — because
-        # build_app_window() below needs its bound methods (add_to_queue,
-        # pause_download, ...) as button callbacks. The controller's own
-        # widget attributes (progress_bar, download_button, ...) are filled
-        # in via download_controller.bind_widgets(...) right after
-        # build_app_window() returns, below.
+        # Created here so build_app_window() can use its methods as button callbacks.
+        # Widget references (progress_bar, download_button, ...) are assigned via
+        # download_controller.bind_widgets(...) after build_app_window() returns.
         self.download_controller = DownloadController(
             app_state=self.app_state,
             theme_manager=self.theme_manager,
@@ -161,9 +135,8 @@ class App:
         )
 
         # -- Build UI ------------------------------------------------------
-        # Every widget build_app_window() creates lives on self.ui from here
-        # on (self.ui.download_button, self.ui.root, ...) — no more
-        # unpacking each one into its own name.
+        # Every widget build_app_window() creates lives on self.ui
+        # (self.ui.download_button, self.ui.root, ...).
         self.ui = build_app_window(
             callbacks=SimpleNamespace(
                 on_close_request=self.on_close_request,
@@ -188,9 +161,7 @@ class App:
             sidebar_x=self.app_state.sidebar_x,
         )
 
-        # Now that the real widgets exist, hand them to the controller — see
-        # the "Download controller" comment above for why it couldn't
-        # happen earlier.
+        # Now that the real widgets exist, hand them to the controller.
         ui = self.ui
         self.download_controller.bind_widgets(
             root=ui.root,
@@ -210,13 +181,11 @@ class App:
             toast_label=ui.toast_label,
         )
 
-        # The initial populate needs save_location_value_label to already
-        # exist — see the NOTE in build_app_window().
+        # Needs save_location_value_label, which build_app_window() creates.
         self.update_save_location_label()
 
-        # Now that every widget it needs exists, wire up the update checker
-        # and hook it to the button created above (its command couldn't be
-        # set at creation time since the checker needs uninstall_button too).
+        # Wired up here because the checker needs several widgets, and the
+        # buttons' commands can only be set once the checker exists.
         self.update_checker = UpdateChecker(
             root=ui.root,
             get_language=lambda: self.app_state.current_language,
@@ -231,21 +200,11 @@ class App:
         ui.update_cancel_button.configure(command=self.update_checker.cancel_download)
 
         # -- Button icons --------------------------------------------------
-        # Which widget gets which icon is declared next to the widget itself
-        # in build_app_window() (registry.add(..., icon=("file.png", color))),
-        # and apply_button_icons() paints them from ui.registry.icons. The
-        # color matches that button's own text_color, so the icon reads the
-        # same as the label. A missing file just leaves that button
-        # text-only — see load_button_icon() — so icons can be added one at
-        # a time.
-        #
-        # pause_button toggles between two icons depending on state, so
-        # apply_button_icons() paints it the first time and
-        # DownloadController._set_pause_button_state() (called by
-        # pause_download() and when a new item starts) swaps it afterwards.
-        # The filenames themselves live on DownloadController
-        # (PAUSE_ICON_FILE/RESUME_ICON_FILE) since it and
-        # apply_button_icons() are the only places that need them.
+        # Icons are declared next to their widgets in build_app_window()
+        # (registry.add(..., icon=("file.png", color))) and applied by
+        # apply_button_icons(). If a file is missing, the button stays
+        # text-only. pause_button's icon switches with its state; see
+        # DownloadController._set_pause_button_state().
         self.apply_button_icons()
 
         # yt-dlp version label (populated asynchronously)
@@ -268,10 +227,8 @@ class App:
 
     @property
     def system_notification_enabled(self):
-        """The sidebar's "system_notification" checkbox variable — lives on
-        self.ui (built by build_app_window()), exposed here so call sites
-        can write self.system_notification_enabled instead of reaching into
-        self.ui directly every time."""
+        """The sidebar's "system_notification" checkbox variable (see
+        build_app_window()), exposed as a shortcut."""
         return self.ui.system_notification_enabled
 
     def run(self) -> None:
@@ -314,9 +271,8 @@ class App:
             try:
                 from settings import get_appdata_path
                 from downloading.ytdlp_manager import ensure_ytdlp, get_ytdlp_version
-                # ensure_ytdlp downloads on first run and, on later launches,
-                # checks for an update — at most once per
-                # MIN_UPDATE_CHECK_INTERVAL (12 h) and once per app session.
+                # ensure_ytdlp downloads on first run; on later launches, it checks for
+                # updates at most once every 12 hours and once per session.
                 exe_path = ensure_ytdlp(get_appdata_path(), on_status=on_status)
                 version_text = f"yt-dlp v{get_ytdlp_version(exe_path)}"
             except Exception:
@@ -469,6 +425,9 @@ class App:
 
     # -- URL change handler ------------------------------------------------
     def url_changed(self, *_) -> None:
+        # Playlist support is pending: once enabled, a "list=" URL should
+        # show playlist_checkbox (see the commented-out grid() call in
+        # build_app_window()). Until then the checkbox stays hidden.
         if "list=" in self.ui.url_var.get():
             pass  # playlist_checkbox.grid()  — playlist support pending
         else:
@@ -541,9 +500,8 @@ class App:
 
     def retry_ytdlp_setup(self) -> None:
         """Called from the retry button after a failed first-run yt-dlp.exe
-        download. Simply re-runs the same setup fetch_ytdlp_version already
-        does at startup — ensure_ytdlp will attempt the download again since
-        it was never marked as successfully checked/cached."""
+        download. Re-runs the startup setup; ensure_ytdlp tries the
+        download again since it was never marked as checked/cached."""
         self.ui.ytdlp_retry_button.pack_forget()
         self.fetch_ytdlp_version(on_status=self.on_ytdlp_status)
 

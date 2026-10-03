@@ -1,17 +1,10 @@
 """
 Single place where each widget declares what the app needs to do with it.
 
-Before this existed, "what happens to a widget" was spread across three
-hand-maintained dicts in main.py:
-
-  * change_language()    -> label_map   (widget -> language key)
-  * apply_button_icons() -> button_icons (widget -> icon file + color)
-  * toggle_theme()       -> widget_map  (THEMES key -> widget)
-
-so adding one button meant remembering to touch all three (and nothing
-complained if one was forgotten — the button just stayed untranslated,
-icon-less or un-themed). Now build_app_window() registers each widget right
-where it is created, and main.py simply loops over the registry.
+build_app_window() registers each widget right where it is created, and
+main.py loops over the registry in change_language() (texts),
+apply_button_icons() (icons) and toggle_theme() (themed). Adding a button
+therefore only means one registry.add(...) call next to its constructor.
 
     registry.add(
         export_button,

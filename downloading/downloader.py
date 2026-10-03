@@ -50,12 +50,10 @@ logger = logging.getLogger(__name__)
 # per-download UUID), including yt-dlp's own .part/.ytdl side files.
 TEMP_PREFIX = ".ytdlp_tmp_"
 
-# Fixed weights combine video download, audio download,
-# and ffmpeg merge into one progress bar.
-# Previously, weights were calculated dynamically from file sizes.
-# However, some DASH/adaptive formats don’t report a filesize, causing progress to get stuck at 0%,
-# while fragmented downloads could make the total estimate fluctuate.
-# Fixed weights make progress simpler and more stable, at the cost of not reflecting actual file-size ratios.
+# Fixed weights combine video download, audio download and ffmpeg merge into
+# one progress bar. They are fixed (not derived from file sizes) because some
+# DASH/adaptive formats report no filesize, which left progress stuck at 0%,
+# and fragmented downloads made a size-based total fluctuate.
 VIDEO_PHASE_WEIGHT = 75
 AUDIO_PHASE_WEIGHT = 15
 MERGE_PHASE_WEIGHT = 10
@@ -73,17 +71,14 @@ AUDIO_CONVERT_WEIGHT = 15
 # rather than waiting forever, and kill the process.
 _STALL_TIMEOUT = 60  # seconds
 
+# How often the yt-dlp download loop, the ffmpeg merge loop and the
+# paused-wait loop re-check cancel/pause while no new output arrives.
+# Cancellation won't be delayed beyond this interval.
+_CANCEL_POLL_INTERVAL = 0.2  # seconds
+
 
 # ---------------------------------------------------------------------------
-# Format selection: find_suitable_format / find_suitable_audio_format now
-# live in ytdlp_manager.py (imported at the top of this file) — they operate purely on the
-# 'formats' list shape yt-dlp's --dump-json produces, with no
-# download-orchestration logic of their own.
-# ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
-# Progress parsing (replaces yt_dlp's progress_hooks — we now read yt-dlp
-# CLI's --newline stdout output directly)
+# Progress parsing (yt-dlp CLI's --newline stdout output)
 # ---------------------------------------------------------------------------
 
 # Matches lines like:
@@ -167,7 +162,7 @@ def _run_download(cmd, on_progress, on_cancel_check, cancel_message, stall_messa
     the yt-dlp process — the OS network stack keeps receiving into the
     socket's buffer regardless of whether our thread gets scheduled, so a
     "paused" download can silently keep completing itself in the
-    background (this is what used to happen here). So instead, pausing
+    background. So instead, pausing
     stops the yt-dlp process — its partial file is left on disk — and
     blocks until resumed, then relaunches the exact same command; yt-dlp
     resumes the partial file itself via an HTTP Range request (its
@@ -335,14 +330,6 @@ def _format_duration(seconds: float) -> str:
     return f"{minutes:02d}:{secs:02d}"
 
 
-# How often the yt-dlp download loop, the ffmpeg merge loop and the
-# paused-wait loop re-check cancel/pause while no new output arrives (defined
-# here, but also used by the yt-dlp code above — it is only looked up when
-# those functions run). Cancellation won't be delayed beyond this interval,
-# even without new output.
-_CANCEL_POLL_INTERVAL = 0.2  # seconds
-
-
 def _run_ffmpeg_merge(cmd, total_duration, on_merge_progress, on_cancel_check, cancel_message,
                        on_pause_check=None):
     """
@@ -462,10 +449,9 @@ def _run_ffmpeg_merge(cmd, total_duration, on_merge_progress, on_cancel_check, c
 # ---------------------------------------------------------------------------
 # Shared helpers for download_video / download_audio
 # ---------------------------------------------------------------------------
-# Both functions run the same shape of pipeline (one or more yt-dlp download
-# phases, then one ffmpeg phase), so the yt-dlp command itself and the
-# exception -> on_error mapping around _run_download/_run_ffmpeg_merge used
-# to be duplicated between them almost verbatim. Collected here instead.
+# Both download_video and download_audio run one or more yt-dlp download
+# phases followed by one ffmpeg phase; the command building and the
+# exception -> callback mapping for those phases live here.
 
 def _build_ytdlp_download_cmd(exe_path: str, format_id: str, client: str | None,
                                 output_template: str, url: str) -> list:
@@ -493,8 +479,8 @@ def _build_ytdlp_download_cmd(exe_path: str, format_id: str, client: str | None,
 
 def _report_cancelled(on_cancelled, on_error, exc) -> None:
     """A user cancellation is not an error. If the caller supplied
-    on_cancelled it gets a plain notification; otherwise (older callers)
-    fall back to the previous behaviour of reporting it through on_error."""
+    on_cancelled it gets a plain notification; otherwise the cancellation
+    is reported through on_error."""
     if on_cancelled is not None:
         on_cancelled()
     else:
@@ -509,11 +495,6 @@ def _run_ytdlp_download_phase(cmd, progress_fn, on_cancel_check, on_pause_check,
     on_error if no on_cancelled was supplied). Returns True on success; on
     False the caller should just `return` immediately — one of those
     callbacks has already been called.
-
-    Shared by download_video (its video and audio phases) and
-    download_audio (its single phase), which otherwise each caught
-    DownloadCancelled/DownloadStalled/YtDlpProcessError around
-    _run_download and mapped them to on_error identically.
     """
     try:
         _run_download(
@@ -554,11 +535,6 @@ def _run_ffmpeg_merge_phase(cmd, duration, progress_fn, on_cancel_check, on_paus
     before stopping. Returns True on success; on False the caller should
     just `return` immediately — one of those callbacks has already been
     called.
-
-    Shared by download_video's video+audio merge and download_audio's mp3
-    conversion, which otherwise each caught DownloadCancelled/
-    FfmpegProcessError around _run_ffmpeg_merge and mapped them to
-    on_error identically.
     """
     try:
         _run_ffmpeg_merge(
@@ -761,12 +737,10 @@ def download_audio(
 
     Downloads the raw audio track first, then converts it to mp3 with our
     own ffmpeg call (using -progress pipe:1, same as the video merge step).
-    We used to let yt-dlp's -x/--audio-format postprocessor do this
-    conversion internally — but that runs invisibly after the [download]
-    100% line, so the progress bar looked stuck at 100% while the
-    conversion actually happened. Splitting it into an explicit ffmpeg
-    step lets us report that phase's progress via on_merge_progress,
-    same as download_video does for merging.
+    Doing the conversion ourselves, rather than via yt-dlp's -x/--audio-format
+    postprocessor, lets us report its progress through on_merge_progress;
+    the postprocessor runs invisibly after the [download] 100% line, which
+    left the progress bar looking stuck.
 
     on_pause_check: optional callable checked throughout both phases. The
     download phase pauses by stopping yt-dlp and relaunching it on resume

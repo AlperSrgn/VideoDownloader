@@ -1,40 +1,25 @@
 """
 Main window construction.
 
-build_app_window() creates every widget of the main window and the
-settings sidebar and returns them all as attributes of one object
-(a SimpleNamespace), which main.py's App keeps as self.ui — no
-unpacking into separate names, so callers just use self.ui.download_button
-etc.
+build_app_window() creates every widget of the main window and the settings
+sidebar and returns them as attributes of one SimpleNamespace, which
+main.py's App keeps as self.ui (self.ui.download_button, ...).
 
-This module owns none of the click-handling logic itself: every
-command=... callback it wires up is supplied by the caller via
-`callbacks` (an object with one attribute per callback, e.g.
-callbacks.add_to_queue), since those functions need things (state, other
-widgets, current_language) this module doesn't have. Some of them are
-App methods in main.py (toggle_theme, change_language, on_close_request,
-...); the queue/download ones (add_to_queue, pause_download,
-cancel_download, clear_queue) are DownloadController methods
-(core/download_controller.py) that main.py hands through unchanged. The
-things NOT wired up here are the "Check for Updates" button and the
-update-download Cancel button (update_cancel_button) — their commands
-depend on an UpdateChecker instance that itself needs several of these
-widgets, so main.py constructs and wires those right after calling this
-function.
+Click handling is not implemented here: every command=... callback is
+supplied by the caller via `callbacks` (one attribute per callback, e.g.
+callbacks.add_to_queue). Two commands are wired up by main.py afterwards,
+because they need an UpdateChecker, which itself needs several of these
+widgets: the "Check for Updates" button and update_cancel_button.
 
 Every widget that needs a translated label, a button icon and/or theme
-colors is registered right where it is created (registry.add(...), see
-ui/registry.py) and the registry is returned as self.ui.registry. main.py
-loops over it in change_language(), apply_button_icons() and toggle_theme(),
-so adding a widget no longer means editing three separate dicts there.
+colors is registered where it is created (registry.add(...), see
+ui/registry.py); the registry is returned as self.ui.registry.
 
-Every widget starts out in light mode, so its colors are read from
-ui/theme.py's THEMES["light"] (aliased below as _LIGHT) instead of being
-retyped as literal hex strings here. That dict is the same one
-toggle_theme() applies later when the user switches themes. A few colors (e.g. the cancel/clear
-buttons' red text, some hover colors) aren't part of THEMES since they
-don't change between themes; those are still hardcoded here and marked
-with a comment saying so.
+Every widget starts in light mode, so its colors come from ui/theme.py's
+THEMES["light"] (aliased as _LIGHT), the same dict toggle_theme() applies
+later. Colors that don't change between themes (e.g. the red text of the
+cancel/clear buttons, some hover colors) are hardcoded here and marked
+with a comment.
 """
 
 from types import SimpleNamespace
@@ -48,8 +33,7 @@ from ui.theme import THEMES
 _LIGHT = THEMES["light"]
 
 # Window title = WINDOW_TITLE_PREFIX + app version. main.py's single-instance
-# check finds an already-running copy by this same prefix, so it is defined
-# once here and imported there — never retype it as a literal.
+# check finds an already-running copy by this same prefix, so never retype it.
 WINDOW_TITLE_PREFIX = "Video Downloader v"
 
 
@@ -111,8 +95,9 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
     url_entry.bind("<Button-3>", lambda e: callbacks.show_entry_context_menu(e, url_entry))
 
     # Playlist checkbox — playlist support is pending, so it is created and
-    # registered (text/theme) but never gridded for now; see url_changed() in
-    # main.py and the commented-out grid()/variable= lines below.
+    # registered (text/theme) but never gridded for now. The commented-out
+    # variable=/grid() lines below are what to enable with it; see
+    # App.url_changed() in main.py.
     frame.grid_rowconfigure(1, minsize=20)
     playlist_checkbox_var = ctk.BooleanVar()
     playlist_checkbox = ctk.CTkCheckBox(
@@ -169,21 +154,19 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
     bottom_panel = ctk.CTkFrame(root, fg_color="transparent")
     bottom_panel.place(relx=0.5, rely=1.0, anchor="s", y=-15)
 
-    # yt-dlp status message — shown on first run or during update checks.
-    # Hidden otherwise. See on_ytdlp_status() in main.py.
+    # yt-dlp status message — shown on first run or during update checks,
+    # hidden otherwise. See on_ytdlp_status() in main.py.
     ytdlp_status_label = ctk.CTkLabel(
         bottom_panel, text="", font=("Helvetica", 14, "italic"), text_color="#888888",
     )
     ytdlp_status_label.pack(pady=(0, 5))
     ytdlp_status_label.pack_forget()
 
-    # Cancel button for the app-update installer download (see updater.py).
-    # Shown/hidden by UpdateChecker (packed just below ytdlp_status_label,
-    # which shows the "%" progress) — separate from `cancel_button` below,
-    # which belongs to normal video downloads. command= is wired up by
-    # main.py once its UpdateChecker exists (see this module's docstring);
-    # its text comes from the current language (registered below, so
-    # change_language() sets it, and UpdateChecker refreshes it when shown).
+    # Cancel button for the app-update installer download (see updater.py),
+    # packed by UpdateChecker just below ytdlp_status_label (which shows the
+    # "%" progress). Separate from `cancel_button` below, which belongs to
+    # video downloads. command= is wired up by main.py; its text is set by
+    # change_language() and refreshed by UpdateChecker when shown.
     update_cancel_button = ctk.CTkButton(
         bottom_panel,
         width=120,
@@ -447,10 +430,6 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
         text_color="#333333",
     )
     save_location_value_label.pack(anchor="w", pady=(2, 10), padx=10, fill="x")
-    # NOTE: the initial update_save_location_label() call that used to happen
-    # right here now happens in main.py, right after self.ui is assigned —
-    # that method is defined on main.py's App class and needs
-    # save_location_value_label to already be reachable via self.ui.
 
     # Check for Updates button
     check_updates_button = ctk.CTkButton(
@@ -463,8 +442,7 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
     )
     check_updates_button.pack(anchor="w", pady=(0, 10), padx=10, fill="x")
     registry.add(check_updates_button, text="check_updates_button", icon=("refresh.png", "#fbfbfb"))
-    # command= is wired up by main.py once its UpdateChecker exists (see
-    # this module's docstring).
+    # command= is wired up by main.py once its UpdateChecker exists.
 
     # Preview notification button
     preview_notification_button = ctk.CTkButton(
@@ -492,14 +470,10 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
     uninstall_button.place(relx=1.0, rely=1.0, anchor="se", x=-10, y=-10)
     registry.add(uninstall_button, text="uninstall_button", icon=("uninstall.png", "#fbfbfb"))
 
-    # Toast (brief bottom-right notice, e.g. "download cancelled").
-    # Created hidden, like every other on-demand widget above (pause_button,
-    # cancel_button, ...) — shown/hidden via place()/place_forget(), with the
-    # animation owned by ToastNotifier (ui/notifications.py) and triggered by
-    # DownloadController, not by this module (see this file's
-    # docstring: build_app_window() only builds widgets, it doesn't decide
-    # when they appear). Parented directly to root and created last, so it
-    # stacks above every other widget placed on root, including the sidebar.
+    # Toast (brief bottom-right notice, e.g. "download cancelled"). Created
+    # hidden; shown/hidden via place()/place_forget() by ToastNotifier
+    # (ui/notifications.py). Created last, so it stacks above every other
+    # widget placed on root, including the sidebar.
     toast_label = ctk.CTkLabel(
         root,
         text="",

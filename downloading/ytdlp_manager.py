@@ -275,10 +275,8 @@ def ensure_ytdlp(appdata_dir: str, force_check: bool = False, on_status=None) ->
         )
         logger.debug("yt-dlp self-update output: %s", result.stdout.strip())
         if result.returncode != 0:
-            # The subprocess itself ran fine, but yt-dlp reported that the
-            # update didn't go through (e.g. no internet, GitHub rate
-            # limit) — this was previously never even noticed, since only
-            # exceptions from launching the subprocess were caught here.
+            # The subprocess ran, but yt-dlp reported that the update
+            # didn't go through (e.g. no internet, GitHub rate limit).
             update_failed_exc = RuntimeError(
                 (result.stdout or "").strip() or f"exit code {result.returncode}"
             )
@@ -393,10 +391,8 @@ def fetch_preview_info(exe_path: str, url: str) -> dict | None:
 
 
 # ---------------------------------------------------------------------------
-# Format selection (moved from downloader.py — operates purely on the
-# 'formats' list shape that --dump-json / extract_info() produces, with no
-# download-specific logic, so it belongs next to the client-list/extraction
-# code above rather than in the download-orchestration module).
+# Format selection: operates purely on the 'formats' list that
+# --dump-json / extract_info() produces.
 # ---------------------------------------------------------------------------
 
 def _select_original_audio(audio_formats: list):
