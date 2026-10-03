@@ -194,22 +194,6 @@ def download_ytdlp_exe(dest_path: str, on_progress=None) -> None:
         raise
 
 
-def _is_runnable(exe_path: str) -> bool:
-    """True if the exe starts and answers --version. Used to detect a corrupt
-    yt-dlp.exe (e.g. one left over from an earlier truncated download) that
-    merely *exists*. A timeout is not treated as corruption."""
-    try:
-        result = _run_hidden(
-            [exe_path, "--version"],
-            capture_output=True, text=True, timeout=15,
-        )
-    except subprocess.TimeoutExpired:
-        return True
-    except OSError:
-        return False
-    return result.returncode == 0 and bool(result.stdout.strip())
-
-
 def ensure_ytdlp(appdata_dir: str, force_check: bool = False, on_status=None) -> str:
     """
     Ensures yt-dlp.exe exists and is up to date. Uses the existing copy or
@@ -219,7 +203,7 @@ def ensure_ytdlp(appdata_dir: str, force_check: bool = False, on_status=None) ->
     these limits and force an immediate check.
 
     If provided, on_status(stage, detail) is called with one of:
-      "downloading"     detail = percent 0-100 (first run, or corrupt exe)
+      "downloading"     detail = percent 0-100 (first run, exe missing)
       "checking_update" detail = None (running `--update-to`)
       "ready"           detail = None
       "error"           detail = the exception; the download failed and
@@ -236,12 +220,11 @@ def ensure_ytdlp(appdata_dir: str, force_check: bool = False, on_status=None) ->
 
     exe_path = get_ytdlp_path(appdata_dir)
 
+    # Only the file's existence is checked here; yt-dlp.exe is not started
+    # just to test it. A partial download can't end up at exe_path anyway:
+    # download_ytdlp_exe() verifies size + SHA-256 on a .tmp file and only
+    # then os.replace()s it into place.
     needs_download = not os.path.exists(exe_path)
-    if not needs_download and not _session_checked and not _is_runnable(exe_path):
-        # File exists but doesn't run (corrupt/truncated) - os.path.exists()
-        # alone would keep it forever, so re-download it. Checked once per process.
-        logger.warning("Existing yt-dlp.exe is not runnable; re-downloading")
-        needs_download = True
 
     if needs_download:
         _notify("downloading", 0.0)
@@ -249,8 +232,7 @@ def ensure_ytdlp(appdata_dir: str, force_check: bool = False, on_status=None) ->
             download_ytdlp_exe(exe_path, on_progress=lambda p: _notify("downloading", p))
         except Exception as e:
             logger.error("Could not download yt-dlp.exe: %s", e)
-            # There is no usable exe at exe_path (missing, or the corrupt one
-            # that triggered this re-download) — don't cache it or report
+            # There is no exe at exe_path — don't cache it or report
             # "ready" as if there were. Leaving _session_checked False means a
             # later retry (e.g. after the user's connection is back) tries
             # the download again instead of silently reusing a broken state.
