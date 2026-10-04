@@ -31,6 +31,8 @@ from settings import load_setting, save_setting
 from ui.registry import UiRegistry
 from ui.theme import THEMES
 
+from core.cookie_options import COOKIE_BROWSERS
+
 _LIGHT = THEMES["light"]
 
 # Window title = WINDOW_TITLE_PREFIX + app version. main.py's single-instance
@@ -465,6 +467,75 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
     check_updates_button.pack(anchor="w", pady=(0, 10), padx=10, fill="x")
     registry.add(check_updates_button, text="check_updates_button", icon=("refresh.png", "#fbfbfb"))
     # command= is wired up by main.py once its UpdateChecker exists.
+
+    # Cookie support (age-restricted / members-only videos).
+    # Only the mode menu is always visible; the browser menu and the file
+    # button live in cookie_extra_frame and are shown/hidden by
+    # App.update_cookie_widgets() (main.py). They start unpacked (hidden).
+    cookie_section_label = ctk.CTkLabel(
+        sidebar_content,
+        text="",
+        font=("Helvetica", 13, "bold"),
+        text_color="black",
+        anchor="w",
+    )
+    cookie_section_label.pack(anchor="w", pady=(6, 0), padx=10, fill="x")
+    registry.add(cookie_section_label, text="cookie_section_label")
+
+    # Texts/values are set by App.change_language() (translated per language).
+    cookie_mode_var = ctk.StringVar()
+    cookie_mode_menu = ctk.CTkOptionMenu(
+        sidebar_content,
+        variable=cookie_mode_var,
+        values=[""],
+        command=callbacks.change_cookie_mode,
+        height=30,
+        font=("Helvetica", 13),
+        fg_color="#4c6a8c",
+        button_color="#004566",
+        text_color="#ebebeb",
+    )
+    cookie_mode_menu.pack(anchor="w", pady=(4, 0), padx=10, fill="x")
+
+    # Holds the mode-dependent widgets. width/height=0 so the empty frame
+    # takes no space while both children are hidden.
+    cookie_extra_frame = ctk.CTkFrame(sidebar_content, width=0, height=0, fg_color="transparent")
+    cookie_extra_frame.pack(fill="x")
+
+    saved_cookie_browser = load_setting("cookie_browser", "firefox")
+    cookie_browser_var = ctk.StringVar(
+        value=COOKIE_BROWSERS.get(saved_cookie_browser, COOKIE_BROWSERS["firefox"])
+    )
+    cookie_browser_menu = ctk.CTkOptionMenu(
+        cookie_extra_frame,
+        variable=cookie_browser_var,
+        values=list(COOKIE_BROWSERS.values()),
+        command=callbacks.change_cookie_browser,
+        height=30,
+        font=("Helvetica", 13),
+        fg_color="#4c6a8c",
+        button_color="#004566",
+        text_color="#ebebeb",
+    )
+
+    cookie_file_button = ctk.CTkButton(
+        cookie_extra_frame,
+        command=callbacks.choose_cookie_file,
+        font=("Helvetica", 13),
+        fg_color="#4c6a8c",
+        hover_color="#3b556f",
+        text_color="#fbfbfb",
+        height=30,
+    )
+    registry.add(cookie_file_button, text="cookie_file_button", icon=("folder.png", "#fbfbfb"))
+
+    # Name of the selected cookies.txt (filled in once the feature works).
+    cookie_file_label = ctk.CTkLabel(
+        cookie_extra_frame,
+        text="",
+        font=("Helvetica", 11),
+        text_color="#333333",
+    )
 
     # Preview notification button
     preview_notification_button = ctk.CTkButton(

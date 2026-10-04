@@ -47,6 +47,14 @@ from utils import (
     load_button_icon,
 )
 
+from core.cookie_options import (
+    COOKIE_MODES,
+    build_cookie_mode_options,
+    cookie_mode_label,
+    resolve_cookie_browser_key,
+    resolve_cookie_mode_key,
+)
+
 
 # ---------------------------------------------------------------------------
 # Single instance
@@ -154,6 +162,9 @@ class App:
                 choose_save_location=self.choose_save_location,
                 preview_notification=self.preview_notification,
                 uninstall_app=self.uninstall_app,
+                change_cookie_mode=self.change_cookie_mode,
+                change_cookie_browser=self.change_cookie_browser,
+                choose_cookie_file=self.choose_cookie_file,
             ),
             app_version=APP_VERSION,
             app_icon=self.app_icon,
@@ -404,6 +415,15 @@ class App:
         # Convert the current selection to a language-independent key BEFORE the language changes.
         selected_key = resolve_quality_key(ui.option_var.get())
 
+        # Same for the cookie mode; at startup the dropdown is still empty,
+        # so fall back to the saved setting.
+        cookie_mode_key = (
+            resolve_cookie_mode_key(ui.cookie_mode_var.get(), self.app_state.current_language)
+            or load_setting("cookie_mode", "none")
+        )
+        if cookie_mode_key not in COOKIE_MODES:
+            cookie_mode_key = "none"
+
         self.app_state.current_language = LANGUAGES.get(selected, LANGUAGES["EN"])
         dropdown_options = build_dropdown_options(self.app_state.current_language)
         ui.quality_options_menu.configure(values=dropdown_options)
@@ -412,6 +432,14 @@ class App:
                 quality_dropdown_text(selected_key, self.app_state.current_language)
             )
         save_setting("language", selected)
+
+        ui.cookie_mode_menu.configure(
+            values=build_cookie_mode_options(self.app_state.current_language)
+        )
+        ui.cookie_mode_var.set(
+            cookie_mode_label(cookie_mode_key, self.app_state.current_language)
+        )
+        self.update_cookie_widgets()
 
         # widget -> language key, registered in build_app_window()
         # (registry.add(..., text="<language key>")).
@@ -507,6 +535,41 @@ class App:
         download again since it was never marked as checked/cached."""
         self.ui.ytdlp_retry_button.pack_forget()
         self.fetch_ytdlp_version(on_status=self.on_ytdlp_status)
+
+    # -- Cookie support (UI only for now) -------------------------------------
+    def update_cookie_widgets(self) -> None:
+        """Shows the browser menu or the file button depending on the mode."""
+        ui = self.ui
+        mode = resolve_cookie_mode_key(
+            ui.cookie_mode_var.get(), self.app_state.current_language
+        )
+
+        ui.cookie_browser_menu.pack_forget()
+        ui.cookie_file_button.pack_forget()
+        ui.cookie_file_label.pack_forget()
+
+        if mode == "browser":
+            ui.cookie_browser_menu.pack(anchor="w", pady=(8, 0), padx=10, fill="x")
+        elif mode == "file":
+            ui.cookie_file_button.pack(anchor="w", pady=(8, 0), padx=10, fill="x")
+            ui.cookie_file_label.pack(anchor="w", pady=(2, 0), padx=10, fill="x")
+
+    def change_cookie_mode(self, selected: str) -> None:
+        mode = resolve_cookie_mode_key(selected, self.app_state.current_language)
+        if mode is None:
+            return
+        save_setting("cookie_mode", mode)
+        self.update_cookie_widgets()
+
+    def change_cookie_browser(self, selected: str) -> None:
+        browser = resolve_cookie_browser_key(selected)
+        if browser:
+            save_setting("cookie_browser", browser)
+
+    def choose_cookie_file(self) -> None:
+        # TODO: pick a cookies.txt, copy it to AppData and show its name in
+        # ui.cookie_file_label (next step).
+        pass
 
     # -- Button icons --------------------------------------------------------
     def make_icon(self, filename: str, color: str, size=BUTTON_ICON_SIZE):

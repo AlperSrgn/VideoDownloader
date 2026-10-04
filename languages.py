@@ -58,6 +58,13 @@ LANGUAGES = {
         "paste_label": "Yapıştır",
         "select_all_label": "Tümünü Seç",
 
+        # Çerez desteği
+        "cookie_section_label": "Çerez desteği",
+        "cookie_mode_none": "Kapalı",
+        "cookie_mode_browser": "Tarayıcıdan al",
+        "cookie_mode_file": "Dosyadan al",
+        "cookie_file_button": "cookies.txt Seç",
+
         # Hata sınıflandırma
         "error_no_internet": "İnternet bağlantısı yok.\n\nLütfen bağlantınızı kontrol edip tekrar deneyin.",
         "error_video_not_found": "Video bulunamadı.\n\nBağlantı yanlış olabilir veya video kaldırılmış olabilir.",
@@ -153,6 +160,13 @@ LANGUAGES = {
         "copy_label": "Copy",
         "paste_label": "Paste",
         "select_all_label": "Select All",
+
+        # Cookie support
+        "cookie_section_label": "Cookie support",
+        "cookie_mode_none": "Off",
+        "cookie_mode_browser": "From browser",
+        "cookie_mode_file": "From file",
+        "cookie_file_button": "Choose cookies.txt",
 
         # Error classification
         "error_no_internet": "No internet connection.\n\nPlease check your connection and try again.",
@@ -250,6 +264,13 @@ LANGUAGES = {
         "paste_label": "Pegar",
         "select_all_label": "Seleccionar todo",
 
+        # Compatibilidad con cookies
+        "cookie_section_label": "Compatibilidad con cookies",
+        "cookie_mode_none": "Desactivado",
+        "cookie_mode_browser": "Desde el navegador",
+        "cookie_mode_file": "Desde un archivo",
+        "cookie_file_button": "Elegir cookies.txt",
+
         # Clasificación de errores
         "error_no_internet": "No hay conexión a Internet.\n\nComprueba tu conexión e inténtalo de nuevo.",
         "error_video_not_found": "No se encontró el video.\n\nEl enlace puede ser incorrecto o el video puede haber sido eliminado.",
@@ -344,6 +365,13 @@ LANGUAGES = {
         "copy_label": "Kopieren",
         "paste_label": "Einfügen",
         "select_all_label": "Alles auswählen",
+
+        # Cookie-Unterstützung
+        "cookie_section_label": "Cookie-Unterstützung",
+        "cookie_mode_none": "Aus",
+        "cookie_mode_browser": "Aus dem Browser",
+        "cookie_mode_file": "Aus Datei",
+        "cookie_file_button": "cookies.txt auswählen",
 
         # Fehlerklassifizierung
         "error_no_internet": "Keine Internetverbindung.\n\nBitte überprüfen Sie Ihre Verbindung und versuchen Sie es erneut.",
@@ -440,6 +468,13 @@ LANGUAGES = {
         "paste_label": "Incolla",
         "select_all_label": "Seleziona tutto",
 
+        # Supporto cookie
+        "cookie_section_label": "Supporto cookie",
+        "cookie_mode_none": "Disattivato",
+        "cookie_mode_browser": "Dal browser",
+        "cookie_mode_file": "Da file",
+        "cookie_file_button": "Scegli cookies.txt",
+
         # Classificazione degli errori
         "error_no_internet": "Nessuna connessione Internet.\n\nControlla la connessione e riprova.",
         "error_video_not_found": "Video non trovato.\n\nIl link potrebbe essere errato oppure il video potrebbe essere stato rimosso.",
@@ -534,6 +569,13 @@ LANGUAGES = {
         "copy_label": "Copier",
         "paste_label": "Coller",
         "select_all_label": "Tout sélectionner",
+
+        # Prise en charge des cookies
+        "cookie_section_label": "Prise en charge des cookies",
+        "cookie_mode_none": "Désactivé",
+        "cookie_mode_browser": "Depuis le navigateur",
+        "cookie_mode_file": "Depuis un fichier",
+        "cookie_file_button": "Choisir cookies.txt",
 
         # Classification des erreurs
         "error_no_internet": "Aucune connexion Internet.\n\nVérifiez votre connexion et réessayez.",
