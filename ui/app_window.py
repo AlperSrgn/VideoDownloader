@@ -31,7 +31,7 @@ from settings import load_setting, save_setting
 from ui.registry import UiRegistry
 from ui.theme import THEMES
 
-from cookie.cookie_options import COOKIE_BROWSERS
+from cookie import COOKIE_BROWSERS, get_cookie_browser
 
 _LIGHT = THEMES["light"]
 
@@ -502,7 +502,7 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
     cookie_extra_frame = ctk.CTkFrame(sidebar_content, width=0, height=0, fg_color="transparent")
     cookie_extra_frame.pack(fill="x")
 
-    saved_cookie_browser = load_setting("cookie_browser", "firefox")
+    saved_cookie_browser = get_cookie_browser()
     cookie_browser_var = ctk.StringVar(
         value=COOKIE_BROWSERS.get(saved_cookie_browser, COOKIE_BROWSERS["firefox"])
     )
@@ -570,7 +570,7 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
     )
     registry.add(cookie_file_button, text="cookie_file_button", icon=("folder.png", "#fbfbfb"))
 
-    # Name of the selected cookies.txt (filled in once the feature works).
+    # Name of the selected cookies.txt (set by App.update_cookie_widgets()).
     cookie_file_label = ctk.CTkLabel(
         cookie_extra_frame,
         text="",

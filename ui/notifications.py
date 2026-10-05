@@ -14,15 +14,26 @@ by DownloadController.bind_widgets(); this module only animates and
 shows/hides it, it doesn't decide *when* a toast appears.
 """
 
+import logging
+
 from plyer import notification
+
+logger = logging.getLogger(__name__)
 
 
 def notify(enabled: bool, title: str, message: str, icon: str, timeout: int = 3) -> None:
     """Shows a system notification, unless `enabled` is False — the
-    user's "system_notification" checkbox setting in main.py."""
+    user's "system_notification" checkbox setting in main.py.
+
+    A failure (e.g. plyer has no backend on this system) is logged and
+    swallowed: a notification must never stop the download queue from
+    moving on to the next item."""
     if not enabled:
         return
-    notification.notify(title=title, message=message, timeout=timeout, app_icon=icon)
+    try:
+        notification.notify(title=title, message=message, timeout=timeout, app_icon=icon)
+    except Exception as e:
+        logger.warning("System notification failed: %s", e)
 
 
 class ToastNotifier:

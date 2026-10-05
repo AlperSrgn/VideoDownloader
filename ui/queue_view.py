@@ -20,7 +20,9 @@ import customtkinter as ctk
 from PIL import Image
 
 from core.download_queue import DownloadQueue
+from settings import get_appdata_path
 from utils import format_duration
+from ytdlp import fetch_preview_info, get_ytdlp_path
 
 logger = logging.getLogger(__name__)
 
@@ -74,10 +76,7 @@ class QueueView:
         invalid/unsupported/unreachable — the item is simply left without
         a preview.
         """
-        def worker():
-            from settings import get_appdata_path
-            from downloading.ytdlp_manager import get_ytdlp_path, fetch_preview_info
-
+        def fetch():
             exe_path = get_ytdlp_path(get_appdata_path())
             if not os.path.exists(exe_path):
                 return  # yt-dlp isn't ready yet — leave the plain url line as-is
@@ -96,6 +95,14 @@ class QueueView:
                     logger.debug("Queue item thumbnail download failed: %s", e)
 
             after(0, lambda: on_done(item["id"], info, thumb_bytes))
+
+        def worker():
+            # Without this, an unexpected error would end the thread silently
+            # and the preview would just never show up.
+            try:
+                fetch()
+            except Exception:
+                logger.exception("Queue item preview failed: %s", item["url"])
 
         threading.Thread(target=worker, daemon=True).start()
 

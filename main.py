@@ -47,16 +47,22 @@ from utils import (
     load_button_icon,
 )
 
-from cookie.cookie_options import (
+from cookie import (
     COOKIE_MODES,
+    CookieExportError,
     build_cookie_mode_options,
+    cookie_file_exists,
     cookie_mode_label,
+    export_cookies_from_firefox,
+    get_cookie_file_label,
+    get_cookie_mode,
+    import_cookie_file,
+    remove_cookie_file,
     resolve_cookie_browser_key,
     resolve_cookie_mode_key,
+    set_cookie_browser,
+    set_cookie_mode,
 )
-import shutil
-from downloading.ytdlp_manager import cookie_file_path
-from cookie.firefox_cookies import export_firefox_cookies, CookieExportError
 
 # ---------------------------------------------------------------------------
 # Single instance
@@ -288,7 +294,7 @@ class App:
         def worker():
             try:
                 from settings import get_appdata_path
-                from downloading.ytdlp_manager import ensure_ytdlp, get_ytdlp_version
+                from ytdlp import ensure_ytdlp, get_ytdlp_version
                 # ensure_ytdlp downloads on first run; on later launches, it checks for
                 # updates at most once every 12 hours and once per session.
                 exe_path = ensure_ytdlp(get_appdata_path(), on_status=on_status)
@@ -423,7 +429,7 @@ class App:
         # so fall back to the saved setting.
         cookie_mode_key = (
             resolve_cookie_mode_key(ui.cookie_mode_var.get(), self.app_state.current_language)
-            or load_setting("cookie_mode", "none")
+            or get_cookie_mode()
         )
         if cookie_mode_key not in COOKIE_MODES:
             cookie_mode_key = "none"
@@ -540,7 +546,7 @@ class App:
         self.ui.ytdlp_retry_button.pack_forget()
         self.fetch_ytdlp_version(on_status=self.on_ytdlp_status)
 
-    # -- Cookie support (UI only for now) -------------------------------------
+    # -- Cookie support (dialogs only; the logic is in the cookie package) ----
     def update_cookie_widgets(self) -> None:
         """Shows the browser menu or the file widgets depending on the mode."""
         ui = self.ui
@@ -560,7 +566,7 @@ class App:
             ui.cookie_file_button.pack(anchor="w", pady=(8, 0), padx=10, fill="x")
             ui.cookie_file_label.pack(anchor="w", pady=(2, 0), padx=10, fill="x")
             ui.cookie_file_label.configure(
-                text=format_save_location_display(load_setting("cookie_file_name", "—"))
+                text=format_save_location_display(get_cookie_file_label())
             )
             ui.cookie_create_title_label.pack(anchor="w", pady=(10, 0), padx=10, fill="x")
             ui.cookie_buttons_row.pack(anchor="w", pady=(4, 0), padx=10, fill="x")
@@ -569,13 +575,13 @@ class App:
         mode = resolve_cookie_mode_key(selected, self.app_state.current_language)
         if mode is None:
             return
-        save_setting("cookie_mode", mode)
+        set_cookie_mode(mode)
         self.update_cookie_widgets()
 
     def change_cookie_browser(self, selected: str) -> None:
         browser = resolve_cookie_browser_key(selected)
         if browser:
-            save_setting("cookie_browser", browser)
+            set_cookie_browser(browser)
 
     def choose_cookie_file(self) -> None:
         path = filedialog.askopenfilename(
@@ -585,12 +591,10 @@ class App:
         if not path:
             return
         try:
-            # We’re using the copy, not the original: yt-dlp overwrites the file on output.
-            shutil.copy2(path, cookie_file_path())
+            import_cookie_file(path)
         except OSError as e:
             messagebox.showerror(self.app_state.current_language["error_title"], str(e))
             return
-        save_setting("cookie_file_name", os.path.basename(path))
         self.update_cookie_widgets()
 
 
@@ -599,9 +603,8 @@ class App:
         cookies.txt (the file yt-dlp reads in "file" mode), then tells the
         user where it is and offers to open the folder."""
         lang = self.app_state.current_language
-        path = cookie_file_path()
         try:
-            result = export_firefox_cookies(path)
+            result = export_cookies_from_firefox()
         except Exception as e:  # CookieExportError and anything unexpected
             if not isinstance(e, CookieExportError):
                 logger.exception("cookies.txt export failed")
@@ -611,8 +614,8 @@ class App:
             )
             return
 
-        save_setting("cookie_file_name", os.path.basename(path))
         self.update_cookie_widgets()
+        path = result.path
 
         if not result.logged_in:
             messagebox.showwarning(
@@ -635,9 +638,8 @@ class App:
         the user picked with "Choose cookies.txt" was copied here, so their
         original is never touched."""
         lang = self.app_state.current_language
-        path = cookie_file_path()
 
-        if not os.path.isfile(path):
+        if not cookie_file_exists():
             messagebox.showinfo(lang["cookie_section_label"], lang["cookie_delete_none_message"])
             return
 
@@ -645,7 +647,7 @@ class App:
             return
 
         try:
-            os.remove(path)
+            remove_cookie_file()
         except OSError as e:
             messagebox.showerror(
                 lang["error_title"],
@@ -653,7 +655,6 @@ class App:
             )
             return
 
-        save_setting("cookie_file_name", "—")
         self.update_cookie_widgets()
 
 

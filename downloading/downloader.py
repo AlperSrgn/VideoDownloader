@@ -26,7 +26,8 @@ from utils import (
     find_glob_file,
 )
 from core.quality_options import RESOLUTION_MAP
-from downloading.ytdlp_manager import (
+from ytdlp import (
+    access_args,
     ensure_ytdlp,
     find_info_with_access_fallback,
     find_progressive_audio_format,
@@ -34,7 +35,6 @@ from downloading.ytdlp_manager import (
     find_suitable_audio_format,
     find_suitable_format,
     youtube_extractor_args,
-    access_args,
 )
 from downloading.error_classifier import (
     DenoNotFoundError,
