@@ -7,10 +7,11 @@ __pycache__/
 *.pyc
 .venv/
 
-# Uygulamaya özel kullanıcı verisi
+# Application-specific user data
 config.json
+cookies.txt
 
-# PyInstaller build çıktıları
+# PyInstaller build outputs
 build/
 dist/
 *.spec
