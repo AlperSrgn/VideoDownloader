@@ -162,9 +162,9 @@ def _match_error_key(text: str):
 
 
 # Errors that justify the "restricted" retry: cookies + Deno are only brought
-# in when yt-dlp reports one of these. Add keys here (e.g. "error_video_private")
-# if more cases should escalate.
-_COOKIE_ESCALATION_KEYS = ("error_age_restricted", "error_members_only")
+# in when yt-dlp reports one of these (videos that need a signed-in account).
+# Add keys here if more cases should escalate.
+_COOKIE_ESCALATION_KEYS = ("error_age_restricted", "error_members_only", "error_video_private")
 
 
 def is_access_restricted_error(errors) -> bool:
