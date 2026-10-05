@@ -28,16 +28,16 @@ from utils import (
 from core.quality_options import RESOLUTION_MAP
 from downloading.ytdlp_manager import (
     ensure_ytdlp,
-    find_info_with_compatible_format,
+    find_info_with_access_fallback,
     find_progressive_audio_format,
     find_progressive_format,
     find_suitable_audio_format,
     find_suitable_format,
     youtube_extractor_args,
-    cookie_args,
-    js_runtime_args,
+    access_args,
 )
 from downloading.error_classifier import (
+    DenoNotFoundError,
     DownloadCancelled,
     DownloadStalled,
     YtDlpProcessError,
@@ -458,7 +458,8 @@ def _run_ffmpeg_merge(cmd, total_duration, on_merge_progress, on_cancel_check, c
 # exception -> callback mapping for those phases live here.
 
 def _build_ytdlp_download_cmd(exe_path: str, format_id: str, client: str | None,
-                                output_template: str, url: str) -> list:
+                                output_template: str, url: str,
+                                restricted: bool = False) -> list:
     """Builds a yt-dlp download command for one phase (a video track, an
     audio track, or an audio-only download) — only the format id and
     output template differ between call sites, so this is the one place
@@ -469,12 +470,14 @@ def _build_ytdlp_download_cmd(exe_path: str, format_id: str, client: str | None,
     relies on it resuming the partial file via an HTTP Range request
     instead of starting over, and this guards against a local yt-dlp
     config overriding that default.
+
+    restricted=True (age-restricted / members-only video) adds cookies + Deno;
+    normal videos get neither (see access_args).
     """
     return [
         exe_path,
         "-f", format_id,
-        *cookie_args(),
-        *js_runtime_args(),
+        *access_args(restricted),
         *youtube_extractor_args(client),
         "--newline", "--no-warnings",
         "--continue",
@@ -557,6 +560,39 @@ def _run_ffmpeg_merge_phase(cmd, duration, progress_fn, on_cancel_check, on_paus
     return False
 
 
+def _extract_with_access_fallback(exe_path, url, selector, fallback_selector,
+                                  lang: dict, on_error):
+    """Info extraction shared by download_video / download_audio.
+
+    Normal videos are extracted without cookies and without Deno. Only an
+    age-restricted / members-only video (with cookies configured) is retried
+    with cookies + Deno -- see find_info_with_access_fallback.
+
+    Returns (info, client, result, restricted), or None after reporting the
+    failure through on_error; the caller should just `return` in that case.
+    """
+    extraction_errors = []
+    try:
+        info, client, result, restricted = find_info_with_access_fallback(
+            exe_path, url, selector, collected_errors=extraction_errors,
+            fallback_selector=fallback_selector,
+        )
+    except DenoNotFoundError:
+        on_error(lang.get(
+            "error_deno_required",
+            "This video is age-restricted or members-only, which requires Deno. "
+            "Please install Deno (e.g. run: winget install DenoLand.Deno) and try again.",
+        ))
+        return None
+
+    if not info:
+        on_error(classify_extraction_failure(
+            extraction_errors, lang, fallback_key="download_video_format_error"
+        ))
+        return None
+    return info, client, result, restricted
+
+
 # ---------------------------------------------------------------------------
 # Video download (with merge)
 # ---------------------------------------------------------------------------
@@ -628,17 +664,14 @@ def download_video(
         def selector(formats):
             return find_suitable_format(formats, video_height)
 
-        extraction_errors = []
-        info, client, result = find_info_with_compatible_format(
-            exe_path, url, selector, collected_errors=extraction_errors,
-            fallback_selector=lambda formats: find_progressive_format(formats, video_height),
+        found = _extract_with_access_fallback(
+            exe_path, url, selector,
+            lambda formats: find_progressive_format(formats, video_height),
+            lang, on_error,
         )
-
-        if not info:
-            on_error(classify_extraction_failure(
-                extraction_errors, lang, fallback_key="download_video_format_error"
-            ))
+        if found is None:
             return
+        info, client, result, restricted = found
 
         video_format, audio_format = result
 
@@ -662,7 +695,8 @@ def download_video(
                 ).replace("{height}", str(height)))
 
             cmd = _build_ytdlp_download_cmd(
-                exe_path, video_format["format_id"], client, f"{temp_base}_video", url
+                exe_path, video_format["format_id"], client, f"{temp_base}_video", url,
+                restricted=restricted,
             )
             if not _run_ytdlp_download_phase(
                 cmd, on_progress, on_cancel_check, on_pause_check, on_error, lang,
@@ -701,10 +735,12 @@ def download_video(
         )
 
         video_cmd = _build_ytdlp_download_cmd(
-            exe_path, video_format["format_id"], client, f"{temp_base}_video", url
+            exe_path, video_format["format_id"], client, f"{temp_base}_video", url,
+            restricted=restricted,
         )
         audio_cmd = _build_ytdlp_download_cmd(
-            exe_path, audio_format["format_id"], client, f"{temp_base}_audio", url
+            exe_path, audio_format["format_id"], client, f"{temp_base}_audio", url,
+            restricted=restricted,
         )
 
         # Scales each phase's progress by *_PHASE_WEIGHT for the overall bar.
@@ -829,17 +865,12 @@ def download_audio(
         def selector(formats):
             return find_suitable_audio_format(formats)
 
-        extraction_errors = []
-        info, client, result = find_info_with_compatible_format(
-            exe_path, url, selector, collected_errors=extraction_errors,
-            fallback_selector=find_progressive_audio_format,
+        found = _extract_with_access_fallback(
+            exe_path, url, selector, find_progressive_audio_format, lang, on_error,
         )
-
-        if not info:
-            on_error(classify_extraction_failure(
-                extraction_errors, lang, fallback_key="download_video_format_error"
-            ))
+        if found is None:
             return
+        info, client, result, restricted = found
 
         (chosen_audio,) = result
         if chosen_audio.get("vcodec") not in (None, "none"):
@@ -866,7 +897,10 @@ def download_audio(
         # Download the raw audio track only — no -x/--audio-format here.
         # The mp3 conversion is done ourselves below so its progress can be
         # reported instead of running invisibly inside yt-dlp.
-        cmd = _build_ytdlp_download_cmd(exe_path, chosen_audio["format_id"], client, output_template, url)
+        cmd = _build_ytdlp_download_cmd(
+            exe_path, chosen_audio["format_id"], client, output_template, url,
+            restricted=restricted,
+        )
 
         def _download_phase_progress(percent, downloaded_mb, total_mb, eta):
             on_progress(AUDIO_DOWNLOAD_WEIGHT * (percent / 100), downloaded_mb, total_mb, eta)

@@ -33,6 +33,13 @@ class DownloadStalled(Exception):
     pass
 
 
+class DenoNotFoundError(Exception):
+    """An age-restricted / members-only video needs cookies + Deno, but Deno
+    could not be found on this machine. Deno is only required for those
+    videos; normal videos never need it."""
+    pass
+
+
 class YtDlpProcessError(Exception):
     """yt-dlp.exe exited with a non-zero code. Carries the raw captured
     output (stdout+stderr merged) so the caller can classify *why* it
@@ -152,6 +159,21 @@ def _match_error_key(text: str):
     if "permission denied" in text:
         return "error_permission"
     return None
+
+
+# Errors that justify the "restricted" retry: cookies + Deno are only brought
+# in when yt-dlp reports one of these. Add keys here (e.g. "error_video_private")
+# if more cases should escalate.
+_COOKIE_ESCALATION_KEYS = ("error_age_restricted", "error_members_only")
+
+
+def is_access_restricted_error(errors) -> bool:
+    """True if yt-dlp's error text(s) say the video is age-restricted or
+    members-only, i.e. a retry with cookies (+ Deno) may succeed."""
+    if isinstance(errors, str):
+        errors = [errors]
+    combined = "\n".join(e for e in (errors or []) if e).lower()
+    return _match_error_key(combined) in _COOKIE_ESCALATION_KEYS
 
 
 # yt-dlp prefixes errors with the extractor name and content ID.

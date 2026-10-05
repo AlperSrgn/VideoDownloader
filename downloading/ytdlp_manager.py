@@ -19,10 +19,12 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 import time
 import urllib.request
 
 from cookie.cookie_options import COOKIE_BROWSERS
+from downloading.error_classifier import DenoNotFoundError, is_access_restricted_error
 from settings import load_setting, save_setting, get_appdata_path
 
 logger = logging.getLogger(__name__)
@@ -85,13 +87,12 @@ def cookie_args() -> list:
             args = ["--cookies", path]
         else:
             logger.warning("cookie_mode=file but %s does not exist; no cookies sent", path)
-    logger.debug("cookie_args: mode=%s -> %s", mode, args)
     return args
 
-def js_runtime_args() -> list:
-    """Passes Deno explicitly so yt-dlp does not depend on the PATH of this
-    process (an IDE / app launched before Deno was installed has a stale PATH).
-    Without a JS runtime YouTube formats come back without URLs."""
+def find_deno():
+    """Path to deno.exe, or None. Looks at PATH first, then at the usual install
+    locations so a stale PATH (app launched before Deno was installed) does not
+    matter."""
     deno = shutil.which("deno")
     if not deno:
         candidates = (
@@ -99,11 +100,62 @@ def js_runtime_args() -> list:
             os.path.join(os.environ.get("LOCALAPPDATA", ""), "Microsoft", "WinGet", "Links", "deno.exe"),
         )
         deno = next((p for p in candidates if os.path.isfile(p)), None)
+    return deno
+
+
+def js_runtime_args() -> list:
+    """Passes Deno explicitly so yt-dlp does not depend on the PATH of this
+    process. Only used for the "restricted" pass (see access_args)."""
+    deno = find_deno()
     if not deno:
-        logger.warning("Deno not found; YouTube formats may come back without URLs")
+        logger.warning("Deno not found; age-restricted / members-only videos need it")
         return []
-    logger.debug("js_runtime_args: deno=%s", deno)
     return ["--js-runtimes", f"deno:{deno}"]
+
+
+def access_args(restricted: bool) -> list:
+    """Extra yt-dlp arguments for videos that need a signed-in session.
+
+    restricted=False (normal videos): [] -> no cookies, no Deno.
+    restricted=True (age-restricted / members-only): cookies + Deno.
+    """
+    if not restricted:
+        return []
+    cookies, runtime = cookie_args(), js_runtime_args()
+    logger.debug("restricted pass: cookies=%s js_runtime=%s", cookies, runtime)
+    return [*cookies, *runtime]
+
+
+# Videos already found to be age-restricted / members-only in this session.
+# The preview, the info extraction and a later retry for the same video go
+# straight to the cookies + Deno pass instead of failing the normal one first
+# (~3 s each). In-memory only: nothing is persisted.
+_restricted_videos: set = set()
+_restricted_lock = threading.Lock()
+_VIDEO_ID_RE = re.compile(r"(?:[?&]v=|youtu\.be/|/shorts/|/embed/|/live/)([\w-]{11})")
+
+
+def _video_key(url: str) -> str:
+    m = _VIDEO_ID_RE.search(url or "")
+    return f"yt:{m.group(1)}" if m else (url or "").strip()
+
+
+def _mark_restricted(url: str) -> None:
+    with _restricted_lock:
+        _restricted_videos.add(_video_key(url))
+
+
+def _forget_restricted(url: str) -> None:
+    with _restricted_lock:
+        _restricted_videos.discard(_video_key(url))
+
+
+def _is_known_restricted(url: str) -> bool:
+    """True if this video was already seen as restricted AND the restricted
+    pass is usable right now (cookies configured, Deno installed)."""
+    with _restricted_lock:
+        known = _video_key(url) in _restricted_videos
+    return known and bool(cookie_args()) and find_deno() is not None
 
 
 def youtube_extractor_args(client, extra=None) -> list:
@@ -212,6 +264,13 @@ def _cookie_summary() -> str:
     )
 
 
+def _cookie_summary_for(cmd: list) -> str:
+    """Cookie summary for the log, but only if this command really sent cookies."""
+    if "--cookies" in cmd or "--cookies-from-browser" in cmd:
+        return _cookie_summary()
+    return "not sent (normal pass)"
+
+
 def _run_info_cmd(cmd: list, timeout: int, label: str) -> str:
     """Runs a yt-dlp info command and returns its stdout.
     Raises YtDlpError on failure/timeout, after logging full diagnostics."""
@@ -225,7 +284,7 @@ def _run_info_cmd(cmd: list, timeout: int, label: str) -> str:
     except subprocess.TimeoutExpired as e:
         logger.warning(
             "[%s] yt-dlp timed out after %ss\n  command: %s\n  cookies: %s\n  partial output:\n%s",
-            label, timeout, subprocess.list2cmdline(cmd), _cookie_summary(),
+            label, timeout, subprocess.list2cmdline(cmd), _cookie_summary_for(cmd),
             _indent(_to_text(e.stderr).strip()),
         )
         raise YtDlpError(f"yt-dlp timed out after {timeout}s") from e
@@ -241,7 +300,7 @@ def _run_info_cmd(cmd: list, timeout: int, label: str) -> str:
         logger.warning(
             "[%s] yt-dlp failed (exit=%s, %.1fs)\n  command: %s\n  cookies: %s\n  yt-dlp output:\n%s",
             label, result.returncode, elapsed, subprocess.list2cmdline(cmd),
-            _cookie_summary(), _indent(stderr.strip()),
+            _cookie_summary_for(cmd), _indent(stderr.strip()),
         )
         raise YtDlpError(_strip_debug_lines(stderr) or "yt-dlp returned no data")
 
@@ -472,7 +531,7 @@ def get_ytdlp_version(exe_path: str) -> str:
         return "unknown"
 
 
-def extract_info(exe_path: str, url: str, client: str) -> dict:
+def extract_info(exe_path: str, url: str, client: str, restricted: bool = False) -> dict:
     """
     Run `yt-dlp --dump-json` for a given player client and return the parsed
     info dict (same shape as yt_dlp's Python `extract_info`, including the
@@ -484,12 +543,12 @@ def extract_info(exe_path: str, url: str, client: str) -> dict:
         exe_path,
         "--dump-json",
         "-v",
-        *cookie_args(),
-        *js_runtime_args(),
+        *access_args(restricted),
         *youtube_extractor_args(client),
         url,
     ]
-    stdout = _run_info_cmd(cmd, timeout=60, label=f"info/{client or 'default'}")
+    suffix = "/restricted" if restricted else ""
+    stdout = _run_info_cmd(cmd, timeout=60, label=f"info/{client or 'default'}{suffix}")
 
     try:
         # --dump-json prints one JSON object per line; take the first.
@@ -498,7 +557,7 @@ def extract_info(exe_path: str, url: str, client: str) -> dict:
         raise YtDlpError(f"Could not parse yt-dlp output: {e}")
 
 
-def _extract_preview_info(exe_path: str, url: str, client: str) -> dict:
+def _extract_preview_info(exe_path: str, url: str, client: str, restricted: bool = False) -> dict:
     """
     Like extract_info(), but tells yt-dlp to skip resolving the HLS/DASH
     adaptive-stream manifests (skip=hls,dash) — each of those requires its
@@ -512,12 +571,12 @@ def _extract_preview_info(exe_path: str, url: str, client: str) -> dict:
         exe_path,
         "--dump-json",
         "-v",
-        *cookie_args(),
-        *js_runtime_args(),
+        *access_args(restricted),
         *youtube_extractor_args(client, extra="skip=hls,dash"),
         url,
     ]
-    stdout = _run_info_cmd(cmd, timeout=30, label=f"preview/{client or 'default'}")
+    suffix = "/restricted" if restricted else ""
+    stdout = _run_info_cmd(cmd, timeout=30, label=f"preview/{client or 'default'}{suffix}")
 
     try:
         return json.loads(stdout.splitlines()[0])
@@ -539,12 +598,32 @@ def fetch_preview_info(exe_path: str, url: str) -> dict | None:
     silently in that case rather than showing an error, since this is a
     supplementary nicety, not a core flow.
     """
+    if _is_known_restricted(url):
+        for client in CLIENT_LIST:
+            try:
+                return _extract_preview_info(exe_path, url, client, restricted=True)
+            except YtDlpError as e:
+                logger.debug("Preview (restricted): client=%s failed: %s", client or "default", e)
+        _forget_restricted(url)  # no longer works (cookies expired?): start over normally
+
+    errors = []
     for client in CLIENT_LIST:
         try:
             return _extract_preview_info(exe_path, url, client)
         except YtDlpError as e:
             logger.debug("Preview: client=%s failed: %s", client or "default", e)
-            continue
+            errors.append(str(e))
+
+    # Age-restricted / members-only: retry once with cookies + Deno, but only
+    # if both are set up. Otherwise the preview is simply hidden as before.
+    if is_access_restricted_error(errors) and cookie_args() and find_deno():
+        for client in CLIENT_LIST:
+            try:
+                info = _extract_preview_info(exe_path, url, client, restricted=True)
+                _mark_restricted(url)
+                return info
+            except YtDlpError as e:
+                logger.debug("Preview (restricted): client=%s failed: %s", client or "default", e)
     return None
 
 
@@ -701,7 +780,8 @@ def find_progressive_audio_format(formats: list):
 
 
 def find_info_with_compatible_format(exe_path: str, url: str, format_selector,
-                                     collected_errors=None, fallback_selector=None):
+                                     collected_errors=None, fallback_selector=None,
+                                     restricted: bool = False):
     """
     Tries each client in CLIENT_LIST until format_selector(formats) succeeds,
     i.e. returns a non-empty tuple with no None in it (as
@@ -719,7 +799,7 @@ def find_info_with_compatible_format(exe_path: str, url: str, format_selector,
     for client in CLIENT_LIST:
         logger.debug("Trying client=%s", client or "default")
         try:
-            info = extract_info(exe_path, url, client)
+            info = extract_info(exe_path, url, client, restricted)
         except YtDlpError as e:
             logger.debug("Client %s failed to extract info: %s", client or "default", e)
             if collected_errors is not None:
@@ -751,3 +831,53 @@ def find_info_with_compatible_format(exe_path: str, url: str, format_selector,
         return fallback
 
     return None, None, None
+
+
+def find_info_with_access_fallback(exe_path: str, url: str, format_selector,
+                                   collected_errors=None, fallback_selector=None):
+    """Two-pass extraction.
+
+    Pass 1 is the normal one: no cookies, no Deno. Only when yt-dlp reports an
+    age-restricted / members-only video AND cookies are configured is the
+    extraction repeated with cookies + Deno (the "restricted" pass).
+
+    Returns (info, client, result, restricted); `restricted` tells the caller
+    to build its download commands with access_args(True) too. On failure
+    info is None. Raises DenoNotFoundError if the restricted pass is needed
+    but Deno is not installed.
+    """
+    if _is_known_restricted(url):
+        info, client, result = find_info_with_compatible_format(
+            exe_path, url, format_selector,
+            collected_errors=collected_errors, fallback_selector=fallback_selector,
+            restricted=True,
+        )
+        if info:
+            return info, client, result, True
+        _forget_restricted(url)  # stale: fall through to a normal pass
+        if collected_errors is not None:
+            collected_errors.clear()
+
+    first_errors = []
+    info, client, result = find_info_with_compatible_format(
+        exe_path, url, format_selector,
+        collected_errors=first_errors, fallback_selector=fallback_selector,
+    )
+    if info or not is_access_restricted_error(first_errors) or not cookie_args():
+        # Success, an unrelated failure, or cookies are turned off: nothing to escalate.
+        if collected_errors is not None:
+            collected_errors.extend(first_errors)
+        return info, client, result, False
+
+    if not find_deno():
+        raise DenoNotFoundError("Deno is required for age-restricted / members-only videos")
+
+    logger.info("Restricted video detected; retrying with cookies + Deno")
+    info, client, result = find_info_with_compatible_format(
+        exe_path, url, format_selector,
+        collected_errors=collected_errors, fallback_selector=fallback_selector,
+        restricted=True,
+    )
+    if info:
+        _mark_restricted(url)
+    return info, client, result, True
