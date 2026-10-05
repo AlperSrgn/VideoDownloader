@@ -102,6 +102,14 @@ _OTHER_NETWORK_ERROR_PATTERNS = (
     "urlopen error", "connection timed out",
 )
 
+# yt-dlp's message for channel-membership videos, e.g. "Join this channel to
+# get access to members-only content like this video, and other exclusive
+# perks." or "This video is available to this channel's members on level: ...".
+_MEMBERS_ONLY_PATTERNS = (
+    "members-only", "members only", "join this channel",
+    "available to this channel's members",
+)
+
 
 def _match_error_key(text: str):
     """Return the lang-dict key that best describes this raw yt-dlp/ffmpeg
@@ -123,6 +131,10 @@ def _match_error_key(text: str):
         return "error_cookies_unreadable"
     if "sign in to confirm your age" in text or "age-restricted" in text:
         return "error_age_restricted"
+    # Channel-members-only videos. Checked before the generic 429 / "not found"
+    # patterns below so a members-only error is never mistaken for them.
+    if any(p in text for p in _MEMBERS_ONLY_PATTERNS):
+        return "error_members_only"
     if ("sign in to confirm you're not a bot" in text or "429" in text
             or "too many requests" in text):
         return "error_access_blocked"
