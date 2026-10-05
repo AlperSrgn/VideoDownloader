@@ -118,6 +118,9 @@ def _match_error_key(text: str):
         return "error_no_internet"
     if any(p in text for p in _OTHER_NETWORK_ERROR_PATTERNS):
         return "error_no_internet"
+    if ("could not copy" in text and "cookie" in text) or "failed to decrypt" in text \
+            or "dpapi" in text or "cookie database" in text:
+        return "error_cookies_unreadable"
     if "sign in to confirm your age" in text or "age-restricted" in text:
         return "error_age_restricted"
     if ("sign in to confirm you're not a bot" in text or "429" in text

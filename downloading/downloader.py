@@ -29,9 +29,13 @@ from core.quality_options import RESOLUTION_MAP
 from downloading.ytdlp_manager import (
     ensure_ytdlp,
     find_info_with_compatible_format,
+    find_progressive_audio_format,
+    find_progressive_format,
     find_suitable_audio_format,
     find_suitable_format,
     youtube_extractor_args,
+    cookie_args,
+    js_runtime_args,
 )
 from downloading.error_classifier import (
     DownloadCancelled,
@@ -469,6 +473,8 @@ def _build_ytdlp_download_cmd(exe_path: str, format_id: str, client: str | None,
     return [
         exe_path,
         "-f", format_id,
+        *cookie_args(),
+        *js_runtime_args(),
         *youtube_extractor_args(client),
         "--newline", "--no-warnings",
         "--continue",
@@ -567,9 +573,14 @@ def download_video(
     on_merge_progress=None,
     on_pause_check=None,
     on_cancelled=None,
+    on_notice=None,
 ) -> None:
     """
     Downloads video and audio separately, then merges them with ffmpeg.
+    If YouTube offers no separate streams (SABR) but does offer a lower-
+    quality single-file format, that one is downloaded as-is (no merge) and
+    on_notice(message) -- if supplied -- is called from the worker thread so
+    the UI can tell the user the quality was reduced (marshal to the UI thread).
     Runs in a background thread. Calls on_done() on success, on_error(msg)
     on failure, or on_cancelled() if the user cancelled (falls back to
     on_error(msg) when on_cancelled isn't supplied).
@@ -619,7 +630,8 @@ def download_video(
 
         extraction_errors = []
         info, client, result = find_info_with_compatible_format(
-            exe_path, url, selector, collected_errors=extraction_errors
+            exe_path, url, selector, collected_errors=extraction_errors,
+            fallback_selector=lambda formats: find_progressive_format(formats, video_height),
         )
 
         if not info:
@@ -630,6 +642,56 @@ def download_video(
 
         video_format, audio_format = result
 
+        title = info.get("title", "video")
+        safe_title = sanitize_filename(title)
+        temp_base = os.path.join(save_location, f"{TEMP_PREFIX}{temp_id}")
+
+        if audio_format is None:
+            # Progressive fallback: one file that already has video + audio.
+            height = video_format.get("height")
+            logger.warning(
+                "Progressive fallback: client=%s format=%s (%sp, vcodec=%s, acodec=%s)",
+                client or "default", video_format.get("format_id"), height,
+                video_format.get("vcodec"), video_format.get("acodec"),
+            )
+            if on_notice:
+                on_notice(lang.get(
+                    "notice_progressive_fallback",
+                    "Only a lower-resolution ({height}p) combined stream was available "
+                    "for this video, so it will be downloaded at that quality.",
+                ).replace("{height}", str(height)))
+
+            cmd = _build_ytdlp_download_cmd(
+                exe_path, video_format["format_id"], client, f"{temp_base}_video", url
+            )
+            if not _run_ytdlp_download_phase(
+                cmd, on_progress, on_cancel_check, on_pause_check, on_error, lang,
+                known_total_mb=_known_size_mb(video_format), on_cancelled=on_cancelled,
+            ):
+                return
+
+            try:
+                downloaded_path = find_glob_file(f"{temp_base}_video.*")
+            except FileNotFoundError as e:
+                on_error(str(e))
+                return
+
+            # Keep yt-dlp's real extension: the progressive file is already a
+            # finished container, so renaming it to .mp4 could mislabel e.g. webm.
+            extension = os.path.splitext(downloaded_path)[1] or ".mp4"
+            output_filename = unique_filename(save_location, f"{safe_title}{extension}")
+            output_path = os.path.join(save_location, output_filename)
+            try:
+                os.replace(downloaded_path, output_path)
+            except OSError as e:
+                on_error(classify_generic_exception(e, lang))
+                return
+
+            update_file_timestamp(output_path)
+            logger.debug("Download completed (progressive): %s", output_path)
+            on_done()
+            return
+
         logger.info(
             "Selected client=%s video_format=%s (vcodec=%s, tbr=%s) "
             "audio_format=%s (acodec=%s, abr=%s)",
@@ -637,11 +699,6 @@ def download_video(
             video_format.get("format_id"), video_format.get("vcodec"), video_format.get("tbr"),
             audio_format.get("format_id"), audio_format.get("acodec"), audio_format.get("abr"),
         )
-
-        title = info.get("title", "video")
-        safe_title = sanitize_filename(title)
-
-        temp_base = os.path.join(save_location, f"{TEMP_PREFIX}{temp_id}")
 
         video_cmd = _build_ytdlp_download_cmd(
             exe_path, video_format["format_id"], client, f"{temp_base}_video", url
@@ -774,7 +831,8 @@ def download_audio(
 
         extraction_errors = []
         info, client, result = find_info_with_compatible_format(
-            exe_path, url, selector, collected_errors=extraction_errors
+            exe_path, url, selector, collected_errors=extraction_errors,
+            fallback_selector=find_progressive_audio_format,
         )
 
         if not info:
@@ -784,6 +842,13 @@ def download_audio(
             return
 
         (chosen_audio,) = result
+        if chosen_audio.get("vcodec") not in (None, "none"):
+            # No audio-only stream: the audio is extracted from a progressive
+            # file by the existing ffmpeg step (-vn), so nothing else changes.
+            logger.warning(
+                "No audio-only stream; extracting audio from progressive format %s",
+                chosen_audio.get("format_id"),
+            )
 
         logger.info(
             "Selected client=%s audio_format=%s (acodec=%s, abr=%s, language=%s)",

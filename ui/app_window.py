@@ -31,7 +31,7 @@ from settings import load_setting, save_setting
 from ui.registry import UiRegistry
 from ui.theme import THEMES
 
-from core.cookie_options import COOKIE_BROWSERS
+from cookie.cookie_options import COOKIE_BROWSERS
 
 _LIGHT = THEMES["light"]
 
@@ -517,6 +517,47 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
         button_color="#004566",
         text_color="#ebebeb",
     )
+
+    # Create + Delete sit side by side in one row (shown only in "file" mode).
+    cookie_buttons_row = ctk.CTkFrame(cookie_extra_frame, fg_color="transparent")
+    cookie_buttons_row.grid_columnconfigure((0, 1), weight=1, uniform="cookie_btn")
+
+    cookie_create_button = ctk.CTkButton(
+        cookie_buttons_row,
+        command=callbacks.create_cookie_file,
+        font=("Helvetica", 13),
+        fg_color="#4c6a8c",
+        hover_color="#3b556f",
+        text_color="#fbfbfb",
+        height=30,
+        width=100,
+    )
+    cookie_create_button.grid(row=0, column=0, sticky="ew", padx=(0, 3))
+    registry.add(cookie_create_button, text="cookie_create_button")
+
+    cookie_delete_button = ctk.CTkButton(
+        cookie_buttons_row,
+        command=callbacks.delete_cookie_file,
+        font=("Helvetica", 13),
+        fg_color="#cc3b3b",       # not part of the light/dark theme, stays fixed
+        hover_color="#ff4c4c",
+        text_color="#fbfbfb",
+        height=30,
+        width=100,
+    )
+    cookie_delete_button.grid(row=0, column=1, sticky="ew", padx=(3, 0))
+    registry.add(cookie_delete_button, text="cookie_delete_button")
+
+    # Small heading above the Create/Delete row; says the Create button is
+    # Firefox-specific. Shown/hidden by App.update_cookie_widgets().
+    cookie_create_title_label = ctk.CTkLabel(
+        cookie_extra_frame,
+        text="",
+        font=("Helvetica", 12, "bold"),
+        text_color="black",
+        anchor="w",
+    )
+    registry.add(cookie_create_title_label, text="cookie_create_title")
 
     cookie_file_button = ctk.CTkButton(
         cookie_extra_frame,

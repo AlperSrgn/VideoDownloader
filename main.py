@@ -47,14 +47,16 @@ from utils import (
     load_button_icon,
 )
 
-from core.cookie_options import (
+from cookie.cookie_options import (
     COOKIE_MODES,
     build_cookie_mode_options,
     cookie_mode_label,
     resolve_cookie_browser_key,
     resolve_cookie_mode_key,
 )
-
+import shutil
+from downloading.ytdlp_manager import cookie_file_path
+from cookie.firefox_cookies import export_firefox_cookies, CookieExportError
 
 # ---------------------------------------------------------------------------
 # Single instance
@@ -165,6 +167,8 @@ class App:
                 change_cookie_mode=self.change_cookie_mode,
                 change_cookie_browser=self.change_cookie_browser,
                 choose_cookie_file=self.choose_cookie_file,
+                create_cookie_file=self.create_cookie_file,
+                delete_cookie_file=self.delete_cookie_file,
             ),
             app_version=APP_VERSION,
             app_icon=self.app_icon,
@@ -538,7 +542,7 @@ class App:
 
     # -- Cookie support (UI only for now) -------------------------------------
     def update_cookie_widgets(self) -> None:
-        """Shows the browser menu or the file button depending on the mode."""
+        """Shows the browser menu or the file widgets depending on the mode."""
         ui = self.ui
         mode = resolve_cookie_mode_key(
             ui.cookie_mode_var.get(), self.app_state.current_language
@@ -547,12 +551,19 @@ class App:
         ui.cookie_browser_menu.pack_forget()
         ui.cookie_file_button.pack_forget()
         ui.cookie_file_label.pack_forget()
+        ui.cookie_create_title_label.pack_forget()
+        ui.cookie_buttons_row.pack_forget()
 
         if mode == "browser":
             ui.cookie_browser_menu.pack(anchor="w", pady=(8, 0), padx=10, fill="x")
         elif mode == "file":
             ui.cookie_file_button.pack(anchor="w", pady=(8, 0), padx=10, fill="x")
             ui.cookie_file_label.pack(anchor="w", pady=(2, 0), padx=10, fill="x")
+            ui.cookie_file_label.configure(
+                text=format_save_location_display(load_setting("cookie_file_name", "—"))
+            )
+            ui.cookie_create_title_label.pack(anchor="w", pady=(10, 0), padx=10, fill="x")
+            ui.cookie_buttons_row.pack(anchor="w", pady=(4, 0), padx=10, fill="x")
 
     def change_cookie_mode(self, selected: str) -> None:
         mode = resolve_cookie_mode_key(selected, self.app_state.current_language)
@@ -567,9 +578,95 @@ class App:
             save_setting("cookie_browser", browser)
 
     def choose_cookie_file(self) -> None:
-        # TODO: pick a cookies.txt, copy it to AppData and show its name in
-        # ui.cookie_file_label (next step).
-        pass
+        path = filedialog.askopenfilename(
+            title=self.app_state.current_language["cookie_file_button"],
+            filetypes=[("cookies.txt", "*.txt"), ("*", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            # We’re using the copy, not the original: yt-dlp overwrites the file on output.
+            shutil.copy2(path, cookie_file_path())
+        except OSError as e:
+            messagebox.showerror(self.app_state.current_language["error_title"], str(e))
+            return
+        save_setting("cookie_file_name", os.path.basename(path))
+        self.update_cookie_widgets()
+
+
+    def create_cookie_file(self) -> None:
+        """Exports the YouTube/Google cookies from Firefox into the app's own
+        cookies.txt (the file yt-dlp reads in "file" mode), then tells the
+        user where it is and offers to open the folder."""
+        lang = self.app_state.current_language
+        path = cookie_file_path()
+        try:
+            result = export_firefox_cookies(path)
+        except Exception as e:  # CookieExportError and anything unexpected
+            if not isinstance(e, CookieExportError):
+                logger.exception("cookies.txt export failed")
+            messagebox.showerror(
+                lang["error_title"],
+                lang["cookie_export_failed_message"].replace("{error}", str(e)),
+            )
+            return
+
+        save_setting("cookie_file_name", os.path.basename(path))
+        self.update_cookie_widgets()
+
+        if not result.logged_in:
+            messagebox.showwarning(
+                lang["warning_title"],
+                lang["cookie_not_logged_in_message"].replace("{path}", path),
+            )
+            return
+
+        message = (
+            lang["cookie_created_message"]
+            .replace("{count}", str(result.count))
+            .replace("{path}", path)
+        )
+        if messagebox.askyesno(lang["cookie_section_label"], message):
+            self.reveal_in_folder(path)
+
+
+    def delete_cookie_file(self) -> None:
+        """Deletes the app's own cookies.txt copy after confirmation. A file
+        the user picked with "Choose cookies.txt" was copied here, so their
+        original is never touched."""
+        lang = self.app_state.current_language
+        path = cookie_file_path()
+
+        if not os.path.isfile(path):
+            messagebox.showinfo(lang["cookie_section_label"], lang["cookie_delete_none_message"])
+            return
+
+        if not messagebox.askyesno(lang["cookie_section_label"], lang["cookie_delete_confirm_message"]):
+            return
+
+        try:
+            os.remove(path)
+        except OSError as e:
+            messagebox.showerror(
+                lang["error_title"],
+                lang["cookie_delete_failed_message"].replace("{error}", str(e)),
+            )
+            return
+
+        save_setting("cookie_file_name", "—")
+        self.update_cookie_widgets()
+
+
+    @staticmethod
+    def reveal_in_folder(path: str) -> None:
+        """Opens Explorer with the file selected (falls back to just the folder)."""
+        try:
+            if os.name == "nt":
+                subprocess.Popen(["explorer", "/select,", os.path.normpath(path)])
+            else:
+                webbrowser.open(os.path.dirname(path))
+        except OSError:
+            logger.warning("Could not open folder for %s", path, exc_info=True)
 
     # -- Button icons --------------------------------------------------------
     def make_icon(self, filename: str, color: str, size=BUTTON_ICON_SIZE):

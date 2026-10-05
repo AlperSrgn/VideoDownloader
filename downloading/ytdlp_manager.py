@@ -17,15 +17,18 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import time
 import urllib.request
 
-from settings import load_setting, save_setting
+from cookie.cookie_options import COOKIE_BROWSERS
+from settings import load_setting, save_setting, get_appdata_path
 
 logger = logging.getLogger(__name__)
 
 YT_DLP_EXE_NAME = "yt-dlp.exe"
+COOKIE_FILE_NAME = "cookies.txt"
 
 # Using nightly instead of stable; YouTube-side issues are usually fixed faster.
 # Nightly is an official yt-dlp channel and is released more frequently.
@@ -62,6 +65,47 @@ _DOWNLOAD_TIMEOUT = 30  # seconds
 CLIENT_LIST = [None]
 
 
+def cookie_file_path() -> str:
+    return os.path.join(get_appdata_path(), COOKIE_FILE_NAME)
+
+
+def cookie_args() -> list:
+    """According to the settings, yt-dlp cookie arguments ([] = do not use cookies)."""
+    mode = load_setting("cookie_mode", "none")
+    args = []
+    if mode == "browser":
+        browser = load_setting("cookie_browser", "firefox")
+        if browser in COOKIE_BROWSERS:
+            args = ["--cookies-from-browser", browser]
+        else:
+            logger.warning("cookie_mode=browser but browser %r is not supported; no cookies sent", browser)
+    elif mode == "file":
+        path = cookie_file_path()
+        if os.path.isfile(path):
+            args = ["--cookies", path]
+        else:
+            logger.warning("cookie_mode=file but %s does not exist; no cookies sent", path)
+    logger.debug("cookie_args: mode=%s -> %s", mode, args)
+    return args
+
+def js_runtime_args() -> list:
+    """Passes Deno explicitly so yt-dlp does not depend on the PATH of this
+    process (an IDE / app launched before Deno was installed has a stale PATH).
+    Without a JS runtime YouTube formats come back without URLs."""
+    deno = shutil.which("deno")
+    if not deno:
+        candidates = (
+            os.path.join(os.path.expanduser("~"), ".deno", "bin", "deno.exe"),
+            os.path.join(os.environ.get("LOCALAPPDATA", ""), "Microsoft", "WinGet", "Links", "deno.exe"),
+        )
+        deno = next((p for p in candidates if os.path.isfile(p)), None)
+    if not deno:
+        logger.warning("Deno not found; YouTube formats may come back without URLs")
+        return []
+    logger.debug("js_runtime_args: deno=%s", deno)
+    return ["--js-runtimes", f"deno:{deno}"]
+
+
 def youtube_extractor_args(client, extra=None) -> list:
     """Builds the `--extractor-args` part of a yt-dlp command.
 
@@ -92,6 +136,120 @@ class YtDlpError(Exception):
 
 def _run_hidden(cmd, **kwargs):
     return subprocess.run(cmd, creationflags=_NO_WINDOW, **kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Diagnostics for the --dump-json info commands
+# ---------------------------------------------------------------------------
+# On failure the FULL yt-dlp output (including `-v` debug lines, WARNING lines
+# and the ERROR line) is written to the log together with the exact command
+# and a summary of the cookies that were configured. The YtDlpError that
+# callers/classifiers see carries the output WITHOUT the "[debug]" lines, so
+# error classification is not confused by verbose noise.
+
+_LOGIN_COOKIE_NAMES = {"SAPISID", "__Secure-3PSID", "SID", "LOGIN_INFO"}
+
+
+def _to_text(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
+
+
+def _indent(text: str, prefix: str = "    | ") -> str:
+    lines = text.splitlines() or ["(empty)"]
+    return "\n".join(prefix + line for line in lines)
+
+
+def _strip_debug_lines(text: str) -> str:
+    return "\n".join(
+        line for line in text.splitlines() if not line.startswith("[debug]")
+    ).strip()
+
+
+def _cookie_summary() -> str:
+    """One-line description of the configured cookies. Never includes values."""
+    mode = load_setting("cookie_mode", "none")
+    if mode == "browser":
+        return f"mode=browser, browser={load_setting('cookie_browser', 'firefox')}"
+    if mode != "file":
+        return f"mode={mode} (no cookies sent)"
+
+    path = cookie_file_path()
+    try:
+        age_min = int((time.time() - os.path.getmtime(path)) / 60)
+        total = expired = 0
+        login = set()
+        now = time.time()
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for raw in f:
+                line = raw.rstrip("\r\n")
+                if line.startswith("#HttpOnly_"):
+                    line = line[len("#HttpOnly_"):]
+                elif not line.strip() or line.startswith("#"):
+                    continue
+                parts = line.split("\t")
+                if len(parts) < 7:
+                    continue
+                total += 1
+                try:
+                    exp = int(parts[4])
+                except ValueError:
+                    exp = 0
+                if 0 < exp < now:
+                    expired += 1
+                if parts[5] in _LOGIN_COOKIE_NAMES:
+                    login.add(parts[5])
+    except OSError as e:
+        return f"mode=file, cannot read {path}: {e}"
+
+    return (
+        f"mode=file, {total} cookies ({expired} expired), "
+        f"login cookies present: {sorted(login) or 'NONE'}, "
+        f"file modified {age_min} min ago"
+    )
+
+
+def _run_info_cmd(cmd: list, timeout: int, label: str) -> str:
+    """Runs a yt-dlp info command and returns its stdout.
+    Raises YtDlpError on failure/timeout, after logging full diagnostics."""
+    started = time.monotonic()
+    try:
+        result = _run_hidden(
+            cmd, capture_output=True, text=True,
+            encoding="utf-8", errors="replace",  # avoid cp125x decode crashes on Windows
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as e:
+        logger.warning(
+            "[%s] yt-dlp timed out after %ss\n  command: %s\n  cookies: %s\n  partial output:\n%s",
+            label, timeout, subprocess.list2cmdline(cmd), _cookie_summary(),
+            _indent(_to_text(e.stderr).strip()),
+        )
+        raise YtDlpError(f"yt-dlp timed out after {timeout}s") from e
+    except OSError as e:
+        logger.warning("[%s] could not launch yt-dlp: %s", label, e)
+        raise YtDlpError(f"Could not run yt-dlp: {e}") from e
+
+    elapsed = time.monotonic() - started
+    stdout = result.stdout or ""
+    stderr = result.stderr or ""
+
+    if result.returncode != 0 or not stdout.strip():
+        logger.warning(
+            "[%s] yt-dlp failed (exit=%s, %.1fs)\n  command: %s\n  cookies: %s\n  yt-dlp output:\n%s",
+            label, result.returncode, elapsed, subprocess.list2cmdline(cmd),
+            _cookie_summary(), _indent(stderr.strip()),
+        )
+        raise YtDlpError(_strip_debug_lines(stderr) or "yt-dlp returned no data")
+
+    for line in stderr.splitlines():
+        if line.startswith("WARNING"):
+            logger.warning("[%s] %s", label, line)
+    logger.debug("[%s] yt-dlp ok (%.1fs)", label, elapsed)
+    return stdout
 
 
 def get_ytdlp_path(appdata_dir: str) -> str:
@@ -320,21 +478,22 @@ def extract_info(exe_path: str, url: str, client: str) -> dict:
     info dict (same shape as yt_dlp's Python `extract_info`, including the
     'formats' list). Raises YtDlpError on failure.
     """
+    # No --no-warnings and -v on purpose: warnings (e.g. "cookies are no longer
+    # valid") and debug lines are only ever written to the log on failure.
     cmd = [
         exe_path,
         "--dump-json",
-        "--no-warnings",
+        "-v",
+        *cookie_args(),
+        *js_runtime_args(),
         *youtube_extractor_args(client),
         url,
     ]
-    result = _run_hidden(cmd, capture_output=True, text=True, timeout=60)
-
-    if result.returncode != 0 or not result.stdout.strip():
-        raise YtDlpError(result.stderr.strip() or "yt-dlp returned no data")
+    stdout = _run_info_cmd(cmd, timeout=60, label=f"info/{client or 'default'}")
 
     try:
         # --dump-json prints one JSON object per line; take the first.
-        return json.loads(result.stdout.splitlines()[0])
+        return json.loads(stdout.splitlines()[0])
     except (json.JSONDecodeError, IndexError) as e:
         raise YtDlpError(f"Could not parse yt-dlp output: {e}")
 
@@ -352,17 +511,16 @@ def _extract_preview_info(exe_path: str, url: str, client: str) -> dict:
     cmd = [
         exe_path,
         "--dump-json",
-        "--no-warnings",
+        "-v",
+        *cookie_args(),
+        *js_runtime_args(),
         *youtube_extractor_args(client, extra="skip=hls,dash"),
         url,
     ]
-    result = _run_hidden(cmd, capture_output=True, text=True, timeout=30)
-
-    if result.returncode != 0 or not result.stdout.strip():
-        raise YtDlpError(result.stderr.strip() or "yt-dlp returned no data")
+    stdout = _run_info_cmd(cmd, timeout=30, label=f"preview/{client or 'default'}")
 
     try:
-        return json.loads(result.stdout.splitlines()[0])
+        return json.loads(stdout.splitlines()[0])
     except (json.JSONDecodeError, IndexError) as e:
         raise YtDlpError(f"Could not parse yt-dlp output: {e}")
 
@@ -490,16 +648,74 @@ def find_suitable_audio_format(formats: list):
     return (_select_original_audio(audio_formats),)
 
 
-def find_info_with_compatible_format(exe_path: str, url: str, format_selector, collected_errors=None):
+def _log_format_summary(client, formats: list) -> None:
+    """Dumps what yt-dlp returned, so a 'no compatible format' failure can be
+    diagnosed (formats with url=NO are SABR/n-challenge casualties)."""
+    rows = [
+        f"    {f.get('format_id')}: ext={f.get('ext')} v={f.get('vcodec')} "
+        f"a={f.get('acodec')} h={f.get('height')} proto={f.get('protocol')} "
+        f"url={'yes' if f.get('url') else 'NO'}"
+        for f in formats
+    ]
+    logger.debug("Client %s returned %d formats:\n%s",
+                 client or "default", len(formats), "\n".join(rows) or "    (none)")
+
+
+# ---------------------------------------------------------------------------
+# Fallback: progressive (single-file, video+audio) formats
+# ---------------------------------------------------------------------------
+# When YouTube forces SABR streaming (common for age-restricted videos and
+# some accounts), the separate DASH video/audio streams come back without a
+# URL and often only a progressive format (e.g. 18 = 360p mp4) remains. These
+# helpers let callers use it as a last resort instead of failing outright.
+
+def _progressive_formats(formats: list) -> list:
+    return [
+        f for f in formats
+        if f.get("url")
+        and f.get("vcodec") not in (None, "none")
+        and f.get("acodec") not in (None, "none")
+        and f.get("protocol") in ("https", "http")
+    ]
+
+
+def find_progressive_format(formats: list, video_height: int):
+    """Fallback selector for video downloads. Returns (format, None); the
+    None audio slot tells the caller this is a single-file download that
+    needs no merge. Returns (None, None) if there is no progressive format."""
+    candidates = [f for f in _progressive_formats(formats) if f.get("height")]
+    if not candidates:
+        return None, None
+    pool = [f for f in candidates if f["height"] <= video_height] or candidates
+    best = max(pool, key=lambda f: (f["height"], f.get("tbr") or 0))
+    return best, None
+
+
+def find_progressive_audio_format(formats: list):
+    """Fallback selector for audio-only downloads: the smallest progressive
+    format (least data to download); the audio is extracted from it later."""
+    candidates = _progressive_formats(formats)
+    if not candidates:
+        return (None,)
+    return (min(candidates, key=lambda f: f.get("height") or 10 ** 9),)
+
+
+def find_info_with_compatible_format(exe_path: str, url: str, format_selector,
+                                     collected_errors=None, fallback_selector=None):
     """
     Tries each client in CLIENT_LIST until format_selector(formats) succeeds,
     i.e. returns a non-empty tuple with no None in it (as
     find_suitable_format / find_suitable_audio_format do).
     Returns (info, client, result) on success, or (None, None, None) if all clients fail.
+    If fallback_selector is given, it is only used when NO client satisfied
+    format_selector: the first client whose formats satisfy it (its first
+    element must be truthy) is returned instead, so a better client is never
+    skipped just because an earlier one only had the fallback.
     If collected_errors is provided,
     it stores each YtDlpError message so the caller can identify the actual failure reason
     instead of showing a generic “no compatible format” error.
     """
+    fallback = None
     for client in CLIENT_LIST:
         logger.debug("Trying client=%s", client or "default")
         try:
@@ -516,9 +732,22 @@ def find_info_with_compatible_format(exe_path: str, url: str, format_selector, c
             logger.debug("Client %s: found compatible format(s)", client or "default")
             return info, client, result
 
+        _log_format_summary(client, formats)
         logger.debug(
             "Client %s: extracted info but no compatible format among %d formats",
             client or "default", len(formats),
         )
+
+        if fallback is None and fallback_selector is not None:
+            fb = fallback_selector(formats)
+            if fb and fb[0]:
+                fallback = (info, client, fb)
+
+    if fallback is not None:
+        logger.warning(
+            "No separate streams from any client; falling back to progressive format %s",
+            fallback[2][0].get("format_id"),
+        )
+        return fallback
 
     return None, None, None
