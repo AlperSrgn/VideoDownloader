@@ -18,8 +18,6 @@ Standalone:
     python firefox_cookies.py cookies.txt
 
 """
-# test code
-# C:\Users\alper\AppData\Local\VideoDownloader\yt-dlp.exe -v --cookies "C:\Users\alper\AppData\Local\VideoDownloader\cookies.txt" "https://www.youtube.com/watch?v=YCuT6oXJX7A"
 
 import configparser
 import logging
