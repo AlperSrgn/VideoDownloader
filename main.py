@@ -7,7 +7,8 @@ switching, save-location settings, the yt-dlp status display and closing.
 
 It constructs DownloadController (core/download_controller.py) before the
 window, because the window's button callbacks are its bound methods; its
-widgets are attached afterwards via bind_widgets(). UpdateChecker is
+widgets are attached afterwards via bind_widgets(). CookiePanel
+(ui/cookie_panel.py) follows the same pattern. UpdateChecker is
 constructed after the window, once the widgets it needs exist.
 
 Which widgets get a translated label, a button icon or theme colors is
@@ -37,6 +38,7 @@ from system.process_manager import acquire_single_instance, focus_existing_windo
 from system.updater import UpdateChecker, APP_VERSION
 from settings import load_setting, save_setting
 from ui.app_window import WINDOW_TITLE_PREFIX, build_app_window
+from ui.cookie_panel import CookiePanel
 from ui.notifications import notify as send_notification
 from ui.theme import ThemeManager
 from utils import (
@@ -45,23 +47,6 @@ from utils import (
     format_save_location_display,
     get_icon_path,
     load_button_icon,
-)
-
-from cookie import (
-    COOKIE_MODES,
-    CookieExportError,
-    build_cookie_mode_options,
-    cookie_file_exists,
-    cookie_mode_label,
-    export_cookies_from_firefox,
-    get_cookie_file_label,
-    get_cookie_mode,
-    import_cookie_file,
-    remove_cookie_file,
-    resolve_cookie_browser_key,
-    resolve_cookie_mode_key,
-    set_cookie_browser,
-    set_cookie_mode,
 )
 
 # ---------------------------------------------------------------------------
@@ -150,6 +135,12 @@ class App:
             get_system_notification_enabled=lambda: self.system_notification_enabled.get(),
         )
 
+        # -- Cookie panel ------------------------------------------------
+        # Created here for the same reason: the sidebar's cookie buttons use
+        # its methods as callbacks. Widgets are attached via bind_widgets()
+        # after build_app_window() returns.
+        self.cookie_panel = CookiePanel(app_state=self.app_state)
+
         # -- Build UI ------------------------------------------------------
         # Every widget build_app_window() creates lives on self.ui
         # (self.ui.download_button, self.ui.root, ...).
@@ -170,11 +161,11 @@ class App:
                 choose_save_location=self.choose_save_location,
                 preview_notification=self.preview_notification,
                 uninstall_app=self.uninstall_app,
-                change_cookie_mode=self.change_cookie_mode,
-                change_cookie_browser=self.change_cookie_browser,
-                choose_cookie_file=self.choose_cookie_file,
-                create_cookie_file=self.create_cookie_file,
-                delete_cookie_file=self.delete_cookie_file,
+                change_cookie_mode=self.cookie_panel.change_mode,
+                change_cookie_browser=self.cookie_panel.change_browser,
+                choose_cookie_file=self.cookie_panel.choose_file,
+                create_cookie_file=self.cookie_panel.create_file,
+                delete_cookie_file=self.cookie_panel.delete_file,
             ),
             app_version=APP_VERSION,
             app_icon=self.app_icon,
@@ -200,6 +191,15 @@ class App:
             uninstall_button=ui.uninstall_button,
             check_updates_button=ui.check_updates_button,
             toast_label=ui.toast_label,
+        )
+        self.cookie_panel.bind_widgets(
+            mode_var=ui.cookie_mode_var,
+            mode_menu=ui.cookie_mode_menu,
+            browser_menu=ui.cookie_browser_menu,
+            file_button=ui.cookie_file_button,
+            file_label=ui.cookie_file_label,
+            create_title_label=ui.cookie_create_title_label,
+            buttons_row=ui.cookie_buttons_row,
         )
 
         # Needs save_location_value_label, which build_app_window() creates.
@@ -425,14 +425,8 @@ class App:
         # Convert the current selection to a language-independent key BEFORE the language changes.
         selected_key = resolve_quality_key(ui.option_var.get())
 
-        # Same for the cookie mode; at startup the dropdown is still empty,
-        # so fall back to the saved setting.
-        cookie_mode_key = (
-            resolve_cookie_mode_key(ui.cookie_mode_var.get(), self.app_state.current_language)
-            or get_cookie_mode()
-        )
-        if cookie_mode_key not in COOKIE_MODES:
-            cookie_mode_key = "none"
+        # Same for the cookie mode.
+        cookie_mode_key = self.cookie_panel.current_mode_key()
 
         self.app_state.current_language = LANGUAGES.get(selected, LANGUAGES["EN"])
         dropdown_options = build_dropdown_options(self.app_state.current_language)
@@ -443,13 +437,7 @@ class App:
             )
         save_setting("language", selected)
 
-        ui.cookie_mode_menu.configure(
-            values=build_cookie_mode_options(self.app_state.current_language)
-        )
-        ui.cookie_mode_var.set(
-            cookie_mode_label(cookie_mode_key, self.app_state.current_language)
-        )
-        self.update_cookie_widgets()
+        self.cookie_panel.refresh_language(cookie_mode_key)
 
         # widget -> language key, registered in build_app_window()
         # (registry.add(..., text="<language key>")).
@@ -545,129 +533,6 @@ class App:
         download again since it was never marked as checked/cached."""
         self.ui.ytdlp_retry_button.pack_forget()
         self.fetch_ytdlp_version(on_status=self.on_ytdlp_status)
-
-    # -- Cookie support (dialogs only; the logic is in the cookie package) ----
-    def update_cookie_widgets(self) -> None:
-        """Shows the browser menu or the file widgets depending on the mode."""
-        ui = self.ui
-        mode = resolve_cookie_mode_key(
-            ui.cookie_mode_var.get(), self.app_state.current_language
-        )
-
-        ui.cookie_browser_menu.pack_forget()
-        ui.cookie_file_button.pack_forget()
-        ui.cookie_file_label.pack_forget()
-        ui.cookie_create_title_label.pack_forget()
-        ui.cookie_buttons_row.pack_forget()
-
-        if mode == "browser":
-            ui.cookie_browser_menu.pack(anchor="w", pady=(8, 0), padx=10, fill="x")
-        elif mode == "file":
-            ui.cookie_file_button.pack(anchor="w", pady=(8, 0), padx=10, fill="x")
-            ui.cookie_file_label.pack(anchor="w", pady=(2, 0), padx=10, fill="x")
-            ui.cookie_file_label.configure(
-                text=format_save_location_display(get_cookie_file_label())
-            )
-            ui.cookie_create_title_label.pack(anchor="w", pady=(10, 0), padx=10, fill="x")
-            ui.cookie_buttons_row.pack(anchor="w", pady=(4, 0), padx=10, fill="x")
-
-    def change_cookie_mode(self, selected: str) -> None:
-        mode = resolve_cookie_mode_key(selected, self.app_state.current_language)
-        if mode is None:
-            return
-        set_cookie_mode(mode)
-        self.update_cookie_widgets()
-
-    def change_cookie_browser(self, selected: str) -> None:
-        browser = resolve_cookie_browser_key(selected)
-        if browser:
-            set_cookie_browser(browser)
-
-    def choose_cookie_file(self) -> None:
-        path = filedialog.askopenfilename(
-            title=self.app_state.current_language["cookie_file_button"],
-            filetypes=[("cookies.txt", "*.txt"), ("*", "*.*")],
-        )
-        if not path:
-            return
-        try:
-            import_cookie_file(path)
-        except OSError as e:
-            messagebox.showerror(self.app_state.current_language["error_title"], str(e))
-            return
-        self.update_cookie_widgets()
-
-
-    def create_cookie_file(self) -> None:
-        """Exports the YouTube/Google cookies from Firefox into the app's own
-        cookies.txt (the file yt-dlp reads in "file" mode), then tells the
-        user where it is and offers to open the folder."""
-        lang = self.app_state.current_language
-        try:
-            result = export_cookies_from_firefox()
-        except Exception as e:  # CookieExportError and anything unexpected
-            if not isinstance(e, CookieExportError):
-                logger.exception("cookies.txt export failed")
-            messagebox.showerror(
-                lang["error_title"],
-                lang["cookie_export_failed_message"].replace("{error}", str(e)),
-            )
-            return
-
-        self.update_cookie_widgets()
-        path = result.path
-
-        if not result.logged_in:
-            messagebox.showwarning(
-                lang["warning_title"],
-                lang["cookie_not_logged_in_message"].replace("{path}", path),
-            )
-            return
-
-        message = (
-            lang["cookie_created_message"]
-            .replace("{count}", str(result.count))
-            .replace("{path}", path)
-        )
-        if messagebox.askyesno(lang["cookie_section_label"], message):
-            self.reveal_in_folder(path)
-
-
-    def delete_cookie_file(self) -> None:
-        """Deletes the app's own cookies.txt copy after confirmation. A file
-        the user picked with "Choose cookies.txt" was copied here, so their
-        original is never touched."""
-        lang = self.app_state.current_language
-
-        if not cookie_file_exists():
-            messagebox.showinfo(lang["cookie_section_label"], lang["cookie_delete_none_message"])
-            return
-
-        if not messagebox.askyesno(lang["cookie_section_label"], lang["cookie_delete_confirm_message"]):
-            return
-
-        try:
-            remove_cookie_file()
-        except OSError as e:
-            messagebox.showerror(
-                lang["error_title"],
-                lang["cookie_delete_failed_message"].replace("{error}", str(e)),
-            )
-            return
-
-        self.update_cookie_widgets()
-
-
-    @staticmethod
-    def reveal_in_folder(path: str) -> None:
-        """Opens Explorer with the file selected (falls back to just the folder)."""
-        try:
-            if os.name == "nt":
-                subprocess.Popen(["explorer", "/select,", os.path.normpath(path)])
-            else:
-                webbrowser.open(os.path.dirname(path))
-        except OSError:
-            logger.warning("Could not open folder for %s", path, exc_info=True)
 
     # -- Button icons --------------------------------------------------------
     def make_icon(self, filename: str, color: str, size=BUTTON_ICON_SIZE):

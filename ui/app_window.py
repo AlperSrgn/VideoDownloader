@@ -1,9 +1,18 @@
 """
 Main window construction.
 
-build_app_window() creates every widget of the main window and the settings
-sidebar and returns them as attributes of one SimpleNamespace, which
-main.py's App keeps as self.ui (self.ui.download_button, ...).
+build_app_window() creates the root window, the main panel (URL row + queue
+list), the bottom action panel and the toast label, builds the settings
+sidebar through ui/sidebar.py, and returns every widget as attributes of one
+flat SimpleNamespace, which main.py's App keeps as self.ui
+(self.ui.download_button, ...).
+
+The file is split into one builder per area, each returning the widgets it
+created as a SimpleNamespace:
+    _build_main_panel()    - quality menu, URL entry, playlist checkbox, queue list
+    _build_bottom_panel()  - status/update/retry buttons, Download/Pause/Queue,
+                             Cancel, progress bar and label, downloads folder button
+    ui/sidebar.py          - build_sidebar(): the settings sidebar, incl. cookies
 
 Click handling is not implemented here: every command=... callback is
 supplied by the caller via `callbacks` (one attribute per callback, e.g.
@@ -21,17 +30,19 @@ THEMES["light"] (aliased as _LIGHT), the same dict toggle_theme() applies
 later. Colors that don't change between themes (e.g. the red text of the
 cancel/clear buttons, some hover colors) are hardcoded here and marked
 with a comment.
+
+Creation order matters: widgets placed on root with place() stack in the
+order they are created, so the builders are called main panel -> bottom
+panel -> sidebar -> toast (the toast must stay last to sit above the sidebar).
 """
 
 from types import SimpleNamespace
 
 import customtkinter as ctk
 
-from settings import load_setting, save_setting
 from ui.registry import UiRegistry
+from ui.sidebar import build_sidebar
 from ui.theme import THEMES
-
-from cookie import COOKIE_BROWSERS, get_cookie_browser
 
 _LIGHT = THEMES["light"]
 
@@ -52,6 +63,38 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
     root.protocol("WM_DELETE_WINDOW", callbacks.on_close_request)
     registry.add(root, theme="root")
 
+    main_widgets = _build_main_panel(root, registry, callbacks)
+    bottom_widgets = _build_bottom_panel(root, registry, callbacks)
+    sidebar_widgets = build_sidebar(root, registry, callbacks, sidebar_width, sidebar_x)
+
+    # Toast (brief bottom-right notice, e.g. "download cancelled"). Created
+    # hidden; shown/hidden via place()/place_forget() by ToastNotifier
+    # (ui/notifications.py). Created last, so it stacks above every other
+    # widget placed on root, including the sidebar.
+    toast_label = ctk.CTkLabel(
+        root,
+        text="",
+        font=ctk.CTkFont(family="Helvetica", size=13, weight="bold"),
+        fg_color="#d9534f",
+        text_color="#ebebeb",
+        corner_radius=5,
+        padx=14,
+        pady=14,
+    )
+
+    return SimpleNamespace(
+        registry=registry,
+        root=root,
+        **vars(main_widgets),
+        **vars(bottom_widgets),
+        **vars(sidebar_widgets),
+        toast_label=toast_label,
+    )
+
+
+def _build_main_panel(root, registry, callbacks) -> SimpleNamespace:
+    """Main frame: quality menu, URL entry, playlist checkbox (not shown yet)
+    and the queue header/clear button/list."""
     # Main frame
     frame = ctk.CTkFrame(root, fg_color=_LIGHT["frame"]["fg_color"])
     frame.pack(pady=30, padx=30)
@@ -152,6 +195,25 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
     queue_list_frame.grid_remove()
     registry.add(queue_list_frame, theme="queue_list_frame")
 
+    return SimpleNamespace(
+        frame=frame,
+        download_option_label=download_option_label,
+        option_var=option_var,
+        quality_options_menu=quality_options_menu,
+        video_url_label=video_url_label,
+        url_var=url_var,
+        url_entry=url_entry,
+        playlist_checkbox_var=playlist_checkbox_var,
+        playlist_checkbox=playlist_checkbox,
+        queue_header_label=queue_header_label,
+        clear_queue_button=clear_queue_button,
+        queue_list_frame=queue_list_frame,
+    )
+
+
+def _build_bottom_panel(root, registry, callbacks) -> SimpleNamespace:
+    """Bottom action panel (status/update/retry buttons, Download/Pause/Queue,
+    Cancel, progress) plus the downloads folder button in the corner."""
     # Bottom action panel: fixed to the bottom with place().
     # Its contents use pack() among themselves.
     bottom_panel = ctk.CTkFrame(root, fg_color="transparent")
@@ -325,298 +387,19 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
     downloads_button.place(relx=0, rely=1, anchor="sw", x=10, y=-10)
     registry.add(downloads_button, icon=("folder.png", "black", (30, 30)), theme="downloads_button")
 
-    # Sidebar
-    sidebar_frame = ctk.CTkFrame(root, width=sidebar_width, fg_color="#95aec9", corner_radius=0)
-    sidebar_frame.place(x=sidebar_x, y=0, relheight=1)
-
-    sidebar_content = ctk.CTkFrame(sidebar_frame, fg_color="#95aec9")
-    sidebar_content.pack(padx=0, pady=0, anchor="nw", fill="both", expand=True)
-
-    close_button = ctk.CTkButton(
-        sidebar_frame,
-        text="✕",
-        font=("Helvetica", 19),
-        fg_color="#95aec9",
-        text_color="black",
-        width=35, height=35,
-        command=callbacks.toggle_sidebar,
-        hover_color="#6c8a9e",
+    return SimpleNamespace(
+        bottom_panel=bottom_panel,
+        ytdlp_status_label=ytdlp_status_label,
+        update_buttons_frame=update_buttons_frame,
+        update_cancel_button=update_cancel_button,
+        update_install_button=update_install_button,
+        ytdlp_retry_button=ytdlp_retry_button,
+        action_buttons_frame=action_buttons_frame,
+        download_button=download_button,
+        pause_button=pause_button,
+        queue_add_button=queue_add_button,
+        cancel_button=cancel_button,
+        progress_bar=progress_bar,
+        progress_label=progress_label,
+        downloads_button=downloads_button,
     )
-    close_button.place(relx=1.0, rely=0.0, anchor="ne", x=-10, y=10)
-
-    # Menu (hamburger) button
-    menu_button = ctk.CTkButton(
-        root,
-        text="☰",
-        font=("Helvetica", 30, "bold"),
-        fg_color=_LIGHT["menu_button"]["fg_color"],
-        text_color=_LIGHT["menu_button"]["text_color"],
-        width=50, height=50,
-        command=callbacks.toggle_sidebar,
-        hover_color=_LIGHT["menu_button"]["hover_color"],
-    )
-    menu_button.place(x=10, y=10)
-    registry.add(menu_button, theme="menu_button")
-
-    # Light/dark toggle inside sidebar
-    light_dark = ctk.CTkButton(
-        sidebar_content,
-        text="",
-        fg_color="#4c6a8c",
-        hover_color="#3b556f",
-        text_color="#fbfbfb",
-        width=45, height=45,
-        command=callbacks.toggle_theme,
-    )
-    light_dark.place(relx=0.0, rely=1.0, anchor="sw", x=10, y=-10)
-    # icon (sun/moon) depends on the current theme, so it's handled by apply_button_icons()/ThemeManager
-    registry.add(light_dark, theme="light_dark")
-
-    # Language selector
-    language_options = ["DE", "EN", "ES", "FR", "IT", "TR"]
-    language_var = ctk.StringVar(value=language_options[0])
-    language_menu = ctk.CTkOptionMenu(
-        sidebar_content,
-        variable=language_var,
-        values=language_options,
-        command=callbacks.change_language,
-        width=70, height=30,
-        font=("Helvetica", 13),
-        fg_color="#4c6a8c",
-        button_color="#004566",
-        text_color="#ebebeb",
-    )
-    language_menu.place(relx=1.0, rely=1.0, anchor="se", x=-85, y=-10)
-
-    # System notification checkbox
-    system_notification_enabled = ctk.BooleanVar(value=load_setting("system_notification", True))
-    system_notification_enabled.trace_add(
-        "write",
-        lambda *_: save_setting("system_notification", system_notification_enabled.get()),
-    )
-    system_notification_checkbox = ctk.CTkCheckBox(
-        sidebar_content,
-        variable=system_notification_enabled,
-        onvalue=True, offvalue=False,
-        font=("Helvetica", 14),
-        text_color="black",
-        fg_color="#95aec9",
-        hover_color="#6c8a9e",
-        border_color="black",
-        border_width=2,
-        checkbox_width=20, checkbox_height=20,
-        corner_radius=4,
-        checkmark_color="black",
-    )
-    system_notification_checkbox.pack(anchor="w", pady=(60, 20), padx=10, fill="x")
-    registry.add(system_notification_checkbox, text="system_notification_checkbox")
-
-    # Start in dark mode checkbox
-    dark_mode_enabled = ctk.BooleanVar(value=load_setting("start_in_dark_mode", False))
-    dark_mode_enabled.trace_add(
-        "write",
-        lambda *_: save_setting("start_in_dark_mode", dark_mode_enabled.get()),
-    )
-    start_in_dark_mode_checkbox = ctk.CTkCheckBox(
-        sidebar_content,
-        variable=dark_mode_enabled,
-        onvalue=True, offvalue=False,
-        font=("Helvetica", 14),
-        text_color="black",
-        fg_color="#95aec9",
-        hover_color="#6c8a9e",
-        border_color="black",
-        border_width=2,
-        checkbox_width=20, checkbox_height=20,
-        corner_radius=4,
-        checkmark_color="black",
-    )
-    start_in_dark_mode_checkbox.pack(anchor="w", pady=10, padx=10, fill="x")
-    registry.add(start_in_dark_mode_checkbox, text="start_in_dark_mode_checkbox")
-
-    # Save location picker
-    save_location_button = ctk.CTkButton(
-        sidebar_content,
-        command=callbacks.choose_save_location,
-        font=("Helvetica", 13),
-        fg_color="#4c6a8c",
-        hover_color="#3b556f",
-        text_color="#fbfbfb",
-        height=30,
-    )
-    save_location_button.pack(anchor="w", pady=(10, 0), padx=10, fill="x")
-    registry.add(save_location_button, text="save_location_button", icon=("folder.png", "#fbfbfb"))
-
-    save_location_value_label = ctk.CTkLabel(
-        sidebar_content,
-        text="",
-        font=("Helvetica", 11),
-        text_color="#333333",
-    )
-    save_location_value_label.pack(anchor="w", pady=(2, 10), padx=10, fill="x")
-
-    # Check for Updates button
-    check_updates_button = ctk.CTkButton(
-        sidebar_content,
-        font=("Helvetica", 13),
-        fg_color="#4c6a8c",
-        hover_color="#3b556f",
-        text_color="#fbfbfb",
-        height=30,
-    )
-    check_updates_button.pack(anchor="w", pady=(0, 10), padx=10, fill="x")
-    registry.add(check_updates_button, text="check_updates_button", icon=("refresh.png", "#fbfbfb"))
-    # command= is wired up by main.py once its UpdateChecker exists.
-
-    # Cookie support (age-restricted / members-only videos).
-    # Only the mode menu is always visible; the browser menu and the file
-    # button live in cookie_extra_frame and are shown/hidden by
-    # App.update_cookie_widgets() (main.py). They start unpacked (hidden).
-    cookie_section_label = ctk.CTkLabel(
-        sidebar_content,
-        text="",
-        font=("Helvetica", 13, "bold"),
-        text_color="black",
-        anchor="w",
-    )
-    cookie_section_label.pack(anchor="w", pady=(6, 0), padx=10, fill="x")
-    registry.add(cookie_section_label, text="cookie_section_label")
-
-    # Texts/values are set by App.change_language() (translated per language).
-    cookie_mode_var = ctk.StringVar()
-    cookie_mode_menu = ctk.CTkOptionMenu(
-        sidebar_content,
-        variable=cookie_mode_var,
-        values=[""],
-        command=callbacks.change_cookie_mode,
-        height=30,
-        font=("Helvetica", 13),
-        fg_color="#4c6a8c",
-        button_color="#004566",
-        text_color="#ebebeb",
-    )
-    cookie_mode_menu.pack(anchor="w", pady=(4, 0), padx=10, fill="x")
-
-    # Holds the mode-dependent widgets. width/height=0 so the empty frame
-    # takes no space while both children are hidden.
-    cookie_extra_frame = ctk.CTkFrame(sidebar_content, width=0, height=0, fg_color="transparent")
-    cookie_extra_frame.pack(fill="x")
-
-    saved_cookie_browser = get_cookie_browser()
-    cookie_browser_var = ctk.StringVar(
-        value=COOKIE_BROWSERS.get(saved_cookie_browser, COOKIE_BROWSERS["firefox"])
-    )
-    cookie_browser_menu = ctk.CTkOptionMenu(
-        cookie_extra_frame,
-        variable=cookie_browser_var,
-        values=list(COOKIE_BROWSERS.values()),
-        command=callbacks.change_cookie_browser,
-        height=30,
-        font=("Helvetica", 13),
-        fg_color="#4c6a8c",
-        button_color="#004566",
-        text_color="#ebebeb",
-    )
-
-    # Create + Delete sit side by side in one row (shown only in "file" mode).
-    cookie_buttons_row = ctk.CTkFrame(cookie_extra_frame, fg_color="transparent")
-    cookie_buttons_row.grid_columnconfigure((0, 1), weight=1, uniform="cookie_btn")
-
-    cookie_create_button = ctk.CTkButton(
-        cookie_buttons_row,
-        command=callbacks.create_cookie_file,
-        font=("Helvetica", 13),
-        fg_color="#4c6a8c",
-        hover_color="#3b556f",
-        text_color="#fbfbfb",
-        height=30,
-        width=100,
-    )
-    cookie_create_button.grid(row=0, column=0, sticky="ew", padx=(0, 3))
-    registry.add(cookie_create_button, text="cookie_create_button")
-
-    cookie_delete_button = ctk.CTkButton(
-        cookie_buttons_row,
-        command=callbacks.delete_cookie_file,
-        font=("Helvetica", 13),
-        fg_color="#cc3b3b",       # not part of the light/dark theme, stays fixed
-        hover_color="#ff4c4c",
-        text_color="#fbfbfb",
-        height=30,
-        width=100,
-    )
-    cookie_delete_button.grid(row=0, column=1, sticky="ew", padx=(3, 0))
-    registry.add(cookie_delete_button, text="cookie_delete_button")
-
-    # Small heading above the Create/Delete row; says the Create button is
-    # Firefox-specific. Shown/hidden by App.update_cookie_widgets().
-    cookie_create_title_label = ctk.CTkLabel(
-        cookie_extra_frame,
-        text="",
-        font=("Helvetica", 12, "bold"),
-        text_color="black",
-        anchor="w",
-    )
-    registry.add(cookie_create_title_label, text="cookie_create_title")
-
-    cookie_file_button = ctk.CTkButton(
-        cookie_extra_frame,
-        command=callbacks.choose_cookie_file,
-        font=("Helvetica", 13),
-        fg_color="#4c6a8c",
-        hover_color="#3b556f",
-        text_color="#fbfbfb",
-        height=30,
-    )
-    registry.add(cookie_file_button, text="cookie_file_button", icon=("folder.png", "#fbfbfb"))
-
-    # Name of the selected cookies.txt (set by App.update_cookie_widgets()).
-    cookie_file_label = ctk.CTkLabel(
-        cookie_extra_frame,
-        text="",
-        font=("Helvetica", 11),
-        text_color="#333333",
-    )
-
-    # Preview notification button
-    preview_notification_button = ctk.CTkButton(
-        sidebar_content,
-        font=("Helvetica", 13),
-        command=callbacks.preview_notification,
-        fg_color="#4c6a8c",
-        hover_color="#3b556f",
-        text_color="#fbfbfb",
-        width=45, height=45,
-    )
-    preview_notification_button.place(x=10, y=-70, relx=0, rely=1, anchor="sw")
-    registry.add(preview_notification_button, text="preview_notification_button", icon=("notification.png", "#fbfbfb"))
-
-    # Uninstall button
-    uninstall_button = ctk.CTkButton(
-        sidebar_content,
-        command=callbacks.uninstall_app,
-        font=("Helvetica", 13),
-        width=70, height=30,
-        fg_color="#cc3b3b",
-        hover_color="#ff4c4c",
-        text_color="#fbfbfb",
-    )
-    uninstall_button.place(relx=1.0, rely=1.0, anchor="se", x=-10, y=-10)
-    registry.add(uninstall_button, text="uninstall_button", icon=("uninstall.png", "#fbfbfb"))
-
-    # Toast (brief bottom-right notice, e.g. "download cancelled"). Created
-    # hidden; shown/hidden via place()/place_forget() by ToastNotifier
-    # (ui/notifications.py). Created last, so it stacks above every other
-    # widget placed on root, including the sidebar.
-    toast_label = ctk.CTkLabel(
-        root,
-        text="",
-        font=ctk.CTkFont(family="Helvetica", size=13, weight="bold"),
-        fg_color="#d9534f",
-        text_color="#ebebeb",
-        corner_radius=5,
-        padx=14,
-        pady=14,
-    )
-
-    return SimpleNamespace(**locals())
