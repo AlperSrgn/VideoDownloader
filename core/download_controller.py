@@ -349,7 +349,7 @@ class DownloadController:
         """Toggles the paused state of the item currently downloading.
 
         The background download thread polls on_pause_check() (see
-        downloader.py) and reacts differently per phase, so pausing
+        downloading/process_runner.py) and reacts differently per phase, so pausing
         genuinely stops network/CPU usage rather than just freezing the
         progress bar: during a yt-dlp download it stops yt-dlp (leaving the
         partial file) and relaunches the same command on resume so it
