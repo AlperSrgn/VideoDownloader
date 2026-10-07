@@ -12,6 +12,11 @@ troubleshooting; it is never shown to the user directly.
 Split out of downloader.py, which was growing long with this being a
 self-contained concern (parsing/classifying text) rather than part of the
 actual download/merge process handling.
+
+Lives in core/ rather than downloading/ because both downloading/ (the
+exceptions process_runner raises, the classify_* functions) and ytdlp/
+(DenoNotFoundError, is_access_restricted_error) import it. Here it depends on
+neither package, so downloading/ and ytdlp/ never have to import each other.
 """
 
 import errno
