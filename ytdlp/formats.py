@@ -114,32 +114,35 @@ def find_suitable_audio_format(formats: list):
 # URL and often only a progressive format (e.g. 18 = 360p mp4) remains. These
 # helpers let callers use it as a last resort instead of failing outright.
 
+_PROGRESSIVE_PROTOCOLS = ("https", "http", "m3u8_native")
+
 def _progressive_formats(formats: list) -> list:
     return [
         f for f in formats
         if f.get("url")
         and f.get("vcodec") not in (None, "none")
         and f.get("acodec") not in (None, "none")
-        and f.get("protocol") in ("https", "http")
+        and f.get("protocol") in _PROGRESSIVE_PROTOCOLS
     ]
 
 
 def find_progressive_format(formats: list, video_height: int):
-    """Fallback selector for video downloads. Returns (format, None); the
-    None audio slot tells the caller this is a single-file download that
-    needs no merge. Returns (None, None) if there is no progressive format."""
     candidates = [f for f in _progressive_formats(formats) if f.get("height")]
     if not candidates:
         return None, None
     pool = [f for f in candidates if f["height"] <= video_height] or candidates
-    best = max(pool, key=lambda f: (f["height"], f.get("tbr") or 0))
+    # Aynı çözünürlükte düz https'i tercih et, sonra bitrate
+    best = max(pool, key=lambda f: (
+        f["height"], f.get("protocol") in ("https", "http"), f.get("tbr") or 0,
+    ))
     return best, None
 
 
 def find_progressive_audio_format(formats: list):
-    """Fallback selector for audio-only downloads: the smallest progressive
-    format (least data to download); the audio is extracted from it later."""
     candidates = _progressive_formats(formats)
     if not candidates:
         return (None,)
-    return (min(candidates, key=lambda f: f.get("height") or 10 ** 9),)
+    # HLS'teki 91/92 HE-AAC (düşük ses kalitesi); mümkünse https (18) kullan
+    https_only = [f for f in candidates if f.get("protocol") in ("https", "http")]
+    pool = https_only or candidates
+    return (min(pool, key=lambda f: f.get("height") or 10 ** 9),)

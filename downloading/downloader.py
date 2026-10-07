@@ -124,10 +124,10 @@ class _DownloadJob:
     cb: DownloadCallbacks
     lang: dict
 
-    def ytdlp_cmd(self, fmt: dict, output_template: str) -> list:
+    def ytdlp_cmd(self, fmt: dict, output_template: str, use_ffmpeg: bool = False) -> list:
         return _build_ytdlp_download_cmd(
             self.exe_path, fmt["format_id"], self.client, output_template, self.url,
-            restricted=self.restricted,
+            restricted=self.restricted, use_ffmpeg=use_ffmpeg,
         )
 
 
@@ -137,7 +137,8 @@ class _DownloadJob:
 
 def _build_ytdlp_download_cmd(exe_path: str, format_id: str, client: str | None,
                               output_template: str, url: str,
-                              restricted: bool = False) -> list:
+                              restricted: bool = False,
+                              use_ffmpeg: bool = False) -> list:
     """Builds a yt-dlp download command for one phase (a video track, an
     audio track, or an audio-only download) — only the format id and
     output template differ between call sites, so this is the one place
@@ -157,6 +158,9 @@ def _build_ytdlp_download_cmd(exe_path: str, format_id: str, client: str | None,
         "-f", format_id,
         *access_args(restricted),
         *youtube_extractor_args(client),
+        # HLS (m3u8) parçaları ham MPEG-TS olarak iner; yt-dlp bunu ancak
+        # ffmpeg'i bulabilirse gerçek MP4'e çevirir.
+        *(["--ffmpeg-location", get_ffmpeg_path()] if use_ffmpeg else []),
         "--newline", "--no-warnings",
         "--continue",
         "-o", f"{output_template}.%(ext)s",
@@ -369,7 +373,7 @@ def _download_progressive(job: _DownloadJob, video_format: dict) -> None:
             "for this video, so it will be downloaded at that quality.",
         ).replace("{height}", str(height)))
 
-    cmd = job.ytdlp_cmd(video_format, f"{job.temp_base}_video")
+    cmd = job.ytdlp_cmd(video_format, f"{job.temp_base}_video", use_ffmpeg=True)
     if not _run_ytdlp_download_phase(
             cmd, cb.on_progress, cb, job.lang, known_total_mb=known_size_mb(video_format),
     ):

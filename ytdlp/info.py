@@ -29,6 +29,16 @@ logger = logging.getLogger(__name__)
 # None is always tried first.
 CLIENT_LIST = [None]
 
+# For videos that require cookie-based authentication (age-restricted / membership).
+RESTRICTED_CLIENT_LIST = [None, "tv", "web_safari", "mweb"]
+
+
+def _fallback_rank(fb: tuple) -> int:
+    """Video fallback is compared by resolution (format, None).
+    Audio fallback has a single element (format,): all are considered equal, so the first one is kept.
+    """
+    return (fb[0].get("height") or 0) if len(fb) > 1 else 0
+
 
 def extract_info(exe_path: str, url: str, client: str, restricted: bool = False) -> dict:
     """
@@ -150,8 +160,9 @@ def find_info_with_compatible_format(exe_path: str, url: str, format_selector,
     it stores each YtDlpError message so the caller can identify the actual failure reason
     instead of showing a generic “no compatible format” error.
     """
+    clients = RESTRICTED_CLIENT_LIST if restricted else CLIENT_LIST
     fallback = None
-    for client in CLIENT_LIST:
+    for client in clients:
         logger.debug("Trying client=%s", client or "default")
         try:
             info = extract_info(exe_path, url, client, restricted)
@@ -173,9 +184,11 @@ def find_info_with_compatible_format(exe_path: str, url: str, format_selector,
             client or "default", len(formats),
         )
 
-        if fallback is None and fallback_selector is not None:
+        if fallback_selector is not None:
             fb = fallback_selector(formats)
-            if fb and fb[0]:
+            if fb and fb[0] and (
+                    fallback is None or _fallback_rank(fb) > _fallback_rank(fallback[2])
+            ):
                 fallback = (info, client, fb)
 
     if fallback is not None:
