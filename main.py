@@ -32,7 +32,7 @@ from core.app_state import AppState
 from core.download_controller import DownloadController
 from core.quality_options import build_dropdown_options, quality_dropdown_text, resolve_quality_key
 from downloading.downloader import TEMP_PREFIX
-from downloading.error_classifier import classify_ytdlp_download_error, classify_ytdlp_update_error
+from core.error_classifier import classify_ytdlp_download_error, classify_ytdlp_update_error
 from languages import LANGUAGES
 from system.process_manager import acquire_single_instance, focus_existing_window
 from system.updater import UpdateChecker, APP_VERSION

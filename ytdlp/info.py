@@ -15,7 +15,7 @@ ytdlp/access.py (run_with_access_fallback), not here.
 import json
 import logging
 
-from downloading.error_classifier import DenoNotFoundError
+from core.error_classifier import DenoNotFoundError
 from ytdlp.access import access_args, run_with_access_fallback
 from ytdlp.runner import YtDlpError, run_info_command, youtube_extractor_args
 

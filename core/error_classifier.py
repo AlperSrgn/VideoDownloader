@@ -117,47 +117,98 @@ _MEMBERS_ONLY_PATTERNS = (
     "available to this channel's members",
 )
 
+# HTTP status codes are only trusted when they appear in an HTTP-error
+# context. A bare "404"/"429" substring would also match video IDs, URL
+# fragments, byte counts or titles that yt-dlp prints (e.g. "watch?v=ab404xQ").
+# Covers yt-dlp ("HTTP Error 404: Not Found") and ffmpeg ("Server returned
+# 404 Not Found", "HTTP error 404").
+_HTTP_STATUS_RE = re.compile(
+    r"(?:http error|server returned|returned http status|status code:?)\s*(\d{3})\b"
+)
+
+
+def _http_status(text: str):
+    """Return the HTTP status code (int) mentioned in an HTTP-error context
+    in the lowercased error text, or None."""
+    m = _HTTP_STATUS_RE.search(text)
+    return int(m.group(1)) if m else None
+
+
+def _contains_any(*patterns: str):
+    """Build a rule predicate that matches if any pattern is a substring."""
+    return lambda text: any(p in text for p in patterns)
+
+
+def _resolve_dns_failure() -> str:
+    """A DNS failure is ambiguous: offline machine vs. a mistyped/nonexistent
+    domain. Only evaluated when a DNS rule actually matched, so the (up to
+    3 s) connectivity check is never run for unrelated errors."""
+    if _has_internet_connection():
+        return "error_unsupported_url"
+    return "error_no_internet"
+
+
+# ---------------------------------------------------------------------------
+# Classification rules
+# ---------------------------------------------------------------------------
+# Ordered table of (key, predicate). The FIRST matching rule wins, so the
+# order here IS the priority — no need to track it in comments. To support a
+# new error: add one line at the right position. `key` is either a lang-dict
+# key (str) or a zero-arg callable that returns one (resolved lazily, only
+# when the rule matches). `predicate` receives the lowercased error text.
+#
+# Ordering notes:
+#   * Network/DNS first: when the connection is the problem, everything else
+#     in the output is noise.
+#   * members-only is before the access-blocked (429/bot) and not-found
+#     rules so a members-only error is never mistaken for them.
+_RULES = (
+    # --- connectivity ---
+    (_resolve_dns_failure,       _contains_any(*_DNS_FAILURE_PATTERNS)),
+    ("error_no_internet",        _contains_any(*_OTHER_NETWORK_ERROR_PATTERNS)),
+
+    # --- needs a signed-in account / cookies ---
+    ("error_cookies_unreadable", lambda t: ("could not copy" in t and "cookie" in t)
+                                           or "failed to decrypt" in t
+                                           or "dpapi" in t
+                                           or "cookie database" in t),
+    ("error_age_restricted",     _contains_any("sign in to confirm your age", "age-restricted")),
+    ("error_members_only",       _contains_any(*_MEMBERS_ONLY_PATTERNS)),
+
+    # --- blocked / rate-limited ---
+    ("error_access_blocked",     lambda t: "sign in to confirm you're not a bot" in t
+                                           or "too many requests" in t
+                                           or _http_status(t) == 429),
+
+    # --- video itself ---
+    ("error_video_private",      _contains_any("private video", "this video is private")),
+    ("error_video_not_found",    lambda t: "video unavailable" in t
+                                           or "no longer available" in t
+                                           or "content isn't available" in t
+                                           or _http_status(t) == 404),
+    ("error_unsupported_url",    _contains_any("unsupported url")),
+    ("error_format_not_found",   _contains_any("requested format is not available",
+                                               "no video formats found")),
+
+    # --- local file system ---
+    ("error_disk_full",          _contains_any("no space left on device")),
+    ("error_permission",         _contains_any("permission denied")),
+)
+
 
 def _match_error_key(text: str):
     """Return the lang-dict key that best describes this raw yt-dlp/ffmpeg
     error text (lowercased), or None if nothing matches. Shared by every
     classification helper below so the same patterns are recognized
     whether they show up in a failed download process, a failed ffmpeg
-    merge, or a failed --dump-json info extraction."""
+    merge, or a failed --dump-json info extraction.
+
+    The first matching rule in _RULES wins (see the table above)."""
     if not text:
         return None
-
-    if any(p in text for p in _DNS_FAILURE_PATTERNS):
-        if _has_internet_connection():
-            return "error_unsupported_url"
-        return "error_no_internet"
-    if any(p in text for p in _OTHER_NETWORK_ERROR_PATTERNS):
-        return "error_no_internet"
-    if ("could not copy" in text and "cookie" in text) or "failed to decrypt" in text \
-            or "dpapi" in text or "cookie database" in text:
-        return "error_cookies_unreadable"
-    if "sign in to confirm your age" in text or "age-restricted" in text:
-        return "error_age_restricted"
-    # Channel-members-only videos. Checked before the generic 429 / "not found"
-    # patterns below so a members-only error is never mistaken for them.
-    if any(p in text for p in _MEMBERS_ONLY_PATTERNS):
-        return "error_members_only"
-    if ("sign in to confirm you're not a bot" in text or "429" in text
-            or "too many requests" in text):
-        return "error_access_blocked"
-    if "private video" in text or "this video is private" in text:
-        return "error_video_private"
-    if ("video unavailable" in text or "no longer available" in text
-            or "content isn't available" in text or "404" in text):
-        return "error_video_not_found"
-    if "unsupported url" in text:
-        return "error_unsupported_url"
-    if "requested format is not available" in text or "no video formats found" in text:
-        return "error_format_not_found"
-    if "no space left on device" in text:
-        return "error_disk_full"
-    if "permission denied" in text:
-        return "error_permission"
+    for key, predicate in _RULES:
+        if predicate(text):
+            return key() if callable(key) else key
     return None
 
 

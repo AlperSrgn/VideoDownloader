@@ -20,7 +20,7 @@ from system.process_manager import (
     resume_if_suspended,
     terminate_process_tree,
 )
-from downloading.error_classifier import (
+from core.error_classifier import (
     DownloadCancelled,
     DownloadStalled,
     YtDlpProcessError,

@@ -21,7 +21,7 @@ import urllib.request
 import webbrowser
 from tkinter import TclError, messagebox
 
-from downloading.error_classifier import classify_generic_exception
+from core.error_classifier import classify_generic_exception
 
 logger = logging.getLogger(__name__)
 

@@ -1,6 +1,6 @@
 """
-Downloading a video or audio track: the yt-dlp download, the ffmpeg merge or
-mp3 conversion, and turning their failures into messages for the user.
+Downloading a video or audio track: the yt-dlp download and the ffmpeg merge
+or mp3 conversion.
 
 Where to look (one concern per module):
 
@@ -13,13 +13,13 @@ Where to look (one concern per module):
   process_runner.py   The subprocess engine: running yt-dlp and ffmpeg,
                       parsing their progress output, cancel / pause / stall
                       handling. No knowledge of formats, files or the UI.
-  error_classifier.py The exceptions the engine raises (DownloadCancelled,
-                      DownloadStalled, YtDlpProcessError, ...) and the
-                      classify_* functions that map a failure to a
-                      translated, user-facing message from the `lang` dict.
 
 Not in here: finding out what a video offers (formats, cookies, the yt-dlp
-binary itself) is the `ytdlp` package.
+binary itself) is the `ytdlp` package, and turning failures into translated,
+user-facing messages is core/error_classifier.py (it also defines the
+exceptions the engine raises: DownloadCancelled, DownloadStalled,
+YtDlpProcessError, ...). It lives in core/ because both this package and
+`ytdlp` import it.
 
 Other code imports the entry points from this package, not from the modules
 above:
@@ -27,9 +27,8 @@ above:
     from downloading import download_video, download_audio
 
 The names are loaded on first use (see __getattr__) instead of being imported
-here, so importing a light submodule such as downloading.error_classifier does
-not pull in the whole download stack. That also keeps the `ytdlp` package and
-this one from importing each other in a circle.
+here, so importing this package does not pull in the whole download stack
+until a name is actually used.
 """
 
 from importlib import import_module

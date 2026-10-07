@@ -21,7 +21,7 @@ import threading
 from typing import NamedTuple
 
 from cookie import cookie_args
-from downloading.error_classifier import DenoNotFoundError, is_access_restricted_error
+from core.error_classifier import DenoNotFoundError, is_access_restricted_error
 
 logger = logging.getLogger(__name__)
 

@@ -18,7 +18,7 @@ What happens, in order:
 
 Not in here: running yt-dlp / ffmpeg and parsing their output (progress,
 pause, stall) is process_runner.py, and turning failures into user-facing
-messages is error_classifier.py. Other code should import the entry points
+messages is core/error_classifier.py. Other code should import the entry points
 from the package: `from downloading import download_video, download_audio`.
 """
 
@@ -54,7 +54,7 @@ from downloading.process_runner import (
     run_download,
     run_ffmpeg_merge,
 )
-from downloading.error_classifier import (
+from core.error_classifier import (
     DenoNotFoundError,
     DownloadCancelled,
     DownloadStalled,
