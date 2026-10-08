@@ -90,6 +90,7 @@ LANGUAGES = {
         "error_disk_full": "Disk alanı yetersiz.\n\nLütfen yer açıp tekrar deneyin.",
         "error_permission": "Dosyaya yazma izni yok.\n\nİndirme konumunun yazma izinlerini kontrol edin.",
         "error_unknown_ytdlp": "İndirme sırasında bilinmeyen bir hata oluştu.",
+        "error_downloaded_file_missing": "İndirilen dosya bulunamadı.\n\nDosya antivirüs gibi başka bir program tarafından silinmiş ya da taşınmış olabilir. Lütfen tekrar deneyin.",
         "error_download_stalled": "İndirme askıda kaldı ve durduruldu.\n\n"
                                   "Bu videoyla ilgili yt-dlp bir sorunla karşılaşmış olabilir. "
                                   "Lütfen tekrar deneyin veya farklı bir video ile test edin.",
@@ -206,6 +207,7 @@ LANGUAGES = {
         "error_disk_full": "Not enough disk space.\n\nFree up some space and try again.",
         "error_permission": "Permission denied while writing the file.\n\nCheck the write permissions of the download location.",
         "error_unknown_ytdlp": "An unknown error occurred during download.",
+        "error_downloaded_file_missing": "The downloaded file could not be found.\n\nIt may have been removed or moved by another program (such as antivirus software). Please try again.",
         "error_download_stalled": "The download got stuck and was stopped.\n\n"
                                   "yt-dlp may have run into an issue with this video. "
                                   "Please try again, or test with a different video.",
@@ -322,6 +324,7 @@ LANGUAGES = {
         "error_disk_full": "No hay suficiente espacio en el disco.\n\nLibera espacio e inténtalo de nuevo.",
         "error_permission": "No tienes permiso para escribir el archivo.\n\nComprueba los permisos de escritura de la ubicación de descarga.",
         "error_unknown_ytdlp": "Ocurrió un error desconocido durante la descarga.",
+        "error_downloaded_file_missing": "No se encontró el archivo descargado.\n\nEs posible que otro programa (como un antivirus) lo haya eliminado o movido. Inténtalo de nuevo.",
         "error_download_stalled": "La descarga se quedó bloqueada y se detuvo.\n\n"
                                   "Es posible que yt-dlp haya encontrado un problema con este video. "
                                   "Inténtalo de nuevo o prueba con otro video.",
@@ -437,6 +440,7 @@ LANGUAGES = {
         "error_disk_full": "Nicht genügend Speicherplatz.\n\nGeben Sie Speicherplatz frei und versuchen Sie es erneut.",
         "error_permission": "Keine Berechtigung zum Schreiben der Datei.\n\nÜberprüfen Sie die Schreibberechtigungen des Download-Speicherorts.",
         "error_unknown_ytdlp": "Beim Download ist ein unbekannter Fehler aufgetreten.",
+        "error_downloaded_file_missing": "Die heruntergeladene Datei wurde nicht gefunden.\n\nSie wurde möglicherweise von einem anderen Programm (z. B. einem Virenscanner) gelöscht oder verschoben. Bitte versuchen Sie es erneut.",
         "error_download_stalled": "Der Download ist hängen geblieben und wurde gestoppt.\n\n"
                                   "yt-dlp ist möglicherweise bei diesem Video auf ein Problem gestoßen. "
                                   "Bitte versuchen Sie es erneut oder testen Sie ein anderes Video.",
@@ -552,6 +556,7 @@ LANGUAGES = {
         "error_disk_full": "Spazio su disco insufficiente.\n\nLibera spazio e riprova.",
         "error_permission": "Nessun permesso per scrivere il file.\n\nControlla i permessi di scrittura della posizione di download.",
         "error_unknown_ytdlp": "Si è verificato un errore sconosciuto durante il download.",
+        "error_downloaded_file_missing": "File scaricato non trovato.\n\nPotrebbe essere stato eliminato o spostato da un altro programma (ad esempio un antivirus). Riprova.",
         "error_download_stalled": "Il download si è bloccato ed è stato interrotto.\n\n"
                                   "yt-dlp potrebbe aver riscontrato un problema con questo video. "
                                   "Riprova oppure prova con un altro video.",
@@ -667,6 +672,7 @@ LANGUAGES = {
         "error_disk_full": "Espace disque insuffisant.\n\nLibérez de l'espace et réessayez.",
         "error_permission": "Autorisation d'écriture refusée.\n\nVérifiez les permissions d'écriture de l'emplacement de téléchargement.",
         "error_unknown_ytdlp": "Une erreur inconnue s'est produite pendant le téléchargement.",
+        "error_downloaded_file_missing": "Le fichier téléchargé est introuvable.\n\nIl a peut-être été supprimé ou déplacé par un autre programme (par exemple un antivirus). Veuillez réessayer.",
         "error_download_stalled": "Le téléchargement est resté bloqué et a été arrêté.\n\n"
                                   "yt-dlp a peut-être rencontré un problème avec cette vidéo. "
                                   "Veuillez réessayer ou tester une autre vidéo.",

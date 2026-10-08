@@ -7,7 +7,8 @@ are bundled internally in DownloadCallbacks.
 What happens, in order:
 
   1. _run_in_worker() starts the thread: checks ffmpeg exists, makes sure
-     yt-dlp is available, and always cleans up the temp files afterwards.
+     yt-dlp is available, runs the download steps, and always cleans up the
+     temp files afterwards.
   2. The video's formats are looked up (see the `ytdlp` package), retried with
      cookies + Deno only for age-restricted / members-only videos.
   3. download_video() either downloads one combined (muxed) file -- the
@@ -17,11 +18,19 @@ What happens, in order:
   4. Every phase feeds one progress bar through fixed weights (see the
      *_WEIGHT constants), not file sizes, because some formats report none.
 
+Error flow: the steps never report a failure themselves. A failing step
+raises -- an engine exception from process_runner, or _DownloadFailed carrying
+a ready, user-facing message -- and _run_in_worker() is the one place that
+turns it into on_error / on_cancelled. If the steps return normally it calls
+on_done. So exactly one of on_done, on_error and on_cancelled is called per
+download.
+
 Not in here: building the yt-dlp / ffmpeg command lines is ytdlp/commands.py
 and ffmpeg_commands.py; running them, parsing their output (progress, pause,
 stall) and retrying an HTTP 403 is process_runner.py; turning failures into
-user-facing messages is core/error_classifier.py. Other code should import the entry points
-from the package: `from downloading import download_video, download_audio`.
+user-facing messages is core/error_classifier.py. Other code should import
+the entry points from the package:
+`from downloading import download_video, download_audio`.
 """
 
 import logging
@@ -99,8 +108,9 @@ class DownloadCallbacks:
     """Everything a download reports back through, bundled so the phase
     helpers take one argument instead of six.
 
-    All callbacks are invoked from the worker thread. on_cancelled and
-    on_notice are optional; if on_cancelled is None a cancellation is
+    All callbacks are invoked from the worker thread. Exactly one of
+    on_done, on_error and on_cancelled is called per download. on_cancelled
+    and on_notice are optional; if on_cancelled is None a cancellation is
     reported through on_error instead.
     """
     on_progress: Callable
@@ -111,6 +121,14 @@ class DownloadCallbacks:
     on_pause_check: Optional[Callable[[], bool]] = None
     on_cancelled: Optional[Callable[[], None]] = None
     on_notice: Optional[Callable[[str], None]] = None
+
+
+class _DownloadFailed(Exception):
+    """A step failed and the user-facing message is already final (ffmpeg or
+    Deno missing, no usable format, downloaded file gone, ...). Raised by the
+    steps and turned into on_error by _run_in_worker; str(exc) is the
+    message. Engine failures (YtDlpProcessError, FfmpegProcessError, ...)
+    are not wrapped in this: _run_in_worker classifies those itself."""
 
 
 @dataclass(frozen=True)
@@ -133,13 +151,49 @@ class _DownloadJob:
             restricted=self.restricted, use_ffmpeg=use_ffmpeg,
         )
 
+    def run_ytdlp(self, cmd: list, progress_fn, known_total_mb=None) -> None:
+        """One yt-dlp download phase, with the HTTP 403 retry (see
+        run_download_with_retry). Raises on failure, stall or cancellation."""
+        run_download_with_retry(
+            cmd, progress_fn, self.cb.on_cancel_check,
+            self.lang["download_canceled_message"], self.lang["error_download_stalled"],
+            known_total_mb=known_total_mb, on_pause_check=self.cb.on_pause_check,
+        )
+
+    def run_ffmpeg(self, cmd: list, progress_fn, output_path: str) -> None:
+        """The ffmpeg merge / mp3 conversion step. Raises on failure or
+        cancellation, first removing `output_path`: a killed or failed ffmpeg
+        run can leave a partial, unplayable file behind."""
+        try:
+            run_ffmpeg_merge(
+                cmd, self.info.get("duration"), progress_fn, self.cb.on_cancel_check,
+                self.lang["download_canceled_message"], on_pause_check=self.cb.on_pause_check,
+            )
+        except Exception:
+            _remove_if_exists(output_path)
+            raise
+
+    def find_file(self, tag: str = "") -> str:
+        """Path of the file a yt-dlp phase wrote: temp_base + tag + any
+        extension. Raises _DownloadFailed if it is gone."""
+        pattern = f"{self.temp_base}{tag}.*"
+        try:
+            return find_glob_file(pattern)
+        except FileNotFoundError:
+            logger.error("Downloaded file not found: %s", pattern)
+            raise _DownloadFailed(self.lang.get(
+                "error_downloaded_file_missing",
+                "The downloaded file could not be found. Please try again.",
+            ))
+
 
 # ---------------------------------------------------------------------------
 # Shared helpers for download_video / download_audio
 # ---------------------------------------------------------------------------
 # Both download_video and download_audio run one or more yt-dlp download
-# phases followed by one ffmpeg phase; the exception -> callback mapping for
-# those phases lives here.
+# phases followed by one ffmpeg phase (see _DownloadJob.run_ytdlp /
+# run_ffmpeg). The exception -> callback mapping for all of them is in
+# _run_in_worker.
 
 def _weighted(report: Callable, offset: float, weight: float) -> Callable:
     """Maps one phase's 0-100 percent onto its slice of the overall bar:
@@ -163,33 +217,6 @@ def _report_cancelled(cb: DownloadCallbacks, exc) -> None:
         cb.on_error(str(exc))
 
 
-def _run_ytdlp_download_phase(cmd, progress_fn, cb: DownloadCallbacks, lang: dict,
-                              known_total_mb=None) -> bool:
-    """Runs one yt-dlp download phase. Failures are reported through
-    cb.on_error, and a user cancellation through cb.on_cancelled (or through
-    on_error if none was supplied). Returns True on success; on False the
-    caller should just `return` immediately — one of those callbacks has
-    already been called.
-
-    The HTTP 403 retry and the final-failure diagnostics live in
-    run_download_with_retry; this only maps its exceptions to callbacks.
-    """
-    try:
-        run_download_with_retry(
-            cmd, progress_fn, cb.on_cancel_check,
-            lang["download_canceled_message"], lang["error_download_stalled"],
-            known_total_mb=known_total_mb, on_pause_check=cb.on_pause_check,
-        )
-        return True
-    except DownloadCancelled as e:
-        _report_cancelled(cb, e)
-    except DownloadStalled as e:
-        cb.on_error(str(e))
-    except YtDlpProcessError as e:
-        cb.on_error(classify_ytdlp_error(e.output, e.returncode, lang))
-    return False
-
-
 def _remove_if_exists(path: str) -> None:
     """Best-effort delete. Used both to remove a partial, unplayable file
     ffmpeg may have written before being cancelled or before erroring out,
@@ -202,35 +229,9 @@ def _remove_if_exists(path: str) -> None:
             pass
 
 
-def _run_ffmpeg_merge_phase(cmd, duration, progress_fn, cb: DownloadCallbacks, lang: dict,
-                            output_path: str) -> bool:
-    """Runs the ffmpeg merge/convert step. Failures are reported through
-    cb.on_error and a user cancellation through cb.on_cancelled (or on_error
-    if none was supplied), first removing `output_path` if ffmpeg left behind
-    a partial file (on cancellation or a non-zero exit) — a killed or
-    failed ffmpeg run can still have written a partial, unplayable file
-    before stopping. Returns True on success; on False the caller should
-    just `return` immediately — one of those callbacks has already been
-    called.
-    """
-    try:
-        run_ffmpeg_merge(
-            cmd, duration, progress_fn, cb.on_cancel_check,
-            lang["download_canceled_message"], on_pause_check=cb.on_pause_check,
-        )
-        return True
-    except DownloadCancelled as e:
-        _remove_if_exists(output_path)
-        _report_cancelled(cb, e)
-    except FfmpegProcessError as e:
-        _remove_if_exists(output_path)
-        cb.on_error(classify_ffmpeg_error(e.output, e.returncode, lang))
-    return False
-
-
 def _extract_with_access_fallback(exe_path, url, selector, fallback_selector,
-                                  lang: dict, on_error,
-                                  fallback_good_enough=None) -> Optional[Extraction]:
+                                  lang: dict,
+                                  fallback_good_enough=None) -> Extraction:
     """Info extraction shared by download_video / download_audio.
 
     Normal videos are extracted without cookies and without Deno. Only an
@@ -240,9 +241,8 @@ def _extract_with_access_fallback(exe_path, url, selector, fallback_selector,
     fallback_good_enough(selection) -> bool lets the extraction stop trying
     further player clients once a fallback is already good enough.
 
-    Returns an Extraction (info, client, selection, restricted), or None after
-    reporting the failure through on_error; the caller should just `return`
-    in that case.
+    Returns an Extraction (info, client, selection, restricted); raises
+    _DownloadFailed with the user-facing message if there is none.
     """
     extraction_errors = []
     try:
@@ -252,25 +252,29 @@ def _extract_with_access_fallback(exe_path, url, selector, fallback_selector,
             fallback_good_enough=fallback_good_enough,
         )
     except DenoNotFoundError:
-        on_error(lang.get(
+        raise _DownloadFailed(lang.get(
             "error_deno_required",
             "This video is age-restricted or members-only, which requires Deno. "
             "Please install Deno (e.g. run: winget install DenoLand.Deno) and try again.",
         ))
-        return None
 
     if extraction is None:
-        on_error(classify_extraction_failure(
+        raise _DownloadFailed(classify_extraction_failure(
             extraction_errors, lang, fallback_key="download_video_format_error"
         ))
-        return None
     return extraction
 
 
-def _run_in_worker(name: str, save_location: str, on_error, lang: dict, impl) -> None:
+def _run_in_worker(name: str, save_location: str, cb: DownloadCallbacks, lang: dict, impl) -> None:
     """Shared skeleton of download_video / download_audio: starts a daemon
     thread that checks ffmpeg exists, makes sure yt-dlp is available, then
     calls impl(temp_id, exe_path) -- the part that differs per download.
+
+    This is the one place that reports the outcome (see the module
+    docstring): impl returning normally means success (on_done); anything it
+    raises is mapped to on_cancelled / on_error here. on_done is called
+    outside the try, so a failing callback can never produce a second
+    terminal callback.
 
     temp_id is a fresh UUID per download, so repeated downloads of the same
     video only match their own temp files. It is created before the thread
@@ -284,13 +288,24 @@ def _run_in_worker(name: str, save_location: str, on_error, lang: dict, impl) ->
     def worker():
         try:
             if not os.path.exists(get_ffmpeg_path()):
-                on_error(lang["ffmpeg_not_found_error"])
-                return
+                raise _DownloadFailed(lang["ffmpeg_not_found_error"])
             exe_path = ensure_ytdlp(get_appdata_path())
             impl(temp_id, exe_path)
+        except DownloadCancelled as e:
+            _report_cancelled(cb, e)
+        except DownloadStalled as e:
+            cb.on_error(str(e))
+        except YtDlpProcessError as e:
+            cb.on_error(classify_ytdlp_error(e.output, e.returncode, lang))
+        except FfmpegProcessError as e:
+            cb.on_error(classify_ffmpeg_error(e.output, e.returncode, lang))
+        except _DownloadFailed as e:
+            cb.on_error(str(e))
         except Exception as e:
             logger.exception("Unexpected error in %s worker", name)
-            on_error(classify_generic_exception(e, lang))
+            cb.on_error(classify_generic_exception(e, lang))
+        else:
+            cb.on_done()
         finally:
             cleanup_temp_files(save_location, f"{TEMP_PREFIX}{temp_id}")
 
@@ -322,31 +337,20 @@ def _download_muxed(job: _DownloadJob, video_format: dict, requested_height: int
         ).replace("{height}", str(height)))
 
     cmd = job.ytdlp_cmd(video_format, f"{job.temp_base}_video", use_ffmpeg=True)
-    if not _run_ytdlp_download_phase(
-            cmd, cb.on_progress, cb, job.lang, known_total_mb=known_size_mb(video_format),
-    ):
-        return
+    job.run_ytdlp(cmd, cb.on_progress, known_total_mb=known_size_mb(video_format))
 
-    try:
-        downloaded_path = find_glob_file(f"{job.temp_base}_video.*")
-    except FileNotFoundError as e:
-        cb.on_error(str(e))
-        return
+    downloaded_path = job.find_file("_video")
 
     # Keep yt-dlp's real extension: the muxed file is already a
     # finished container, so renaming it to .mp4 could mislabel e.g. webm.
     extension = os.path.splitext(downloaded_path)[1] or ".mp4"
     output_filename = unique_filename(job.save_location, f"{job.safe_title}{extension}")
     output_path = os.path.join(job.save_location, output_filename)
-    try:
-        os.replace(downloaded_path, output_path)
-    except OSError as e:
-        cb.on_error(classify_generic_exception(e, job.lang))
-        return
+    # An OSError here (disk, permissions) is classified by _run_in_worker.
+    os.replace(downloaded_path, output_path)
 
     update_file_timestamp(output_path)
     logger.debug("Download completed (muxed): %s", output_path)
-    cb.on_done()
 
 
 def _download_and_merge(job: _DownloadJob, video_format: dict, audio_format: dict) -> None:
@@ -363,23 +367,17 @@ def _download_and_merge(job: _DownloadJob, video_format: dict, audio_format: dic
     video_cmd = job.ytdlp_cmd(video_format, f"{job.temp_base}_video")
     audio_cmd = job.ytdlp_cmd(audio_format, f"{job.temp_base}_audio")
 
-    if not _run_ytdlp_download_phase(
-            video_cmd, _weighted(cb.on_progress, 0, VIDEO_PHASE_WEIGHT), cb, job.lang,
-            known_total_mb=known_size_mb(video_format),
-    ):
-        return
-    if not _run_ytdlp_download_phase(
-            audio_cmd, _weighted(cb.on_progress, VIDEO_PHASE_WEIGHT, AUDIO_PHASE_WEIGHT), cb,
-            job.lang, known_total_mb=known_size_mb(audio_format),
-    ):
-        return
+    job.run_ytdlp(
+        video_cmd, _weighted(cb.on_progress, 0, VIDEO_PHASE_WEIGHT),
+        known_total_mb=known_size_mb(video_format),
+    )
+    job.run_ytdlp(
+        audio_cmd, _weighted(cb.on_progress, VIDEO_PHASE_WEIGHT, AUDIO_PHASE_WEIGHT),
+        known_total_mb=known_size_mb(audio_format),
+    )
 
-    try:
-        video_path = find_glob_file(f"{job.temp_base}_video.*")
-        audio_path = find_glob_file(f"{job.temp_base}_audio.*")
-    except FileNotFoundError as e:
-        cb.on_error(str(e))
-        return
+    video_path = job.find_file("_video")
+    audio_path = job.find_file("_audio")
 
     output_filename = unique_filename(job.save_location, f"{job.safe_title}.mp4")
     output_path = os.path.join(job.save_location, output_filename)
@@ -389,19 +387,18 @@ def _download_and_merge(job: _DownloadJob, video_format: dict, audio_format: dic
         merge_progress = _weighted(
             cb.on_merge_progress, VIDEO_PHASE_WEIGHT + AUDIO_PHASE_WEIGHT, MERGE_PHASE_WEIGHT,
         )
-    success = _run_ffmpeg_merge_phase(
-        build_ffmpeg_merge_cmd(video_path, audio_path, output_path),
-        job.info.get("duration"), merge_progress, cb, job.lang, output_path,
-    )
-    # Always clean up temporary video/audio files, regardless of merge result.
-    for path in (video_path, audio_path):
-        _remove_if_exists(path)
-    if not success:
-        return
+    try:
+        job.run_ffmpeg(
+            build_ffmpeg_merge_cmd(video_path, audio_path, output_path),
+            merge_progress, output_path,
+        )
+    finally:
+        # Always clean up temporary video/audio files, regardless of merge result.
+        for path in (video_path, audio_path):
+            _remove_if_exists(path)
 
     update_file_timestamp(output_path)
     logger.debug("Download completed: %s", output_path)
-    cb.on_done()
 
 
 def download_video(
@@ -445,21 +442,18 @@ def download_video(
 
     def _impl(temp_id, exe_path):
         if target_resolution not in RESOLUTION_MAP:
-            on_error(f"Invalid resolution: {target_resolution}")
-            return
+            raise _DownloadFailed(f"Invalid resolution: {target_resolution}")
 
         video_height = RESOLUTION_MAP[target_resolution]
         extraction = _extract_with_access_fallback(
             exe_path, url,
             lambda formats: find_suitable_format(formats, video_height),
             lambda formats: find_progressive_format(formats, video_height),
-            lang, on_error,
+            lang,
             # A muxed fallback that already reaches the requested resolution
             # cannot be beaten by trying more clients.
             fallback_good_enough=lambda selection: selection.height >= video_height,
         )
-        if extraction is None:
-            return
         selection = extraction.selection
 
         job = _DownloadJob(
@@ -474,7 +468,7 @@ def download_video(
         else:
             _download_and_merge(job, selection.video, selection.audio)
 
-    _run_in_worker("download_video", save_location, on_error, lang, _impl)
+    _run_in_worker("download_video", save_location, cb, lang, _impl)
 
 
 # ---------------------------------------------------------------------------
@@ -520,10 +514,8 @@ def download_audio(
     def _impl(temp_id, exe_path):
         extraction = _extract_with_access_fallback(
             exe_path, url, find_suitable_audio_format, find_progressive_audio_format,
-            lang, on_error,
+            lang,
         )
-        if extraction is None:
-            return
         info, client = extraction.info, extraction.client
         chosen_audio = extraction.selection.audio
 
@@ -553,33 +545,28 @@ def download_audio(
         # Download the raw audio track only — no -x/--audio-format here.
         # The mp3 conversion is done ourselves below so its progress can be
         # reported instead of running invisibly inside yt-dlp.
-        if not _run_ytdlp_download_phase(
-                job.ytdlp_cmd(chosen_audio, job.temp_base),
-                _weighted(cb.on_progress, 0, AUDIO_DOWNLOAD_WEIGHT), cb, lang,
-                known_total_mb=known_size_mb(chosen_audio),
-        ):
-            return
+        job.run_ytdlp(
+            job.ytdlp_cmd(chosen_audio, job.temp_base),
+            _weighted(cb.on_progress, 0, AUDIO_DOWNLOAD_WEIGHT),
+            known_total_mb=known_size_mb(chosen_audio),
+        )
 
-        try:
-            raw_audio_path = find_glob_file(f"{job.temp_base}.*")
-        except FileNotFoundError as e:
-            on_error(str(e))
-            return
+        raw_audio_path = job.find_file()
 
         convert_progress = None
         if cb.on_merge_progress:
             convert_progress = _weighted(
                 cb.on_merge_progress, AUDIO_DOWNLOAD_WEIGHT, AUDIO_CONVERT_WEIGHT,
             )
-        success = _run_ffmpeg_merge_phase(
-            build_ffmpeg_mp3_cmd(raw_audio_path, output_path),
-            info.get("duration"), convert_progress, cb, lang, output_path,
-        )
-        _remove_if_exists(raw_audio_path)
-        if not success:
-            return
+        try:
+            job.run_ffmpeg(
+                build_ffmpeg_mp3_cmd(raw_audio_path, output_path),
+                convert_progress, output_path,
+            )
+        finally:
+            _remove_if_exists(raw_audio_path)
 
         update_file_timestamp(output_path)
-        on_done()
+        logger.debug("Download completed (audio): %s", output_path)
 
-    _run_in_worker("download_audio", save_location, on_error, lang, _impl)
+    _run_in_worker("download_audio", save_location, cb, lang, _impl)
