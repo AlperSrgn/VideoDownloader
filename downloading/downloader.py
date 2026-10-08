@@ -292,12 +292,16 @@ def _run_ffmpeg_merge_phase(cmd, duration, progress_fn, cb: DownloadCallbacks, l
 
 
 def _extract_with_access_fallback(exe_path, url, selector, fallback_selector,
-                                  lang: dict, on_error) -> Optional[Extraction]:
+                                  lang: dict, on_error,
+                                  fallback_good_enough=None) -> Optional[Extraction]:
     """Info extraction shared by download_video / download_audio.
 
     Normal videos are extracted without cookies and without Deno. Only an
     age-restricted / members-only video (with cookies configured) is retried
     with cookies + Deno -- see find_info_with_access_fallback.
+
+    fallback_good_enough(selection) -> bool lets the extraction stop trying
+    further player clients once a fallback is already good enough.
 
     Returns an Extraction (info, client, selection, restricted), or None after
     reporting the failure through on_error; the caller should just `return`
@@ -308,6 +312,7 @@ def _extract_with_access_fallback(exe_path, url, selector, fallback_selector,
         extraction = find_info_with_access_fallback(
             exe_path, url, selector, collected_errors=extraction_errors,
             fallback_selector=fallback_selector,
+            fallback_good_enough=fallback_good_enough,
         )
     except DenoNotFoundError:
         on_error(lang.get(
@@ -512,6 +517,9 @@ def download_video(
             lambda formats: find_suitable_format(formats, video_height),
             lambda formats: find_progressive_format(formats, video_height),
             lang, on_error,
+            # A muxed fallback that already reaches the requested resolution
+            # cannot be beaten by trying more clients.
+            fallback_good_enough=lambda selection: selection.height >= video_height,
         )
         if extraction is None:
             return

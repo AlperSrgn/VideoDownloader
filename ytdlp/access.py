@@ -10,7 +10,10 @@ This module owns that whole story:
   - access_args():              the extra yt-dlp arguments (cookies + Deno)
   - find_deno():                where Deno is installed
   - run_with_access_fallback(): the single place that decides WHEN a video gets
-                                them; the preview and the download both use it
+                                them; the preview and the download both use it.
+                                It is also the single place that writes the full
+                                yt-dlp diagnostics of a FINAL failure to the log
+                                (failed passes before it stay short).
 """
 
 import logging
@@ -22,6 +25,7 @@ from typing import NamedTuple
 
 from cookie import cookie_args
 from core.error_classifier import DenoNotFoundError, is_access_restricted_error
+from ytdlp.runner import log_diagnostics
 
 logger = logging.getLogger(__name__)
 
@@ -98,16 +102,24 @@ class AccessResult(NamedTuple):
     """Outcome of run_with_access_fallback()."""
     value: object     # what `attempt` returned on success, else None
     restricted: bool  # True if the last pass that ran was the restricted one
-    errors: list      # error messages collected by that last pass
+    errors: list      # YtDlpError objects collected by that last pass (str() = message)
 
 
-def run_with_access_fallback(url: str, attempt) -> AccessResult:
+def _log_final_failure(errors: list) -> None:
+    """Writes the full diagnostics of every error of the pass that ended the
+    whole attempt. Failed passes that were followed by another pass are NOT
+    logged this way, only the last one is."""
+    for error in errors:
+        log_diagnostics(error)
+
+
+def run_with_access_fallback(url: str, attempt, log_failure: bool = True) -> AccessResult:
     """Runs `attempt` with the normal pass first, and with cookies + Deno only
     when the video turns out to need them.
 
     `attempt(restricted: bool, errors: list)` does ONE extraction pass.
     restricted=True means "use access_args(True)". On failure it appends the
-    error message(s) to `errors` and returns None; on success it returns
+    YtDlpError(s) to `errors` and returns None; on success it returns
     anything that is not None.
 
     Order of passes:
@@ -125,21 +137,32 @@ def run_with_access_fallback(url: str, attempt) -> AccessResult:
 
     `errors` in the result belong to the last pass that ran, which is the
     one worth showing the user.
+
+    Logging: a pass that is followed by another one only leaves short DEBUG
+    lines (see ytdlp/runner.py). When the whole attempt fails, the full
+    diagnostics of the last pass are written to the log once -- unless
+    log_failure=False (the preview, whose failure is silent; the download
+    that follows logs its own).
     """
     if _is_known_restricted(url):
         errors = []
         value = attempt(True, errors)
         if value is not None:
             return AccessResult(value, True, errors)
-        _forget_restricted(url)  # stale (cookies expired?): start over normally
+        logger.info("Remembered restricted pass failed (cookies expired?); starting over normally")
+        _forget_restricted(url)  # stale: start over normally
 
     errors = []
     value = attempt(False, errors)
-    if value is not None or not is_access_restricted_error(errors) or not cookie_args():
+    if value is not None or not is_access_restricted_error([str(e) for e in errors]) or not cookie_args():
         # Success, an unrelated failure, or cookies are turned off: nothing to escalate.
+        if value is None and log_failure:
+            _log_final_failure(errors)
         return AccessResult(value, False, errors)
 
     if not find_deno():
+        if log_failure:
+            _log_final_failure(errors)
         raise DenoNotFoundError("Deno is required for age-restricted / members-only videos")
 
     logger.info("Restricted video detected; retrying with cookies + Deno")
@@ -147,4 +170,6 @@ def run_with_access_fallback(url: str, attempt) -> AccessResult:
     value = attempt(True, errors)
     if value is not None:
         _mark_restricted(url)
+    elif log_failure:
+        _log_final_failure(errors)
     return AccessResult(value, True, errors)

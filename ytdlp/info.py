@@ -15,8 +15,9 @@ not here.
 
 import json
 import logging
+import threading
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable, Optional
 
 from core.error_classifier import DenoNotFoundError
 from ytdlp.access import access_args, run_with_access_fallback
@@ -37,6 +38,28 @@ CLIENT_LIST = [None]
 # cookies). With a signed-in account the default client often gets SABR-only
 # streams without URLs; web_safari still returns HLS formats up to 1080p.
 RESTRICTED_CLIENT_LIST = [None, "web_safari"]
+
+# The restricted client that worked last (in any restricted pass this session)
+# is tried first next time, so a signed-in account whose default client is
+# SABR-only does not pay for the failing client on every video (each client
+# costs ~6-7 s). [] = none known yet; [None] = the default client worked.
+# In-memory only: nothing is persisted.
+_restricted_client_hint: list = []
+_hint_lock = threading.Lock()
+
+
+def _restricted_clients() -> list:
+    """RESTRICTED_CLIENT_LIST, with the client that worked last moved first."""
+    with _hint_lock:
+        hint = list(_restricted_client_hint)
+    if not hint or hint[0] not in RESTRICTED_CLIENT_LIST:
+        return list(RESTRICTED_CLIENT_LIST)
+    return [hint[0]] + [c for c in RESTRICTED_CLIENT_LIST if c != hint[0]]
+
+
+def _remember_restricted_client(client) -> None:
+    with _hint_lock:
+        _restricted_client_hint[:] = [client]
 
 
 @dataclass(frozen=True)
@@ -127,11 +150,13 @@ def fetch_preview_info(exe_path: str, url: str) -> dict | None:
                     "Preview%s: client=%s failed: %s",
                     " (restricted)" if restricted else "", client or "default", e,
                 )
-                errors.append(str(e))
+                errors.append(e)
         return None
 
     try:
-        return run_with_access_fallback(url, attempt).value
+        # log_failure=False: a failed preview is silent; if the video really
+        # cannot be downloaded, the download logs the full diagnostics itself.
+        return run_with_access_fallback(url, attempt, log_failure=False).value
     except DenoNotFoundError:
         # Needs a login but Deno isn't installed: hide the preview. The
         # download itself tells the user what is missing.
@@ -154,6 +179,7 @@ def _log_format_summary(client, formats: list) -> None:
 def find_info_with_compatible_format(exe_path: str, url: str, selector: FormatSelector,
                                      collected_errors=None,
                                      fallback_selector: FormatSelector | None = None,
+                                     fallback_good_enough: Callable[[Selection], bool] | None = None,
                                      restricted: bool = False) -> Extraction | None:
     """
     Tries each client until `selector(formats)` returns a Selection, and
@@ -163,12 +189,21 @@ def find_info_with_compatible_format(exe_path: str, url: str, selector: FormatSe
     `selector`: the fallback Selection with the greatest video height wins
     (the first client wins ties), so a better client is never skipped just
     because an earlier one only offered a lower-quality fallback.
+    If fallback_good_enough is also given and the best fallback so far
+    satisfies it (e.g. it already reaches the requested resolution), the
+    remaining clients are skipped: each costs several seconds and cannot
+    improve on it.
 
-    If collected_errors is provided, it stores each YtDlpError message so the
-    caller can identify the actual failure reason instead of showing a generic
-    “no compatible format” error.
+    In the restricted pass the clients are tried in the order of
+    _restricted_clients() (the one that worked last first), and the client of
+    the returned Extraction is remembered for next time.
+
+    If collected_errors is provided, the YtDlpError of each failed client is
+    appended to it (str() gives the message) so the caller can identify the
+    actual failure reason instead of showing a generic “no compatible format”
+    error, and log the full diagnostics if the failure is final.
     """
-    clients = RESTRICTED_CLIENT_LIST if restricted else CLIENT_LIST
+    clients = _restricted_clients() if restricted else CLIENT_LIST
     fallback: Extraction | None = None
 
     for client in clients:
@@ -178,13 +213,15 @@ def find_info_with_compatible_format(exe_path: str, url: str, selector: FormatSe
         except YtDlpError as e:
             logger.debug("Client %s failed to extract info: %s", client or "default", e)
             if collected_errors is not None:
-                collected_errors.append(str(e))
+                collected_errors.append(e)
             continue
 
         formats = info.get("formats", [])
         selection = selector(formats)
         if selection is not None:
             logger.debug("Client %s: found compatible format(s)", client or "default")
+            if restricted:
+                _remember_restricted_client(client)
             return Extraction(info, client, selection, restricted)
 
         _log_format_summary(client, formats)
@@ -200,7 +237,17 @@ def find_info_with_compatible_format(exe_path: str, url: str, selector: FormatSe
             ):
                 fallback = Extraction(info, client, candidate, restricted)
 
+        if (fallback is not None and fallback_good_enough is not None
+                and fallback_good_enough(fallback.selection)):
+            logger.debug(
+                "Fallback from client %s is good enough; skipping remaining clients",
+                fallback.client or "default",
+            )
+            break
+
     if fallback is not None:
+        if restricted:
+            _remember_restricted_client(fallback.client)
         logger.warning(
             "No separate streams from any client; falling back to %s format %s "
             "(client=%s, %sp)",
@@ -214,7 +261,8 @@ def find_info_with_compatible_format(exe_path: str, url: str, selector: FormatSe
 
 def find_info_with_access_fallback(exe_path: str, url: str, selector: FormatSelector,
                                    collected_errors=None,
-                                   fallback_selector: FormatSelector | None = None
+                                   fallback_selector: FormatSelector | None = None,
+                                   fallback_good_enough: Callable[[Selection], bool] | None = None
                                    ) -> Extraction | None:
     """Full info extraction for a download, with the cookies + Deno retry for
     age-restricted / members-only videos (see run_with_access_fallback for the
@@ -223,17 +271,19 @@ def find_info_with_access_fallback(exe_path: str, url: str, selector: FormatSele
     Returns an Extraction, or None on failure. `Extraction.restricted` tells
     the caller to build its download commands with access_args(True) too.
     Raises DenoNotFoundError if the restricted pass is needed but Deno is not
-    installed. If collected_errors is given, the error messages of the last
-    pass are appended to it.
+    installed. If collected_errors is given, the error messages (strings) of
+    the last pass are appended to it. When the whole extraction fails, the full
+    yt-dlp diagnostics of the last pass are logged once (see
+    run_with_access_fallback).
     """
     def attempt(restricted: bool, errors: list):
         return find_info_with_compatible_format(
             exe_path, url, selector,
             collected_errors=errors, fallback_selector=fallback_selector,
-            restricted=restricted,
+            fallback_good_enough=fallback_good_enough, restricted=restricted,
         )
 
     outcome = run_with_access_fallback(url, attempt)
     if collected_errors is not None:
-        collected_errors.extend(outcome.errors)
+        collected_errors.extend(str(e) for e in outcome.errors)
     return outcome.value
