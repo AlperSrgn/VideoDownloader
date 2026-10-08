@@ -17,9 +17,10 @@ What happens, in order:
   4. Every phase feeds one progress bar through fixed weights (see the
      *_WEIGHT constants), not file sizes, because some formats report none.
 
-Not in here: running yt-dlp / ffmpeg and parsing their output (progress,
-pause, stall) is process_runner.py, and turning failures into user-facing
-messages is core/error_classifier.py. Other code should import the entry points
+Not in here: building the yt-dlp / ffmpeg command lines is ytdlp/commands.py
+and ffmpeg_commands.py; running them, parsing their output (progress, pause,
+stall) and retrying an HTTP 403 is process_runner.py; turning failures into
+user-facing messages is core/error_classifier.py. Other code should import the entry points
 from the package: `from downloading import download_video, download_audio`.
 """
 
@@ -41,19 +42,19 @@ from utils import (
 )
 from core.quality_options import RESOLUTION_MAP
 from ytdlp import (
-    access_args,
+    build_download_cmd,
     ensure_ytdlp,
     find_info_with_access_fallback,
     find_progressive_audio_format,
     find_progressive_format,
     find_suitable_audio_format,
     find_suitable_format,
-    youtube_extractor_args,
 )
 from ytdlp.info import Extraction
+from downloading.ffmpeg_commands import build_ffmpeg_merge_cmd, build_ffmpeg_mp3_cmd
 from downloading.process_runner import (
     known_size_mb,
-    run_download,
+    run_download_with_retry,
     run_ffmpeg_merge,
 )
 from core.error_classifier import (
@@ -127,77 +128,10 @@ class _DownloadJob:
     lang: dict
 
     def ytdlp_cmd(self, fmt: dict, output_template: str, use_ffmpeg: bool = False) -> list:
-        return _build_ytdlp_download_cmd(
+        return build_download_cmd(
             self.exe_path, fmt["format_id"], self.client, output_template, self.url,
             restricted=self.restricted, use_ffmpeg=use_ffmpeg,
         )
-
-
-# ---------------------------------------------------------------------------
-# Command builders
-# ---------------------------------------------------------------------------
-
-def _build_ytdlp_download_cmd(exe_path: str, format_id: str, client: str | None,
-                              output_template: str, url: str,
-                              restricted: bool = False,
-                              use_ffmpeg: bool = False) -> list:
-    """Builds a yt-dlp download command for one phase (a video track, an
-    audio track, or an audio-only download) — only the format id and
-    output template differ between call sites, so this is the one place
-    that lists the flags all of them share.
-
-    --continue is explicit even though it's yt-dlp's default: relaunching
-    this exact command after a pause (see run_download's docstring)
-    relies on it resuming the partial file via an HTTP Range request
-    instead of starting over, and this guards against a local yt-dlp
-    config overriding that default.
-
-    restricted=True (age-restricted / members-only video) adds cookies + Deno;
-    normal videos get neither (see access_args).
-    """
-    return [
-        exe_path,
-        "-f", format_id,
-        *access_args(restricted),
-        *youtube_extractor_args(client),
-        # HLS (m3u8) parçaları ham MPEG-TS olarak iner; yt-dlp bunu ancak
-        # ffmpeg'i bulabilirse gerçek MP4'e çevirir.
-        *(["--ffmpeg-location", get_ffmpeg_path()] if use_ffmpeg else []),
-        "--newline", "--no-warnings",
-        "--continue",
-        "-o", f"{output_template}.%(ext)s",
-        url,
-    ]
-
-
-def _build_ffmpeg_merge_cmd(video_path: str, audio_path: str, output_path: str) -> list:
-    """Muxes separate video + audio tracks into one mp4 (video is copied,
-    audio re-encoded to AAC). -progress pipe:1 feeds run_ffmpeg_merge."""
-    return [
-        get_ffmpeg_path(), "-y",
-        "-i", video_path,
-        "-i", audio_path,
-        "-c:v", "copy",
-        "-c:a", "aac",
-        "-shortest",
-        "-progress", "pipe:1",
-        "-nostats",
-        output_path,
-    ]
-
-
-def _build_ffmpeg_mp3_cmd(raw_audio_path: str, output_path: str) -> list:
-    """Converts a raw audio (or muxed video, via -vn) file to mp3."""
-    return [
-        get_ffmpeg_path(), "-y",
-        "-i", raw_audio_path,
-        "-vn",
-        "-c:a", "libmp3lame",
-        "-q:a", "2",
-        "-progress", "pipe:1",
-        "-nostats",
-        output_path,
-    ]
 
 
 # ---------------------------------------------------------------------------
@@ -236,9 +170,12 @@ def _run_ytdlp_download_phase(cmd, progress_fn, cb: DownloadCallbacks, lang: dic
     on_error if none was supplied). Returns True on success; on False the
     caller should just `return` immediately — one of those callbacks has
     already been called.
+
+    The HTTP 403 retry and the final-failure diagnostics live in
+    run_download_with_retry; this only maps its exceptions to callbacks.
     """
     try:
-        run_download(
+        run_download_with_retry(
             cmd, progress_fn, cb.on_cancel_check,
             lang["download_canceled_message"], lang["error_download_stalled"],
             known_total_mb=known_total_mb, on_pause_check=cb.on_pause_check,
@@ -453,7 +390,7 @@ def _download_and_merge(job: _DownloadJob, video_format: dict, audio_format: dic
             cb.on_merge_progress, VIDEO_PHASE_WEIGHT + AUDIO_PHASE_WEIGHT, MERGE_PHASE_WEIGHT,
         )
     success = _run_ffmpeg_merge_phase(
-        _build_ffmpeg_merge_cmd(video_path, audio_path, output_path),
+        build_ffmpeg_merge_cmd(video_path, audio_path, output_path),
         job.info.get("duration"), merge_progress, cb, job.lang, output_path,
     )
     # Always clean up temporary video/audio files, regardless of merge result.
@@ -635,7 +572,7 @@ def download_audio(
                 cb.on_merge_progress, AUDIO_DOWNLOAD_WEIGHT, AUDIO_CONVERT_WEIGHT,
             )
         success = _run_ffmpeg_merge_phase(
-            _build_ffmpeg_mp3_cmd(raw_audio_path, output_path),
+            build_ffmpeg_mp3_cmd(raw_audio_path, output_path),
             info.get("duration"), convert_progress, cb, lang, output_path,
         )
         _remove_if_exists(raw_audio_path)

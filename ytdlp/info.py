@@ -20,9 +20,10 @@ from dataclasses import dataclass
 from typing import Callable, Optional
 
 from core.error_classifier import DenoNotFoundError
-from ytdlp.access import access_args, run_with_access_fallback
+from ytdlp.access import run_with_access_fallback
+from ytdlp.commands import build_info_cmd
 from ytdlp.formats import FormatSelector, Selection
-from ytdlp.runner import YtDlpError, run_info_command, youtube_extractor_args
+from ytdlp.runner import YtDlpError, run_info_command
 
 logger = logging.getLogger(__name__)
 
@@ -77,16 +78,7 @@ def extract_info(exe_path: str, url: str, client: str, restricted: bool = False)
     info dict (same shape as yt_dlp's Python `extract_info`, including the
     'formats' list). Raises YtDlpError on failure.
     """
-    # No --no-warnings and -v on purpose: warnings (e.g. "cookies are no longer
-    # valid") and debug lines are only ever written to the log on failure.
-    cmd = [
-        exe_path,
-        "--dump-json",
-        "-v",
-        *access_args(restricted),
-        *youtube_extractor_args(client),
-        url,
-    ]
+    cmd = build_info_cmd(exe_path, url, client, restricted)
     suffix = "/restricted" if restricted else ""
     stdout = run_info_command(cmd, timeout=60, label=f"info/{client or 'default'}{suffix}")
 
@@ -107,14 +99,7 @@ def _extract_preview_info(exe_path: str, url: str, client: str, restricted: bool
     extraction extract_info() does for an actual download, where every
     format really does need to be resolved.
     """
-    cmd = [
-        exe_path,
-        "--dump-json",
-        "-v",
-        *access_args(restricted),
-        *youtube_extractor_args(client, extra="skip=hls,dash"),
-        url,
-    ]
+    cmd = build_info_cmd(exe_path, url, client, restricted, preview=True)
     suffix = "/restricted" if restricted else ""
     stdout = run_info_command(cmd, timeout=30, label=f"preview/{client or 'default'}{suffix}")
 

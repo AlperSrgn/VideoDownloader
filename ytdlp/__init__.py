@@ -5,6 +5,10 @@ Where to look (one concern per module):
 
   binary.py   Getting yt-dlp.exe: first-run download (SHA-256 verified), the
               nightly self-update, version lookup. Entry point: ensure_ytdlp().
+  commands.py Building every yt-dlp command line: build_info_cmd() for the
+              --dump-json info commands (full or preview) and
+              build_download_cmd() for one download phase. Pure functions;
+              nothing else assembles a yt-dlp argument list.
   runner.py   Launching yt-dlp.exe for the --dump-json info commands: no
               console window, timeouts, full diagnostics in the log on
               failure. Defines YtDlpError and youtube_extractor_args().
@@ -17,8 +21,9 @@ Where to look (one concern per module):
   formats.py  Picking the video/audio format for the requested quality from
               that metadata. Pure functions, easy to unit test.
 
-Not in here: the download itself (progress, pause/resume, ffmpeg merge) is
-downloading/downloader.py, and the cookie settings and files are the `cookie`
+Not in here: running the download (progress, pause/resume, 403 retry, ffmpeg
+merge) is downloading/, which uses build_download_cmd() from here; ffmpeg
+command lines are downloading/ffmpeg_commands.py. The cookie settings and files are the `cookie`
 package.
 
 Other code imports from this package, not from the modules above:
@@ -34,6 +39,7 @@ from ytdlp.binary import (
     get_ytdlp_path,
     get_ytdlp_version,
 )
+from ytdlp.commands import build_download_cmd, build_info_cmd
 from ytdlp.formats import (
     find_progressive_audio_format,
     find_progressive_format,
@@ -52,6 +58,8 @@ __all__ = [
     "YT_DLP_EXE_NAME",
     "YtDlpError",
     "access_args",
+    "build_download_cmd",
+    "build_info_cmd",
     "download_ytdlp_exe",
     "ensure_ytdlp",
     "extract_info",

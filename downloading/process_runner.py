@@ -2,7 +2,11 @@
 progress output, and handles cancel / pause / stall detection.
 
 Public API (used by downloader.py):
-    known_size_mb, run_download, run_ffmpeg_merge
+    known_size_mb, run_download, run_download_with_retry, run_ffmpeg_merge
+
+run_download_with_retry() is what downloader.py calls for yt-dlp phases: it
+adds the bounded HTTP 403 retry (and the final-failure diagnostics) on top of
+run_download()'s pause/cancel/stall handling.
 """
 import logging
 import queue
@@ -25,6 +29,7 @@ from core.error_classifier import (
     DownloadStalled,
     YtDlpProcessError,
     FfmpegProcessError,
+    is_http_403,
 )
 
 logger = logging.getLogger(__name__)
@@ -39,6 +44,13 @@ _STALL_TIMEOUT = 60  # seconds
 # paused-wait loop re-check cancel/pause while no new output arrives.
 # Cancellation won't be delayed beyond this interval.
 _CANCEL_POLL_INTERVAL = 0.2  # seconds
+
+# HTTP 403 from YouTube's servers is often transient (rate limiting after many
+# requests in a row, an expired or rejected stream URL). Every run of a download
+# command re-extracts the video, so a retry gets fresh URLs. Bounded on purpose:
+# a persistent 403 (e.g. a format that needs a PO token) still fails quickly.
+_RETRY_DELAYS_403 = (3, 8)   # seconds to wait before retry 1 and retry 2
+_LOG_TAIL_LINES = 25
 
 
 # ---------------------------------------------------------------------------
@@ -270,6 +282,65 @@ def _download_once(cmd, on_progress, on_cancel_check, cancel_message, stall_mess
     process.wait()
     if process.returncode != 0:
         raise YtDlpProcessError(process.returncode, "".join(output_lines))
+
+
+# ---------------------------------------------------------------------------
+# HTTP 403 retry
+# ---------------------------------------------------------------------------
+
+def _output_tail(output: str, max_lines: int = _LOG_TAIL_LINES) -> str:
+    """Last lines of yt-dlp's output for the log, without the progress lines."""
+    lines = [l for l in output.splitlines() if l.strip() and "% of" not in l]
+    return "\n".join("    | " + l for l in lines[-max_lines:]) or "    | (empty)"
+
+
+def _wait_cancellable(seconds: float, on_cancel_check) -> bool:
+    """Sleeps for `seconds`; returns False as soon as the user cancels."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if on_cancel_check():
+            return False
+        time.sleep(0.25)
+    return not on_cancel_check()
+
+
+def run_download_with_retry(cmd, on_progress, on_cancel_check, cancel_message,
+                            stall_message=None, known_total_mb=None, on_pause_check=None):
+    """run_download() plus the HTTP 403 retry policy; same arguments.
+
+    A 403 (see core.error_classifier.is_http_403) is retried up to
+    len(_RETRY_DELAYS_403) times after a short, cancellable pause. A failure
+    that is final is logged with the command and the tail of yt-dlp's output,
+    then re-raised.
+
+    Raises DownloadCancelled (also when the user cancels during a retry
+    pause), DownloadStalled, or YtDlpProcessError once retries are used up
+    or the failure is not a 403.
+    """
+    retries_done = 0
+    while True:
+        try:
+            run_download(
+                cmd, on_progress, on_cancel_check, cancel_message, stall_message,
+                known_total_mb=known_total_mb, on_pause_check=on_pause_check,
+            )
+            return
+        except YtDlpProcessError as e:
+            if is_http_403(e.output) and retries_done < len(_RETRY_DELAYS_403):
+                delay = _RETRY_DELAYS_403[retries_done]
+                retries_done += 1
+                logger.warning(
+                    "HTTP 403 during download; retry %d/%d in %ss",
+                    retries_done, len(_RETRY_DELAYS_403), delay,
+                )
+                if not _wait_cancellable(delay, on_cancel_check):
+                    raise DownloadCancelled(cancel_message)
+                continue
+            logger.warning(
+                "yt-dlp download failed (exit=%s, 403 retries used: %d)\n  command: %s\n  output (tail):\n%s",
+                e.returncode, retries_done, subprocess.list2cmdline(cmd), _output_tail(e.output),
+            )
+            raise
 
 
 # ---------------------------------------------------------------------------

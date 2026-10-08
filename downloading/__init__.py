@@ -10,12 +10,17 @@ Where to look (one concern per module):
                       on_error, on_cancelled, ...). Holds the orchestration:
                       format extraction, the download phases, the ffmpeg
                       step, the progress-bar weights and temp-file cleanup.
+  ffmpeg_commands.py  The ffmpeg command lines (merge video + audio, convert
+                      to mp3). Pure functions that only build argument lists.
   process_runner.py   The subprocess engine: running yt-dlp and ffmpeg,
                       parsing their progress output, cancel / pause / stall
-                      handling. No knowledge of formats, files or the UI.
+                      handling, and the bounded retry of an HTTP 403
+                      (run_download_with_retry). No knowledge of formats,
+                      files or the UI.
 
 Not in here: finding out what a video offers (formats, cookies, the yt-dlp
-binary itself) is the `ytdlp` package, and turning failures into translated,
+binary itself) and building the yt-dlp command lines (ytdlp/commands.py) are
+the `ytdlp` package, and turning failures into translated,
 user-facing messages is core/error_classifier.py (it also defines the
 exceptions the engine raises: DownloadCancelled, DownloadStalled,
 YtDlpProcessError, ...). It lives in core/ because both this package and

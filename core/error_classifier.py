@@ -139,6 +139,14 @@ def _http_status(text: str):
     return int(m.group(1)) if m else None
 
 
+def is_http_403(output: str) -> bool:
+    """True if yt-dlp's raw output reports an HTTP 403 (Forbidden). Uses the
+    same HTTP-error-context matching as the rules above, so a bare "403" in a
+    video ID or byte count never counts."""
+    text = (output or "").lower()
+    return "403" in _HTTP_STATUS_RE.findall(text) or "403: forbidden" in text
+
+
 def _contains_any(*patterns: str):
     """Build a rule predicate that matches if any pattern is a substring."""
     return lambda text: any(p in text for p in patterns)
