@@ -7,16 +7,20 @@ Two flavours:
   - find_info_with_access_fallback(): the full extraction a download needs,
                                       including the 'formats' list
 
-Both go through the player clients in CLIENT_LIST, and both retry with
-cookies and Deno when the video needs a login; that decision is made by
-ytdlp/access.py (run_with_access_fallback), not here.
+Both go through the player clients in CLIENT_LIST (RESTRICTED_CLIENT_LIST for
+videos that need a login), and both retry with cookies and Deno when the video
+needs one; that decision is made by ytdlp/access.py (run_with_access_fallback),
+not here.
 """
 
 import json
 import logging
+from dataclasses import dataclass
+from typing import Optional
 
 from core.error_classifier import DenoNotFoundError
 from ytdlp.access import access_args, run_with_access_fallback
+from ytdlp.formats import FormatSelector, Selection
 from ytdlp.runner import YtDlpError, run_info_command, youtube_extractor_args
 
 logger = logging.getLogger(__name__)
@@ -29,15 +33,19 @@ logger = logging.getLogger(__name__)
 # None is always tried first.
 CLIENT_LIST = [None]
 
-# For videos that require cookie-based authentication (age-restricted / membership).
-RESTRICTED_CLIENT_LIST = [None, "tv", "web_safari", "mweb"]
+# Clients for the restricted pass (age-restricted / members-only videos, with
+# cookies). With a signed-in account the default client often gets SABR-only
+# streams without URLs; web_safari still returns HLS formats up to 1080p.
+RESTRICTED_CLIENT_LIST = [None, "web_safari"]
 
 
-def _fallback_rank(fb: tuple) -> int:
-    """Video fallback is compared by resolution (format, None).
-    Audio fallback has a single element (format,): all are considered equal, so the first one is kept.
-    """
-    return (fb[0].get("height") or 0) if len(fb) > 1 else 0
+@dataclass(frozen=True)
+class Extraction:
+    """A successful info extraction together with what to download from it."""
+    info: dict                # yt-dlp's info dict (incl. 'formats')
+    client: Optional[str]     # player client that produced it (None = default)
+    selection: Selection      # the formats chosen from info["formats"]
+    restricted: bool = False  # True: build download commands with access_args(True)
 
 
 def extract_info(exe_path: str, url: str, client: str, restricted: bool = False) -> dict:
@@ -143,25 +151,26 @@ def _log_format_summary(client, formats: list) -> None:
                  client or "default", len(formats), "\n".join(rows) or "    (none)")
 
 
-
-def find_info_with_compatible_format(exe_path: str, url: str, format_selector,
-                                     collected_errors=None, fallback_selector=None,
-                                     restricted: bool = False):
+def find_info_with_compatible_format(exe_path: str, url: str, selector: FormatSelector,
+                                     collected_errors=None,
+                                     fallback_selector: FormatSelector | None = None,
+                                     restricted: bool = False) -> Extraction | None:
     """
-    Tries each client in CLIENT_LIST until format_selector(formats) succeeds,
-    i.e. returns a non-empty tuple with no None in it (as
-    find_suitable_format / find_suitable_audio_format do).
-    Returns (info, client, result) on success, or (None, None, None) if all clients fail.
+    Tries each client until `selector(formats)` returns a Selection, and
+    returns that as an Extraction. Returns None if every client fails.
+
     If fallback_selector is given, it is only used when NO client satisfied
-    format_selector: the first client whose formats satisfy it (its first
-    element must be truthy) is returned instead, so a better client is never
-    skipped just because an earlier one only had the fallback.
-    If collected_errors is provided,
-    it stores each YtDlpError message so the caller can identify the actual failure reason
-    instead of showing a generic “no compatible format” error.
+    `selector`: the fallback Selection with the greatest video height wins
+    (the first client wins ties), so a better client is never skipped just
+    because an earlier one only offered a lower-quality fallback.
+
+    If collected_errors is provided, it stores each YtDlpError message so the
+    caller can identify the actual failure reason instead of showing a generic
+    “no compatible format” error.
     """
     clients = RESTRICTED_CLIENT_LIST if restricted else CLIENT_LIST
-    fallback = None
+    fallback: Extraction | None = None
+
     for client in clients:
         logger.debug("Trying client=%s", client or "default")
         try:
@@ -173,10 +182,10 @@ def find_info_with_compatible_format(exe_path: str, url: str, format_selector,
             continue
 
         formats = info.get("formats", [])
-        result = format_selector(formats)
-        if result and all(result):
+        selection = selector(formats)
+        if selection is not None:
             logger.debug("Client %s: found compatible format(s)", client or "default")
-            return info, client, result
+            return Extraction(info, client, selection, restricted)
 
         _log_format_summary(client, formats)
         logger.debug(
@@ -185,44 +194,46 @@ def find_info_with_compatible_format(exe_path: str, url: str, format_selector,
         )
 
         if fallback_selector is not None:
-            fb = fallback_selector(formats)
-            if fb and fb[0] and (
-                    fallback is None or _fallback_rank(fb) > _fallback_rank(fallback[2])
+            candidate = fallback_selector(formats)
+            if candidate is not None and (
+                fallback is None or candidate.height > fallback.selection.height
             ):
-                fallback = (info, client, fb)
+                fallback = Extraction(info, client, candidate, restricted)
 
     if fallback is not None:
         logger.warning(
-            "No separate streams from any client; falling back to progressive format %s",
-            fallback[2][0].get("format_id"),
+            "No separate streams from any client; falling back to %s format %s "
+            "(client=%s, %sp)",
+            fallback.selection.kind, fallback.selection.primary.get("format_id"),
+            fallback.client or "default", fallback.selection.height,
         )
         return fallback
 
-    return None, None, None
+    return None
 
 
-def find_info_with_access_fallback(exe_path: str, url: str, format_selector,
-                                   collected_errors=None, fallback_selector=None):
+def find_info_with_access_fallback(exe_path: str, url: str, selector: FormatSelector,
+                                   collected_errors=None,
+                                   fallback_selector: FormatSelector | None = None
+                                   ) -> Extraction | None:
     """Full info extraction for a download, with the cookies + Deno retry for
     age-restricted / members-only videos (see run_with_access_fallback for the
     order of passes).
 
-    Returns (info, client, result, restricted); `restricted` tells the caller
-    to build its download commands with access_args(True) too. On failure
-    info is None. Raises DenoNotFoundError if the restricted pass is needed
-    but Deno is not installed. If collected_errors is given, the error
-    messages of the last pass are appended to it.
+    Returns an Extraction, or None on failure. `Extraction.restricted` tells
+    the caller to build its download commands with access_args(True) too.
+    Raises DenoNotFoundError if the restricted pass is needed but Deno is not
+    installed. If collected_errors is given, the error messages of the last
+    pass are appended to it.
     """
     def attempt(restricted: bool, errors: list):
-        found = find_info_with_compatible_format(
-            exe_path, url, format_selector,
+        return find_info_with_compatible_format(
+            exe_path, url, selector,
             collected_errors=errors, fallback_selector=fallback_selector,
             restricted=restricted,
         )
-        return found if found[0] else None
 
     outcome = run_with_access_fallback(url, attempt)
     if collected_errors is not None:
         collected_errors.extend(outcome.errors)
-    info, client, result = outcome.value or (None, None, None)
-    return info, client, result, outcome.restricted
+    return outcome.value

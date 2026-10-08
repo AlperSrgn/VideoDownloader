@@ -2,13 +2,88 @@
 Format selection: picking the video/audio format for a requested quality out
 of the 'formats' list that yt-dlp's --dump-json produces.
 
+Every selector returns a `Selection` (or None when nothing usable exists), so
+callers never have to guess what a tuple like (video, None) means.
+
 Pure functions (no I/O, no yt-dlp process), so they are easy to unit test with
 a hand-written list of format dicts.
 """
 
 import logging
+from dataclasses import dataclass
+from typing import Callable, Literal, Optional
 
 logger = logging.getLogger(__name__)
+
+SelectionKind = Literal["separate", "muxed", "audio_only"]
+
+
+@dataclass(frozen=True)
+class Selection:
+    """What to download, as decided by a selector.
+
+    kind == "separate":  `video` and `audio` are separate streams; download both
+                         and merge them with ffmpeg.
+    kind == "muxed":     `video` is ONE file that already contains video + audio
+                         (progressive https, or HLS); no merge needed. `audio`
+                         is None.
+    kind == "audio_only": `audio` is the track to download; `video` is None.
+                         It may itself be a muxed format when no audio-only
+                         stream exists (see `audio_from_muxed`).
+
+    Build one with Selection.separate / .muxed / .audio_only; the constructor
+    rejects combinations that do not fit `kind`.
+    """
+    kind: SelectionKind
+    video: Optional[dict] = None
+    audio: Optional[dict] = None
+
+    def __post_init__(self):
+        valid = {
+            "separate": self.video is not None and self.audio is not None,
+            "muxed": self.video is not None and self.audio is None,
+            "audio_only": self.audio is not None and self.video is None,
+        }.get(self.kind, False)
+        if not valid:
+            raise ValueError(
+                f"Selection(kind={self.kind!r}) has an inconsistent "
+                f"video/audio combination"
+            )
+
+    @classmethod
+    def separate(cls, video: dict, audio: dict) -> "Selection":
+        return cls("separate", video=video, audio=audio)
+
+    @classmethod
+    def muxed(cls, video: dict) -> "Selection":
+        return cls("muxed", video=video)
+
+    @classmethod
+    def audio_only(cls, audio: dict) -> "Selection":
+        return cls("audio_only", audio=audio)
+
+    @property
+    def height(self) -> int:
+        """Video resolution in pixels; 0 for audio-only selections."""
+        return (self.video or {}).get("height") or 0
+
+    @property
+    def primary(self) -> dict:
+        """The format that determines quality: the video, else the audio."""
+        return self.video or self.audio
+
+    @property
+    def audio_from_muxed(self) -> bool:
+        """True for an audio_only selection whose format also carries video
+        (the audio has to be extracted from it afterwards)."""
+        return (
+            self.kind == "audio_only"
+            and self.audio.get("vcodec") not in (None, "none")
+        )
+
+
+# A selector takes yt-dlp's 'formats' list and returns a Selection or None.
+FormatSelector = Callable[[list], Optional[Selection]]
 
 
 def _select_original_audio(audio_formats: list):
@@ -39,15 +114,14 @@ def _select_original_audio(audio_formats: list):
     return chosen
 
 
-def find_suitable_format(formats: list, video_height: int):
+def find_suitable_format(formats: list, video_height: int) -> Optional[Selection]:
     """
-    Return (video_format, audio_format) for the best available resolution
-    at or below video_height. If nothing at or below video_height exists,
-    falls back to the highest resolution available. Within a resolution the
-    highest-tbr video and the original-language audio track are chosen.
-    Returns (None, None) if there are no usable (url-bearing) video or audio
-    formats — e.g. SABR-protected videos, whose formats come without a
-    direct URL.
+    Separate video + audio streams for the best available resolution at or
+    below video_height; if nothing at or below exists, the highest resolution
+    available. Within a resolution the highest-tbr video and the
+    original-language audio track are chosen.
+    Returns None if there are no usable (url-bearing) video or audio formats
+    -- e.g. SABR-protected videos, whose formats come without a direct URL.
     """
     video_formats = [
         f for f in formats
@@ -59,90 +133,83 @@ def find_suitable_format(formats: list, video_height: int):
     ]
 
     if not video_formats or not audio_formats:
-        return None, None
+        return None
 
-    available_heights = sorted(
-        {f["height"] for f in video_formats if f["height"] <= video_height},
-        reverse=True
+    heights = {f["height"] for f in video_formats}
+    at_or_below = [h for h in heights if h <= video_height]
+    height = max(at_or_below) if at_or_below else max(heights)
+
+    chosen_video = max(
+        (f for f in video_formats if f["height"] == height),
+        key=lambda x: x.get("tbr") or 0,
     )
-    if not available_heights:
-        available_heights = sorted({f["height"] for f in video_formats}, reverse=True)
+    chosen_audio = _select_original_audio(audio_formats)
 
-    for h in available_heights:
-        candidates = [f for f in video_formats if f.get("height") == h]
-        if not candidates:
-            continue
-
-        chosen_video = max(candidates, key=lambda x: x.get("tbr") or 0)
-        chosen_audio = _select_original_audio(audio_formats)
-
-        if chosen_video.get("url") and chosen_audio and chosen_audio.get("url"):
-            logger.debug(
-                "Compatible formats found — Video: %s (%dp), Audio: %s",
-                chosen_video["format_id"], h, chosen_audio["format_id"]
-            )
-            return chosen_video, chosen_audio
-        else:
-            logger.debug(
-                "SABR protection detected for %s (%dp)", chosen_video["format_id"], h
-            )
-            return None, None
-
-    return None, None
+    logger.debug(
+        "Compatible formats found — Video: %s (%dp), Audio: %s",
+        chosen_video["format_id"], height, chosen_audio["format_id"],
+    )
+    return Selection.separate(chosen_video, chosen_audio)
 
 
-def find_suitable_audio_format(formats: list):
-    """
-    Returns the original audio track as (audio_format,) so it can be passed
-    directly to find_info_with_compatible_format.
-
-    Returns (None,) if no usable audio track is available, allowing the next
-    client to be tried.
-    """
+def find_suitable_audio_format(formats: list) -> Optional[Selection]:
+    """The original audio track as an audio_only Selection, or None if no
+    usable audio-only stream exists (so the next client can be tried)."""
     audio_formats = [
         f for f in formats
         if f.get("url") and f.get("acodec") != "none" and f.get("vcodec") == "none"
     ]
-    return (_select_original_audio(audio_formats),)
+    chosen = _select_original_audio(audio_formats)
+    return Selection.audio_only(chosen) if chosen else None
 
 
 # ---------------------------------------------------------------------------
-# Fallback: progressive (single-file, video+audio) formats
+# Fallback: muxed (single-file, video+audio) formats
 # ---------------------------------------------------------------------------
 # When YouTube forces SABR streaming (common for age-restricted videos and
 # some accounts), the separate DASH video/audio streams come back without a
-# URL and often only a progressive format (e.g. 18 = 360p mp4) remains. These
-# helpers let callers use it as a last resort instead of failing outright.
+# URL. What remains are muxed formats: the plain-https 18 (360p mp4) and,
+# with the web_safari client, HLS streams (m3u8_native) up to 1080p. These
+# selectors let callers use them as a last resort instead of failing.
+#
+# NOTE: HLS downloads are raw MPEG-TS until yt-dlp's ffmpeg fixup remuxes
+# them, so the download command must be given --ffmpeg-location.
 
-_PROGRESSIVE_PROTOCOLS = ("https", "http", "m3u8_native")
+_HTTP_PROTOCOLS = ("https", "http")
+_MUXED_PROTOCOLS = (*_HTTP_PROTOCOLS, "m3u8_native")
 
-def _progressive_formats(formats: list) -> list:
+
+def _muxed_formats(formats: list) -> list:
     return [
         f for f in formats
         if f.get("url")
         and f.get("vcodec") not in (None, "none")
         and f.get("acodec") not in (None, "none")
-        and f.get("protocol") in _PROGRESSIVE_PROTOCOLS
+        and f.get("protocol") in _MUXED_PROTOCOLS
     ]
 
 
-def find_progressive_format(formats: list, video_height: int):
-    candidates = [f for f in _progressive_formats(formats) if f.get("height")]
+def find_progressive_format(formats: list, video_height: int) -> Optional[Selection]:
+    """Fallback selector for video downloads: the best muxed format at or
+    below video_height (or the lowest-above if nothing fits). At equal height
+    plain https wins over HLS, then the higher bitrate. Returns None if there
+    is no muxed format at all."""
+    candidates = [f for f in _muxed_formats(formats) if f.get("height")]
     if not candidates:
-        return None, None
+        return None
     pool = [f for f in candidates if f["height"] <= video_height] or candidates
-    # Aynı çözünürlükte düz https'i tercih et, sonra bitrate
     best = max(pool, key=lambda f: (
-        f["height"], f.get("protocol") in ("https", "http"), f.get("tbr") or 0,
+        f["height"], f.get("protocol") in _HTTP_PROTOCOLS, f.get("tbr") or 0,
     ))
-    return best, None
+    return Selection.muxed(best)
 
 
-def find_progressive_audio_format(formats: list):
-    candidates = _progressive_formats(formats)
+def find_progressive_audio_format(formats: list) -> Optional[Selection]:
+    """Fallback selector for audio-only downloads: the smallest muxed format
+    (least data to download), preferring plain https because the HLS ones
+    carry low-bitrate HE-AAC. The audio is extracted from it later."""
+    candidates = _muxed_formats(formats)
     if not candidates:
-        return (None,)
-    # HLS'teki 91/92 HE-AAC (düşük ses kalitesi); mümkünse https (18) kullan
-    https_only = [f for f in candidates if f.get("protocol") in ("https", "http")]
-    pool = https_only or candidates
-    return (min(pool, key=lambda f: f.get("height") or 10 ** 9),)
+        return None
+    pool = [f for f in candidates if f.get("protocol") in _HTTP_PROTOCOLS] or candidates
+    return Selection.audio_only(min(pool, key=lambda f: f.get("height") or 10 ** 9))

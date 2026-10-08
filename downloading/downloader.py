@@ -10,9 +10,10 @@ What happens, in order:
      yt-dlp is available, and always cleans up the temp files afterwards.
   2. The video's formats are looked up (see the `ytdlp` package), retried with
      cookies + Deno only for age-restricted / members-only videos.
-  3. download_video() either downloads one combined file (progressive
-     fallback) or downloads video and audio separately and merges them with
-     ffmpeg; download_audio() downloads the raw audio and converts it to mp3.
+  3. download_video() either downloads one combined (muxed) file -- the
+     fallback when YouTube offers no separate streams -- or downloads video
+     and audio separately and merges them with ffmpeg; download_audio()
+     downloads the raw audio and converts it to mp3.
   4. Every phase feeds one progress bar through fixed weights (see the
      *_WEIGHT constants), not file sizes, because some formats report none.
 
@@ -49,6 +50,7 @@ from ytdlp import (
     find_suitable_format,
     youtube_extractor_args,
 )
+from ytdlp.info import Extraction
 from downloading.process_runner import (
     known_size_mb,
     run_download,
@@ -185,7 +187,7 @@ def _build_ffmpeg_merge_cmd(video_path: str, audio_path: str, output_path: str) 
 
 
 def _build_ffmpeg_mp3_cmd(raw_audio_path: str, output_path: str) -> list:
-    """Converts a raw audio (or progressive video, via -vn) file to mp3."""
+    """Converts a raw audio (or muxed video, via -vn) file to mp3."""
     return [
         get_ffmpeg_path(), "-y",
         "-i", raw_audio_path,
@@ -290,19 +292,20 @@ def _run_ffmpeg_merge_phase(cmd, duration, progress_fn, cb: DownloadCallbacks, l
 
 
 def _extract_with_access_fallback(exe_path, url, selector, fallback_selector,
-                                  lang: dict, on_error):
+                                  lang: dict, on_error) -> Optional[Extraction]:
     """Info extraction shared by download_video / download_audio.
 
     Normal videos are extracted without cookies and without Deno. Only an
     age-restricted / members-only video (with cookies configured) is retried
     with cookies + Deno -- see find_info_with_access_fallback.
 
-    Returns (info, client, result, restricted), or None after reporting the
-    failure through on_error; the caller should just `return` in that case.
+    Returns an Extraction (info, client, selection, restricted), or None after
+    reporting the failure through on_error; the caller should just `return`
+    in that case.
     """
     extraction_errors = []
     try:
-        info, client, result, restricted = find_info_with_access_fallback(
+        extraction = find_info_with_access_fallback(
             exe_path, url, selector, collected_errors=extraction_errors,
             fallback_selector=fallback_selector,
         )
@@ -314,12 +317,12 @@ def _extract_with_access_fallback(exe_path, url, selector, fallback_selector,
         ))
         return None
 
-    if not info:
+    if extraction is None:
         on_error(classify_extraction_failure(
             extraction_errors, lang, fallback_key="download_video_format_error"
         ))
         return None
-    return info, client, result, restricted
+    return extraction
 
 
 def _run_in_worker(name: str, save_location: str, on_error, lang: dict, impl) -> None:
@@ -356,17 +359,20 @@ def _run_in_worker(name: str, save_location: str, on_error, lang: dict, impl) ->
 # Video download
 # ---------------------------------------------------------------------------
 
-def _download_progressive(job: _DownloadJob, video_format: dict) -> None:
-    """Progressive fallback: one file that already has video + audio, so
-    no merge step -- the finished file is just moved into place."""
+def _download_muxed(job: _DownloadJob, video_format: dict, requested_height: int) -> None:
+    """Muxed fallback: one file that already has video + audio (plain https,
+    or HLS which yt-dlp remuxes with ffmpeg), so no merge step -- the finished
+    file is just moved into place. The user is only told about a quality
+    reduction if the stream is below the requested height."""
     cb = job.cb
     height = video_format.get("height")
     logger.warning(
-        "Progressive fallback: client=%s format=%s (%sp, vcodec=%s, acodec=%s)",
+        "Muxed fallback: client=%s format=%s (%sp, protocol=%s, vcodec=%s, acodec=%s)",
         job.client or "default", video_format.get("format_id"), height,
-        video_format.get("vcodec"), video_format.get("acodec"),
+        video_format.get("protocol"), video_format.get("vcodec"),
+        video_format.get("acodec"),
     )
-    if cb.on_notice:
+    if cb.on_notice and (height or 0) < requested_height:
         cb.on_notice(job.lang.get(
             "notice_progressive_fallback",
             "Only a lower-resolution ({height}p) combined stream was available "
@@ -385,7 +391,7 @@ def _download_progressive(job: _DownloadJob, video_format: dict) -> None:
         cb.on_error(str(e))
         return
 
-    # Keep yt-dlp's real extension: the progressive file is already a
+    # Keep yt-dlp's real extension: the muxed file is already a
     # finished container, so renaming it to .mp4 could mislabel e.g. webm.
     extension = os.path.splitext(downloaded_path)[1] or ".mp4"
     output_filename = unique_filename(job.save_location, f"{job.safe_title}{extension}")
@@ -397,7 +403,7 @@ def _download_progressive(job: _DownloadJob, video_format: dict) -> None:
         return
 
     update_file_timestamp(output_path)
-    logger.debug("Download completed (progressive): %s", output_path)
+    logger.debug("Download completed (muxed): %s", output_path)
     cb.on_done()
 
 
@@ -501,27 +507,27 @@ def download_video(
             return
 
         video_height = RESOLUTION_MAP[target_resolution]
-        found = _extract_with_access_fallback(
+        extraction = _extract_with_access_fallback(
             exe_path, url,
             lambda formats: find_suitable_format(formats, video_height),
             lambda formats: find_progressive_format(formats, video_height),
             lang, on_error,
         )
-        if found is None:
+        if extraction is None:
             return
-        info, client, (video_format, audio_format), restricted = found
+        selection = extraction.selection
 
         job = _DownloadJob(
             url=url, save_location=save_location, exe_path=exe_path,
-            client=client, restricted=restricted,
+            client=extraction.client, restricted=extraction.restricted,
             temp_base=os.path.join(save_location, f"{TEMP_PREFIX}{temp_id}"),
-            safe_title=sanitize_filename(info.get("title", "video")),
-            info=info, cb=cb, lang=lang,
+            safe_title=sanitize_filename(extraction.info.get("title", "video")),
+            info=extraction.info, cb=cb, lang=lang,
         )
-        if audio_format is None:
-            _download_progressive(job, video_format)
+        if selection.kind == "muxed":
+            _download_muxed(job, selection.video, video_height)
         else:
-            _download_and_merge(job, video_format, audio_format)
+            _download_and_merge(job, selection.video, selection.audio)
 
     _run_in_worker("download_video", save_location, on_error, lang, _impl)
 
@@ -567,19 +573,20 @@ def download_audio(
     )
 
     def _impl(temp_id, exe_path):
-        found = _extract_with_access_fallback(
+        extraction = _extract_with_access_fallback(
             exe_path, url, find_suitable_audio_format, find_progressive_audio_format,
             lang, on_error,
         )
-        if found is None:
+        if extraction is None:
             return
-        info, client, (chosen_audio,), restricted = found
+        info, client = extraction.info, extraction.client
+        chosen_audio = extraction.selection.audio
 
-        if chosen_audio.get("vcodec") not in (None, "none"):
-            # No audio-only stream: the audio is extracted from a progressive
+        if extraction.selection.audio_from_muxed:
+            # No audio-only stream: the audio is extracted from a muxed
             # file by the existing ffmpeg step (-vn), so nothing else changes.
             logger.warning(
-                "No audio-only stream; extracting audio from progressive format %s",
+                "No audio-only stream; extracting audio from muxed format %s",
                 chosen_audio.get("format_id"),
             )
         logger.info(
@@ -590,7 +597,7 @@ def download_audio(
 
         job = _DownloadJob(
             url=url, save_location=save_location, exe_path=exe_path,
-            client=client, restricted=restricted,
+            client=client, restricted=extraction.restricted,
             temp_base=os.path.join(save_location, f"{TEMP_PREFIX}{temp_id}"),
             safe_title=sanitize_filename(info.get("title", "audio")),
             info=info, cb=cb, lang=lang,
