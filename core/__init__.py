@@ -15,7 +15,9 @@ close/uninstall logic, and the error classification that several packages use.
     download_controller.py  DownloadController: decides when the next queue
                             item starts, feeds progress into the progress bar
                             and reacts to a download finishing, failing or
-                            being cancelled. Its widgets are attached after
+                            being cancelled. Also handles the save location
+                            (folder picker, sidebar label, open-folder
+                            button). Its widgets are attached after
                             construction via bind_widgets().
     app_lifecycle.py        AppLifecycle: closing the window (confirm, stop a
                             running download or app-update download through

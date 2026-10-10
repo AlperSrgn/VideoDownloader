@@ -1,6 +1,8 @@
 """
 Drives the download queue and the lifecycle of each item: queued,
-downloading, paused, cancelled, finished or failed.
+downloading, paused, cancelled, finished or failed. Also owns the
+save-location settings (choosing the folder, its sidebar label, opening it),
+since that folder is where downloads end up.
 
 It sits on top of QueueView (which holds the queue state and draws the
 list): it decides *when* the next item starts, wires download progress
@@ -13,14 +15,17 @@ They are attached afterwards via bind_widgets() — the same build-then-wire
 two-step main.py uses for UpdateChecker.
 """
 
-from tkinter import messagebox
+import os
+import webbrowser
+from tkinter import filedialog, messagebox
 
 from downloading.downloader import download_video, download_audio
 from core.quality_options import quality_label, resolve_quality_key
+from settings import save_setting
 from system.process_manager import set_keep_awake
 from ui.notifications import ToastNotifier
 from ui.queue_view import QueueView
-from utils import clean_playlist_url, validate_video_url
+from utils import clean_playlist_url, format_save_location_display, validate_video_url
 
 
 class DownloadController:
@@ -31,13 +36,16 @@ class DownloadController:
     RESUME_ICON_FILE = "resume.png"
 
     def __init__(self, app_state, theme_manager, make_icon, send_notification,
-                 notification_icon, get_system_notification_enabled):
+                 notification_icon, get_system_notification_enabled,
+                 default_save_location):
         self.app_state = app_state
         self.theme_manager = theme_manager
         self.make_icon = make_icon
         self.send_notification = send_notification
         self.notification_icon = notification_icon
         self.get_system_notification_enabled = get_system_notification_enabled
+        # Fallback folder for the folder picker if the saved one disappeared.
+        self.default_save_location = default_save_location
 
         self.queue_view = QueueView()
 
@@ -58,6 +66,7 @@ class DownloadController:
         self.option_var = None
         self.uninstall_button = None
         self.check_updates_button = None
+        self.save_location_value_label = None
         self.toast = None  # ToastNotifier, created in bind_widgets() from the toast label
 
     def bind_widgets(self, **widgets) -> None:
@@ -75,6 +84,31 @@ class DownloadController:
     def lang(self) -> dict:
         """The current UI language dict (changes when the user switches language)."""
         return self.app_state.current_language
+
+
+    # -- save location -------------------------------------------------------
+
+    def open_downloads_folder(self) -> None:
+        if os.name == "nt":
+            os.startfile(self.app_state.save_location)
+        else:
+            webbrowser.open(self.app_state.save_location)
+
+    def update_save_location_label(self) -> None:
+        self.save_location_value_label.configure(
+            text=format_save_location_display(self.app_state.save_location)
+        )
+
+    def choose_save_location(self) -> None:
+        folder = filedialog.askdirectory(
+            initialdir=self.app_state.save_location
+            if os.path.isdir(self.app_state.save_location) else self.default_save_location,
+            title=self.lang.get("choose_folder_button", "Choose Folder"),
+        )
+        if folder:
+            self.app_state.save_location = folder
+            save_setting("save_location", folder)
+            self.update_save_location_label()
 
     # -- generic UI helpers --------------------------------------------------
 

@@ -2,8 +2,8 @@
 Application entry point.
 
 App owns the main window and everything that is not download- or
-update-specific: building the window, sidebar animation, theme/language
-switching and save-location settings.
+update-specific: building the window, sidebar animation and theme/language
+switching. (Save-location handling lives in DownloadController.)
 
 It constructs DownloadController (core/download_controller.py) before the
 window, because the window's button callbacks are its bound methods; its
@@ -22,11 +22,10 @@ just loop over self.ui.registry.
 import logging
 import os
 import sys
-import webbrowser
 from types import SimpleNamespace
 
 import customtkinter as ctk
-from tkinter import Menu, filedialog
+from tkinter import Menu
 
 from core.app_lifecycle import AppLifecycle
 from core.app_state import AppState
@@ -45,7 +44,6 @@ from ui.ytdlp_status import YtdlpStatusPanel
 from utils import (
     cleanup_temp_files,
     copy_icons,
-    format_save_location_display,
     get_icon_path,
     load_button_icon,
 )
@@ -76,21 +74,16 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
-
 logging.getLogger("PIL").setLevel(logging.WARNING)
 
 
-# ---------------------------------------------------------------------------
 # App-wide constants
-# ---------------------------------------------------------------------------
 SIDEBAR_WIDTH = 300
 
-# Folder where completed downloads are saved by default.
-# Can be changed by the user and is saved to config.json.
+# Default download folder, saved to config.json.
 DEFAULT_SAVE_LOCATION = os.path.join(os.path.expanduser("~"), "Downloads")
 
-# Button icons (PNG files in icons/) default to this size unless a call site
-# overrides it.
+# Default button icon size (PNG).
 BUTTON_ICON_SIZE = (18, 18)
 
 
@@ -128,6 +121,7 @@ class App:
             send_notification=send_notification,
             notification_icon=self.notification_icon,
             get_system_notification_enabled=lambda: self.system_notification_enabled.get(),
+            default_save_location=DEFAULT_SAVE_LOCATION,
         )
 
         # -- Cookie panel ------------------------------------------------
@@ -170,11 +164,11 @@ class App:
                 add_to_queue=self.download_controller.add_to_queue,
                 pause_download=self.download_controller.pause_download,
                 cancel_download=self.download_controller.cancel_download,
-                open_downloads_folder=self.open_downloads_folder,
+                open_downloads_folder=self.download_controller.open_downloads_folder,
                 toggle_sidebar=self.toggle_sidebar,
                 toggle_theme=self.toggle_theme,
                 change_language=self.change_language,
-                choose_save_location=self.choose_save_location,
+                choose_save_location=self.download_controller.choose_save_location,
                 preview_notification=self.preview_notification,
                 uninstall_app=self.lifecycle.uninstall_app,
                 change_cookie_mode=self.cookie_panel.change_mode,
@@ -207,6 +201,7 @@ class App:
             uninstall_button=ui.uninstall_button,
             check_updates_button=ui.check_updates_button,
             toast_label=ui.toast_label,
+            save_location_value_label=ui.save_location_value_label,
         )
         self.cookie_panel.bind_widgets(
             mode_var=ui.cookie_mode_var,
@@ -226,8 +221,8 @@ class App:
             action_buttons_frame=ui.action_buttons_frame,
         )
 
-        # Needs save_location_value_label, which build_app_window() creates.
-        self.update_save_location_label()
+        # Needs save_location_value_label, attached via bind_widgets() above.
+        self.download_controller.update_save_location_label()
 
         # Wired up here because the checker needs several widgets, and the
         # buttons' commands can only be set once the checker exists.
@@ -407,28 +402,6 @@ class App:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
             menu.grab_release()
-
-    def open_downloads_folder(self) -> None:
-        if os.name == "nt":
-            os.startfile(self.app_state.save_location)
-        else:
-            webbrowser.open(self.app_state.save_location)
-
-    def update_save_location_label(self) -> None:
-        self.ui.save_location_value_label.configure(
-            text=format_save_location_display(self.app_state.save_location)
-        )
-
-    def choose_save_location(self) -> None:
-        folder = filedialog.askdirectory(
-            initialdir=self.app_state.save_location
-            if os.path.isdir(self.app_state.save_location) else DEFAULT_SAVE_LOCATION,
-            title=self.app_state.current_language.get("choose_folder_button", "Choose Folder"),
-        )
-        if folder:
-            self.app_state.save_location = folder
-            save_setting("save_location", folder)
-            self.update_save_location_label()
 
     def preview_notification(self) -> None:
         send_notification(
