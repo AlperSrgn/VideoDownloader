@@ -2,15 +2,16 @@
 Application entry point.
 
 App owns the main window and everything that is not download- or
-update-specific: building the window, sidebar animation and theme/language
-switching. (Save-location handling lives in DownloadController.)
+update-specific: building the window and theme/language switching.
+(Save-location handling lives in DownloadController, the sidebar slide
+animation in SidebarController.)
 
 It constructs DownloadController (core/download_controller.py) before the
 window, because the window's button callbacks are its bound methods; its
 widgets are attached afterwards via bind_widgets(). CookiePanel
-(ui/cookie_panel.py), YtdlpStatusPanel (ui/ytdlp_status.py) and
-AppLifecycle (core/app_lifecycle.py, closing and uninstalling) follow the
-same pattern. UpdateChecker is constructed after the window, once the
+(ui/cookie_panel.py), YtdlpStatusPanel (ui/ytdlp_status.py),
+SidebarController (ui/sidebar_controller.py) and AppLifecycle
+(core/app_lifecycle.py, closing and uninstalling) follow the same pattern. UpdateChecker is constructed after the window, once the
 widgets it needs exist.
 
 Which widgets get a translated label, a button icon or theme colors is
@@ -39,6 +40,7 @@ from settings import load_setting, save_setting
 from ui.app_window import WINDOW_TITLE_PREFIX, build_app_window
 from ui.cookie_panel import CookiePanel
 from ui.notifications import notify as send_notification
+from ui.sidebar_controller import SidebarController
 from ui.theme import ThemeManager
 from ui.ytdlp_status import YtdlpStatusPanel
 from utils import (
@@ -77,7 +79,9 @@ logger = logging.getLogger(__name__)
 logging.getLogger("PIL").setLevel(logging.WARNING)
 
 
+# ---------------------------------------------------------------------------
 # App-wide constants
+# ---------------------------------------------------------------------------
 SIDEBAR_WIDTH = 300
 
 # Default download folder, saved to config.json.
@@ -151,6 +155,14 @@ class App:
             get_update_checker=lambda: self.update_checker,
         )
 
+        # -- Sidebar (open / close animation) ----------------------------
+        # Same pattern: the hamburger and close buttons use its `toggle` as
+        # callback; widgets are attached via bind_widgets() below.
+        self.sidebar = SidebarController(
+            app_state=self.app_state,
+            sidebar_width=SIDEBAR_WIDTH,
+        )
+
         # -- Build UI ------------------------------------------------------
         # Every widget build_app_window() creates lives on self.ui
         # (self.ui.download_button, self.ui.root, ...).
@@ -165,7 +177,7 @@ class App:
                 pause_download=self.download_controller.pause_download,
                 cancel_download=self.download_controller.cancel_download,
                 open_downloads_folder=self.download_controller.open_downloads_folder,
-                toggle_sidebar=self.toggle_sidebar,
+                toggle_sidebar=self.sidebar.toggle,
                 toggle_theme=self.toggle_theme,
                 change_language=self.change_language,
                 choose_save_location=self.download_controller.choose_save_location,
@@ -213,6 +225,11 @@ class App:
             buttons_row=ui.cookie_buttons_row,
         )
         self.lifecycle.bind_widgets(root=ui.root)
+        self.sidebar.bind_widgets(
+            root=ui.root,
+            sidebar_frame=ui.sidebar_frame,
+            menu_button=ui.menu_button,
+        )
         self.ytdlp_status.bind_widgets(
             root=ui.root,
             url_entry=ui.url_entry,
@@ -302,27 +319,6 @@ class App:
             hover_color=ui.cancel_button.cget("hover_color"),
         )
         self.download_controller.render_queue_list()  # repaints any already-visible queue rows with the new color
-
-    # -- Sidebar animation -----------------------------------------------
-    def animate_sidebar(self, target_x: int, step: int) -> None:
-        if self.app_state.sidebar_x != target_x:
-            self.app_state.sidebar_x = (
-                max(target_x, min(0, self.app_state.sidebar_x + step)) if step > 0
-                else max(target_x, self.app_state.sidebar_x + step)
-            )
-            self.ui.sidebar_frame.place(x=self.app_state.sidebar_x, y=0)
-            self.ui.root.after(5, lambda: self.animate_sidebar(target_x, step))
-        else:
-            self.ui.sidebar_frame.place(x=target_x, y=0)
-
-    def toggle_sidebar(self) -> None:
-        if self.app_state.sidebar_open:
-            self.animate_sidebar(-SIDEBAR_WIDTH, -10)
-            self.ui.menu_button.place(x=10, y=10)
-        else:
-            self.animate_sidebar(0, 10)
-            self.ui.menu_button.place_forget()
-        self.app_state.sidebar_open = not self.app_state.sidebar_open
 
     # -- Language ------------------------------------------------------------
     def change_language(self, selected: str) -> None:
