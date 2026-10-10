@@ -6,20 +6,15 @@ widgets, with no download or update logic of its own.
                       bottom action panel, toast label). Returns every widget as
                       one flat namespace that main.py keeps as self.ui. Also holds
                       WINDOW_TITLE_PREFIX, used by main.py's single-instance check.
-    sidebar.py        build_sidebar(): the settings sidebar, incl. the cookie
-                      section and the hamburger button that opens it.
-    sidebar_controller.py
-                      SidebarController: opening/closing the sidebar (slide
-                      animation and open state). Its widgets are attached after
-                      construction via bind_widgets().
-    cookie_panel.py   CookiePanel: which cookie widgets show for the selected mode,
-                      language refresh of the mode menu, and the handlers behind
-                      the cookie buttons (file picker, Firefox export, delete).
+    sidebar/          the settings sidebar as its own subpackage (see
+                      ui/sidebar/__init__.py): view.py (build_sidebar(), incl. the
+                      cookie section and hamburger button), controller.py
+                      (SidebarController: slide animation and open state),
+                      cookie_panel.py (CookiePanel) and widgets.py (button / menu /
+                      checkbox factories and the sidebar's color constants).
     ytdlp_status.py   YtdlpStatusPanel: the yt-dlp.exe preparation status (first-run
                       download, self-update, retry button, URL entry lock, version
                       label) and the `ready` flag the Download button depends on.
-    widgets.py        sidebar_button() / sidebar_option_menu() / sidebar_checkbox()
-                      and the sidebar's color constants.
     registry.py       UiRegistry: each widget declares its translated text, icon
                       and theme key once, where it is created; main.py loops over it.
     theme.py          THEMES (light/dark style dicts) and ThemeManager.

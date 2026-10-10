@@ -9,8 +9,8 @@ animation in SidebarController.)
 It constructs DownloadController (core/download_controller.py) before the
 window, because the window's button callbacks are its bound methods; its
 widgets are attached afterwards via bind_widgets(). CookiePanel
-(ui/cookie_panel.py), YtdlpStatusPanel (ui/ytdlp_status.py),
-SidebarController (ui/sidebar_controller.py) and AppLifecycle
+(ui/sidebar/cookie_panel.py), YtdlpStatusPanel (ui/ytdlp_status.py),
+SidebarController (ui/sidebar/controller.py) and AppLifecycle
 (core/app_lifecycle.py, closing and uninstalling) follow the same pattern. UpdateChecker is constructed after the window, once the
 widgets it needs exist.
 
@@ -38,9 +38,9 @@ from system.process_manager import acquire_single_instance, focus_existing_windo
 from system.updater import UpdateChecker, APP_VERSION
 from settings import load_setting, save_setting
 from ui.app_window import WINDOW_TITLE_PREFIX, build_app_window
-from ui.cookie_panel import CookiePanel
 from ui.notifications import notify as send_notification
-from ui.sidebar_controller import SidebarController
+from ui.sidebar.controller import SidebarController
+from ui.sidebar.cookie_panel import CookiePanel
 from ui.theme import ThemeManager
 from ui.ytdlp_status import YtdlpStatusPanel
 from utils import (

@@ -3,7 +3,7 @@ Main window construction.
 
 build_app_window() creates the root window, the main panel (URL row + queue
 list), the bottom action panel and the toast label, builds the settings
-sidebar through ui/sidebar.py, and returns every widget as attributes of one
+sidebar through ui/sidebar/view.py, and returns every widget as attributes of one
 flat SimpleNamespace, which main.py's App keeps as self.ui
 (self.ui.download_button, ...).
 
@@ -12,7 +12,7 @@ created as a SimpleNamespace:
     _build_main_panel()    - quality menu, URL entry, playlist checkbox, queue list
     _build_bottom_panel()  - status/update/retry buttons, Download/Pause/Queue,
                              Cancel, progress bar and label, downloads folder button
-    ui/sidebar.py          - build_sidebar(): the settings sidebar, incl. cookies
+    ui/sidebar/view.py     - build_sidebar(): the settings sidebar, incl. cookies
 
 Click handling is not implemented here: every command=... callback is
 supplied by the caller via `callbacks` (one attribute per callback, e.g.
@@ -41,7 +41,7 @@ from types import SimpleNamespace
 import customtkinter as ctk
 
 from ui.registry import UiRegistry
-from ui.sidebar import build_sidebar
+from ui.sidebar.view import build_sidebar
 from ui.theme import THEMES
 
 _LIGHT = THEMES["light"]

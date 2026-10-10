@@ -2,7 +2,7 @@
 Opening and closing the settings sidebar: the slide animation and the open /
 closed state.
 
-ui/sidebar.py builds the sidebar's widgets; this class only moves them.
+ui/sidebar/view.py builds the sidebar's widgets; this class only moves them.
 Widgets don't exist yet when main.py constructs it, because
 build_app_window() needs toggle() as the callback of the hamburger and close
 buttons. They are attached afterwards via bind_widgets(), the same

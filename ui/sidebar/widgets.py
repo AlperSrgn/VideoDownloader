@@ -9,7 +9,7 @@ place; anything passed as a keyword argument overrides its default, e.g.
     sidebar_button(parent, command=cb, fg_color=DANGER, hover_color=DANGER_HOVER)
 
 They only create the widget: placing it (pack/place/grid) and registering it
-(registry.add(...)) stay at the call site in ui/sidebar.py.
+(registry.add(...)) stay at the call site in ui/sidebar/view.py.
 
 Not covered on purpose: the light/dark toggle (icon only, no font) and the
 sidebar's labels, whose settings differ from one another.

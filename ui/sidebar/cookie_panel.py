@@ -3,7 +3,7 @@ Cookie support in the sidebar (age-restricted / members-only videos): which
 cookie widgets are visible for the selected mode, and the handlers behind
 their buttons (file picker, Firefox export, delete, open folder).
 
-The widgets themselves are built by ui/sidebar.py; the cookie logic (modes,
+The widgets themselves are built by ui/sidebar/view.py; the cookie logic (modes,
 files, export) lives in the cookie package. This class is only the glue
 between them: widget visibility, language refresh and the dialogs.
 
@@ -55,7 +55,7 @@ class CookiePanel:
 
     def bind_widgets(self, *, mode_var, mode_menu, browser_menu, file_button,
                      file_label, create_title_label, buttons_row) -> None:
-        """Attaches the sidebar's cookie widgets (see ui/sidebar.py).
+        """Attaches the sidebar's cookie widgets (see ui/sidebar/view.py).
 
         Only the mode menu is always visible; browser_menu, file_button,
         file_label, create_title_label and buttons_row start unpacked and are

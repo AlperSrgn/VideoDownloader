@@ -13,9 +13,9 @@ same as before the split.
 
 Callbacks, registry and colors work exactly as described in
 ui/app_window.py. The repeated button / option menu / checkbox settings live
-in ui/widgets.py (sidebar_button(), sidebar_option_menu(), sidebar_checkbox());
+in ui/sidebar/widgets.py (sidebar_button(), sidebar_option_menu(), sidebar_checkbox());
 only what differs per widget is passed here. Colors that don't change between
-themes are hardcoded or come from ui/widgets.py's constants.
+themes are hardcoded or come from ui/sidebar/widgets.py's constants.
 """
 
 from types import SimpleNamespace
@@ -25,7 +25,7 @@ import customtkinter as ctk
 from cookie import COOKIE_BROWSERS, get_cookie_browser
 from settings import load_setting, save_setting
 from ui.theme import THEMES
-from ui.widgets import (
+from ui.sidebar.widgets import (
     DANGER, DANGER_HOVER, SIDEBAR_BG, SIDEBAR_HOVER,
     sidebar_button, sidebar_checkbox, sidebar_option_menu,
 )
@@ -186,12 +186,12 @@ def build_sidebar(root, registry, callbacks, sidebar_width: int, sidebar_x: int)
 
 def _build_cookie_section(sidebar_content, registry, callbacks) -> SimpleNamespace:
     """Cookie support (age-restricted / members-only videos). Packs its
-    widgets into sidebar_content; returns them for ui/cookie_panel.py's
+    widgets into sidebar_content; returns them for ui/sidebar/cookie_panel.py's
     CookiePanel.bind_widgets()."""
     # Cookie support (age-restricted / members-only videos).
     # Only the mode menu is always visible; the browser menu and the file
     # button live in cookie_extra_frame and are shown/hidden by
-    # CookiePanel.update_widgets() (ui/cookie_panel.py). They start unpacked (hidden).
+    # CookiePanel.update_widgets() (ui/sidebar/cookie_panel.py). They start unpacked (hidden).
     cookie_section_label = ctk.CTkLabel(
         sidebar_content,
         text="",
