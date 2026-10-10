@@ -3,13 +3,14 @@ Application entry point.
 
 App owns the main window and everything that is not download- or
 update-specific: building the window, sidebar animation, theme/language
-switching, save-location settings, the yt-dlp status display and closing.
+switching, save-location settings and closing.
 
 It constructs DownloadController (core/download_controller.py) before the
 window, because the window's button callbacks are its bound methods; its
 widgets are attached afterwards via bind_widgets(). CookiePanel
-(ui/cookie_panel.py) follows the same pattern. UpdateChecker is
-constructed after the window, once the widgets it needs exist.
+(ui/cookie_panel.py) and YtdlpStatusPanel (ui/ytdlp_status.py) follow the
+same pattern. UpdateChecker is constructed after the window, once the
+widgets it needs exist.
 
 Which widgets get a translated label, a button icon or theme colors is
 declared where each widget is created, in build_app_window() (via
@@ -21,7 +22,6 @@ import logging
 import os
 import subprocess
 import sys
-import threading
 import webbrowser
 from types import SimpleNamespace
 
@@ -32,7 +32,6 @@ from core.app_state import AppState
 from core.download_controller import DownloadController
 from core.quality_options import build_dropdown_options, quality_dropdown_text, resolve_quality_key
 from downloading.downloader import TEMP_PREFIX
-from core.error_classifier import classify_ytdlp_download_error, classify_ytdlp_update_error
 from languages import LANGUAGES
 from system.process_manager import acquire_single_instance, focus_existing_window
 from system.updater import UpdateChecker, APP_VERSION
@@ -41,6 +40,7 @@ from ui.app_window import WINDOW_TITLE_PREFIX, build_app_window
 from ui.cookie_panel import CookiePanel
 from ui.notifications import notify as send_notification
 from ui.theme import ThemeManager
+from ui.ytdlp_status import YtdlpStatusPanel
 from utils import (
     cleanup_temp_files,
     copy_icons,
@@ -112,12 +112,6 @@ class App:
 
         self.app_state = AppState(save_location=initial_save_location, sidebar_width=SIDEBAR_WIDTH)
 
-        # True while yt-dlp.exe is available and not being replaced. False at startup,
-        # during the initial download or `--update-to` update (checking_update), or
-        # after a failed initial download. The Download button is derived from this
-        # flag (see refresh_download_button), so it cannot be enabled before yt-dlp is ready.
-        self.ytdlp_ready = False
-
         # Temp files (.ytdlp_tmp_*) left if the app closes during a download.
         # Each download uses a new UUID, so they cannot be resumed and can be deleted.
         cleanup_temp_files(self.app_state.save_location, TEMP_PREFIX)
@@ -141,6 +135,17 @@ class App:
         # after build_app_window() returns.
         self.cookie_panel = CookiePanel(app_state=self.app_state)
 
+        # -- yt-dlp status panel -----------------------------------------
+        # Same pattern: the retry button uses its `retry` as callback; widgets
+        # are attached via bind_widgets() after build_app_window() returns.
+        # Its `ready` flag gates the Download button (see refresh_download_button).
+        # update_checker doesn't exist yet, hence the lambda.
+        self.ytdlp_status = YtdlpStatusPanel(
+            app_state=self.app_state,
+            refresh_download_button=self.refresh_download_button,
+            is_app_update_downloading=lambda: self.update_checker.is_downloading,
+        )
+
         # -- Build UI ------------------------------------------------------
         # Every widget build_app_window() creates lives on self.ui
         # (self.ui.download_button, self.ui.root, ...).
@@ -150,7 +155,7 @@ class App:
                 url_changed=self.url_changed,
                 show_entry_context_menu=self.show_entry_context_menu,
                 clear_queue=self.download_controller.clear_queue,
-                retry_ytdlp_setup=self.retry_ytdlp_setup,
+                retry_ytdlp_setup=self.ytdlp_status.retry,
                 add_to_queue=self.download_controller.add_to_queue,
                 pause_download=self.download_controller.pause_download,
                 cancel_download=self.download_controller.cancel_download,
@@ -201,6 +206,13 @@ class App:
             create_title_label=ui.cookie_create_title_label,
             buttons_row=ui.cookie_buttons_row,
         )
+        self.ytdlp_status.bind_widgets(
+            root=ui.root,
+            url_entry=ui.url_entry,
+            status_label=ui.ytdlp_status_label,
+            retry_button=ui.ytdlp_retry_button,
+            action_buttons_frame=ui.action_buttons_frame,
+        )
 
         # Needs save_location_value_label, which build_app_window() creates.
         self.update_save_location_label()
@@ -231,13 +243,8 @@ class App:
         # DownloadController._set_pause_button_state().
         self.apply_button_icons()
 
-        # yt-dlp version label (populated asynchronously)
-        self.yt_dlp_version_label = ctk.CTkLabel(
-            ui.root, text="", font=ctk.CTkFont(size=10), text_color="#888888",
-        )
-        self.yt_dlp_version_label.place(relx=1.0, rely=1.0, anchor="se", x=-10, y=-5)
-
-        self.fetch_ytdlp_version(on_status=self.on_ytdlp_status)
+        # First-run download / self-update of yt-dlp.exe (runs in the background).
+        self.ytdlp_status.fetch()
 
         # -- Apply saved settings on startup ---------------------------------
         if ui.dark_mode_enabled.get():
@@ -261,7 +268,7 @@ class App:
     # -- Download button gate -----------------------------------------------
     def _download_allowed(self) -> bool:
         return (
-            self.ytdlp_ready
+            self.ytdlp_status.ready
             and self.download_controller.queue_view.current_item is None
             and not self.update_checker.is_locked
         )
@@ -273,37 +280,6 @@ class App:
         self.ui.download_button.configure(
             state="normal" if self._download_allowed() else "disabled"
         )
-
-    # -- yt-dlp version (async) ------------------------------------------
-    def fetch_ytdlp_version(self, on_status=None) -> None:
-        """Runs ensure_ytdlp (first-run download / self-update) in the
-        background and updates yt_dlp_version_label with the result.
-
-        If provided, `on_status(stage, detail)` is called as ensure_ytdlp
-        progresses (detail is the percentage while downloading, or the
-        exception on failure — see ensure_ytdlp's docstring for the stages).
-        This lets the UI show status while yt-dlp.exe is being downloaded
-        or updated.
-        """
-        # Set synchronously on the main thread, before the worker starts, so
-        # there is no window in which Download is enabled while ensure_ytdlp
-        # may already be replacing the exe. Also covers the retry button.
-        self.ytdlp_ready = False
-        self.refresh_download_button()
-
-        def worker():
-            try:
-                from settings import get_appdata_path
-                from ytdlp import ensure_ytdlp, get_ytdlp_version
-                # ensure_ytdlp downloads on first run; on later launches, it checks for
-                # updates at most once every 12 hours and once per session.
-                exe_path = ensure_ytdlp(get_appdata_path(), on_status=on_status)
-                version_text = f"yt-dlp v{get_ytdlp_version(exe_path)}"
-            except Exception:
-                version_text = "yt-dlp version unavailable"
-            self.ui.root.after(0, lambda: self.yt_dlp_version_label.configure(text=version_text))
-
-        threading.Thread(target=worker, daemon=True).start()
 
     # -- Window close (X) -------------------------------------------------
     def on_close_request(self) -> None:
@@ -527,13 +503,6 @@ class App:
             self.preview_icon,
         )
 
-    def retry_ytdlp_setup(self) -> None:
-        """Called from the retry button after a failed first-run yt-dlp.exe
-        download. Re-runs the startup setup; ensure_ytdlp tries the
-        download again since it was never marked as checked/cached."""
-        self.ui.ytdlp_retry_button.pack_forget()
-        self.fetch_ytdlp_version(on_status=self.on_ytdlp_status)
-
     # -- Button icons --------------------------------------------------------
     def make_icon(self, filename: str, color: str, size=BUTTON_ICON_SIZE):
         img = load_button_icon(filename, color=color, size=size)
@@ -565,101 +534,6 @@ class App:
         theme_icon = self.make_icon(theme_icon_file, "#fbfbfb", (24, 24))
         if theme_icon is not None:
             self.ui.light_dark.configure(image=theme_icon)
-
-    def on_ytdlp_status(self, stage: str, detail) -> None:
-        """Called during ensure_ytdlp to update preparation status. Keeps
-        self.ytdlp_ready in sync and derives the download button from it
-        (see refresh_download_button); also locks the URL entry while
-        yt-dlp.exe is being downloaded, preventing failed preview fetches
-        and a stuck "Loading..." state.
-
-        detail is the download percentage (0-100) or the failure exception.
-        """
-        def apply():
-            ui = self.ui
-            lang = self.app_state.current_language or LANGUAGES.get("EN", {})
-
-            # While the app-update installer is downloading, ytdlp_status_label
-            # is showing its "%" progress — don't hide/overwrite it.
-            updating = self.update_checker.is_downloading
-
-            if stage == "ready":
-                if not updating:
-                    ui.ytdlp_status_label.pack_forget()
-                ui.ytdlp_retry_button.pack_forget()
-                ui.url_entry.configure(state="normal")
-                self.ytdlp_ready = True
-                self.refresh_download_button()  # stays disabled if a download/app update is active
-                return
-
-            if stage == "error":
-                # Classifies yt-dlp.exe download errors as connection or
-                # other errors, showing the raw error message for
-                # non-connection failures.
-                message = classify_ytdlp_download_error(
-                    detail if isinstance(detail, Exception) else Exception("unknown"), lang
-                )
-                ui.ytdlp_status_label.configure(text=message)
-                ui.ytdlp_status_label.pack(pady=(0, 5), before=ui.action_buttons_frame)
-                ui.ytdlp_retry_button.configure(text=lang["ytdlp_retry_button"])
-                ui.ytdlp_retry_button.pack(pady=(0, 5), before=ui.action_buttons_frame)
-                self.ytdlp_ready = False
-                self.refresh_download_button()
-                ui.url_entry.configure(state="disabled")
-                return
-
-            if stage == "update_failed":
-                # Self-update check failed on a later launch, but this is
-                # not fatal because the existing yt-dlp.exe still works.
-                # Keep download/URL controls enabled, show a brief
-                # classified warning, then hide it after a few seconds.
-                message = classify_ytdlp_update_error(
-                    detail if isinstance(detail, Exception) else Exception("unknown"), lang
-                )
-                ui.ytdlp_retry_button.pack_forget()
-                if not updating:
-                    ui.ytdlp_status_label.configure(text=message)
-                    ui.ytdlp_status_label.pack(pady=(0, 5), before=ui.action_buttons_frame)
-                ui.url_entry.configure(state="normal")
-                self.ytdlp_ready = True
-                self.refresh_download_button()
-                if not updating:
-                    ui.root.after(6000, ui.ytdlp_status_label.pack_forget)
-                return
-
-            # Every stage below is transitional (checking_update, downloading,
-            # unknown): `--update-to` replaces yt-dlp.exe in place, so a
-            # download must not be able to start (or spawn its own
-            # ensure_ytdlp) until "ready" / "update_failed" arrives.
-            self.ytdlp_ready = False
-            self.refresh_download_button()
-
-            if stage == "checking_update":
-                # exe already exists and works (this stage only occurs when
-                # an exe was already there), so the URL entry can stay
-                # usable — only Download is held back until the update
-                # check finishes.
-                text = lang["ytdlp_checking_message"]
-                ui.url_entry.configure(state="normal")
-            elif stage == "downloading":
-                # First run: exe doesn't exist yet. Lock the URL entry too,
-                # so a pasted link can't kick off a preview fetch that's
-                # doomed to fail silently and leave "Loading..." stuck on
-                # screen.
-                text = (
-                    lang["ytdlp_downloading_message"].replace("{percent}", f"{detail:.0f}")
-                    if detail is not None
-                    else lang["ytdlp_downloading_indeterminate_message"]
-                )
-                ui.url_entry.configure(state="disabled")
-            else:
-                text = lang["ytdlp_downloading_indeterminate_message"]
-
-            ui.ytdlp_retry_button.pack_forget()
-            ui.ytdlp_status_label.configure(text=text)
-            ui.ytdlp_status_label.pack(pady=(0, 5), before=ui.action_buttons_frame)
-
-        self.ui.root.after(0, apply)
 
 
 if __name__ == "__main__":

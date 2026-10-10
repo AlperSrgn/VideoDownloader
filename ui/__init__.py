@@ -11,6 +11,9 @@ widgets, with no download or update logic of its own.
     cookie_panel.py   CookiePanel: which cookie widgets show for the selected mode,
                       language refresh of the mode menu, and the handlers behind
                       the cookie buttons (file picker, Firefox export, delete).
+    ytdlp_status.py   YtdlpStatusPanel: the yt-dlp.exe preparation status (first-run
+                      download, self-update, retry button, URL entry lock, version
+                      label) and the `ready` flag the Download button depends on.
     widgets.py        sidebar_button() / sidebar_option_menu() / sidebar_checkbox()
                       and the sidebar's color constants.
     registry.py       UiRegistry: each widget declares its translated text, icon
