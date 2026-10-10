@@ -3,12 +3,13 @@ Application entry point.
 
 App owns the main window and everything that is not download- or
 update-specific: building the window, sidebar animation, theme/language
-switching, save-location settings and closing.
+switching and save-location settings.
 
 It constructs DownloadController (core/download_controller.py) before the
 window, because the window's button callbacks are its bound methods; its
 widgets are attached afterwards via bind_widgets(). CookiePanel
-(ui/cookie_panel.py) and YtdlpStatusPanel (ui/ytdlp_status.py) follow the
+(ui/cookie_panel.py), YtdlpStatusPanel (ui/ytdlp_status.py) and
+AppLifecycle (core/app_lifecycle.py, closing and uninstalling) follow the
 same pattern. UpdateChecker is constructed after the window, once the
 widgets it needs exist.
 
@@ -20,14 +21,14 @@ just loop over self.ui.registry.
 
 import logging
 import os
-import subprocess
 import sys
 import webbrowser
 from types import SimpleNamespace
 
 import customtkinter as ctk
-from tkinter import Menu, filedialog, messagebox
+from tkinter import Menu, filedialog
 
+from core.app_lifecycle import AppLifecycle
 from core.app_state import AppState
 from core.download_controller import DownloadController
 from core.quality_options import build_dropdown_options, quality_dropdown_text, resolve_quality_key
@@ -146,12 +147,22 @@ class App:
             is_app_update_downloading=lambda: self.update_checker.is_downloading,
         )
 
+        # -- App lifecycle (close / uninstall) ---------------------------
+        # Same pattern: the window's close handler and the uninstall button
+        # use its methods; root is attached via bind_widgets() below.
+        # update_checker doesn't exist yet, hence the lambda.
+        self.lifecycle = AppLifecycle(
+            app_state=self.app_state,
+            queue_view=self.download_controller.queue_view,
+            get_update_checker=lambda: self.update_checker,
+        )
+
         # -- Build UI ------------------------------------------------------
         # Every widget build_app_window() creates lives on self.ui
         # (self.ui.download_button, self.ui.root, ...).
         self.ui = build_app_window(
             callbacks=SimpleNamespace(
-                on_close_request=self.on_close_request,
+                on_close_request=self.lifecycle.on_close_request,
                 url_changed=self.url_changed,
                 show_entry_context_menu=self.show_entry_context_menu,
                 clear_queue=self.download_controller.clear_queue,
@@ -165,7 +176,7 @@ class App:
                 change_language=self.change_language,
                 choose_save_location=self.choose_save_location,
                 preview_notification=self.preview_notification,
-                uninstall_app=self.uninstall_app,
+                uninstall_app=self.lifecycle.uninstall_app,
                 change_cookie_mode=self.cookie_panel.change_mode,
                 change_cookie_browser=self.cookie_panel.change_browser,
                 choose_cookie_file=self.cookie_panel.choose_file,
@@ -206,6 +217,7 @@ class App:
             create_title_label=ui.cookie_create_title_label,
             buttons_row=ui.cookie_buttons_row,
         )
+        self.lifecycle.bind_widgets(root=ui.root)
         self.ytdlp_status.bind_widgets(
             root=ui.root,
             url_entry=ui.url_entry,
@@ -280,83 +292,6 @@ class App:
         self.ui.download_button.configure(
             state="normal" if self._download_allowed() else "disabled"
         )
-
-    # -- Window close (X) -------------------------------------------------
-    def on_close_request(self) -> None:
-        """Idle: close right away. Download/merge in progress: pause it and
-        ask. On confirm, the download is stopped through the normal cancel
-        path (stops yt-dlp/ffmpeg and lets the worker delete its temp
-        files), then the app closes. Declining restores the previous pause
-        state, so the download continues where it left off."""
-        if self.app_state.closing:
-            return
-
-        queue_view = self.download_controller.queue_view
-        if queue_view.current_item is not None:
-            # Freeze the download while the dialog is open, using the same
-            # pause mechanism as the Pause button (the button itself is
-            # left untouched).
-            item_at_open = queue_view.current_item
-            was_paused = self.app_state.pause_requested
-            self.app_state.pause_requested = True
-            if not messagebox.askyesno(
-                self.app_state.current_language["close_confirm_title"],
-                self.app_state.current_language["close_confirm_message"],
-            ):
-                # Only restore if it's still the same item; a new queue item
-                # that started meanwhile has already reset its own pause state.
-                if queue_view.current_item is item_at_open:
-                    self.app_state.pause_requested = was_paused
-                return
-            self.app_state.closing = True
-            queue_view.clear()  # don't let the next queued item start
-            self.app_state.pause_requested = False
-            self.app_state.cancel_requested = True
-            self.ui.root.withdraw()  # window disappears immediately
-
-        # An app-update installer download in progress: cancel it so its
-        # partial .part file gets deleted (_finish_close waits for that).
-        if self.update_checker.is_downloading:
-            self.update_checker.cancel_download()
-            self.ui.root.withdraw()
-
-        self._finish_close(0)
-
-    def _finish_close(self, attempt: int) -> None:
-        """Waits (max ~10 s) for the cancelled worker to finish, then closes.
-        Anything still alive after that is killed by the job object."""
-        busy = (
-            self.download_controller.queue_view.current_item is not None
-            or self.update_checker.is_downloading
-        )
-        if busy and attempt < 100:
-            self.ui.root.after(100, lambda: self._finish_close(attempt + 1))
-            return
-        if self.app_state.closing:
-            # Processes should be stopped by now (any that aren't are killed
-            # by the job object as we exit); remove whatever temp files remain.
-            cleanup_temp_files(self.app_state.save_location, TEMP_PREFIX)
-        self.ui.root.destroy()
-
-    # -- Uninstall ---------------------------------------------------------
-    def uninstall_app(self) -> None:
-        app_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
-        uninstall_path = os.path.join(app_dir, "unins000.exe")
-
-        if not messagebox.askyesno(
-            self.app_state.current_language["uninstall_app_title"],
-            self.app_state.current_language["uninstall_app_message"],
-        ):
-            return
-
-        if os.path.exists(uninstall_path):
-            subprocess.Popen([uninstall_path])
-            sys.exit()
-        else:
-            messagebox.showerror(
-                self.app_state.current_language["error_title"],
-                self.app_state.current_language["file_not_found_error"],
-            )
 
     # -- Theme toggle --------------------------------------------------------
     def toggle_theme(self) -> None:

@@ -1,7 +1,7 @@
 """
 Application logic that has no widgets of its own: shared state, the download
-queue, the quality options, the controller that drives each download, and the
-error classification that several packages use.
+queue, the quality options, the controller that drives each download, the
+close/uninstall logic, and the error classification that several packages use.
 
     app_state.py            AppState: status flags shared by App,
                             DownloadController and the update/close logic
@@ -17,6 +17,11 @@ error classification that several packages use.
                             and reacts to a download finishing, failing or
                             being cancelled. Its widgets are attached after
                             construction via bind_widgets().
+    app_lifecycle.py        AppLifecycle: closing the window (confirm, stop a
+                            running download or app-update download through
+                            the normal cancel path, remove leftover temp
+                            files) and launching the uninstaller. Its root
+                            window is attached via bind_widgets().
     error_classifier.py     The exceptions the download engine raises and the
                             classify_* functions that turn yt-dlp / ffmpeg
                             failures into translated, user-facing messages.
@@ -25,8 +30,9 @@ error classification that several packages use.
 
 Nothing is imported here on purpose, and that matters beyond tidiness:
 error_classifier.py must stay importable without loading the rest of this
-package. `ytdlp` imports it, while download_controller.py imports
-`downloading`, which imports `ytdlp`; importing DownloadController from this
-file would close that circle and make `import ytdlp` fail. Import the module
-you need instead, e.g. `from core.error_classifier import DenoNotFoundError`.
+package. `ytdlp` imports it, while download_controller.py (and
+app_lifecycle.py) import `downloading`, which imports `ytdlp`; importing
+DownloadController or AppLifecycle from this file would close that circle and
+make `import ytdlp` fail. Import the module you need instead, e.g.
+`from core.error_classifier import DenoNotFoundError`.
 """

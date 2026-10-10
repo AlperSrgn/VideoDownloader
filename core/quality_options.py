@@ -1,26 +1,22 @@
 """
 Single source of truth for the app's quality/format options.
 
-Before this, adding a quality option meant editing three places by hand:
-RESOLUTION_MAP in downloader.py, three separate dicts/lists in main.py,
-and the label in languages.py. This module collapses all of that except
-translated labels (which have to stay in languages.py) into one list.
+Everything that depends on the available qualities -- the dropdown order, the
+resolution lookup used for video downloads, and the format tag (mp4/mp3) shown
+next to each option in the dropdown -- is derived from the one list below.
+Only the translated labels live elsewhere (languages.py).
 
 Most quality labels ("1080p ᴴᴰ", "720p", ...) are the same text in every
-language, so they're just written directly as `label` below — no need to
+language, so they're just written directly as `label` below -- no need to
 touch languages.py for those. Only options whose label actually differs by
 language (like "audio") use `lang_field` to look the label up from the
 current language dict at display time. Give an option `label` OR
 `lang_field`, not both.
 
-To add a new option:
-  1. Add one entry to QUALITY_OPTIONS below, with a `label` if the text is
-     the same in every language, or a `lang_field` if it needs translation
-     (in which case also add that field to every language dict in
-     languages.py).
-The dropdown order, the resolution lookup used for video
-downloads, and the format tag (mp4/mp3) shown next to each option in the
-dropdown are all derived from this list automatically.
+To add a new option, add one entry to QUALITY_OPTIONS below, with a `label` if
+the text is the same in every language, or a `lang_field` if it needs
+translation (in which case also add that field to every language dict in
+languages.py).
 """
 
 QUALITY_OPTIONS = [
@@ -46,7 +42,7 @@ QUALITY_KEY_TO_FORMAT_TAG = {opt["key"]: opt["format"] for opt in QUALITY_OPTION
 
 
 # ---------------------------------------------------------------------------
-# Display helpers (moved from main.py)
+# Display helpers
 # ---------------------------------------------------------------------------
 # The dropdown shows language-specific labels, but each queue item stores its
 # selection as a language-independent key, so it stays valid if the language
