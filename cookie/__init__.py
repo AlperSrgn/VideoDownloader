@@ -24,6 +24,7 @@ from cookie.firefox import CookieExportError, ExportResult
 from cookie.options import (
     COOKIE_BROWSERS,
     COOKIE_MODES,
+    FILE_MODES,
     build_cookie_mode_options,
     cookie_mode_label,
     resolve_cookie_browser_key,
@@ -56,6 +57,7 @@ __all__ = [
     "describe_cookies",
     "export_cookies_from_firefox",
     "ExportResult",
+    "FILE_MODES",
     "get_cookie_browser",
     "get_cookie_file_label",
     "get_cookie_mode",

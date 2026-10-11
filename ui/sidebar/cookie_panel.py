@@ -52,15 +52,22 @@ class CookiePanel:
         self.file_label = None
         self.create_title_label = None
         self.buttons_row = None
+        self.create_button = None
+        self.delete_button = None
 
     def bind_widgets(self, *, mode_var, mode_menu, browser_menu, file_button,
-                     file_label, create_title_label, buttons_row) -> None:
+                     file_label, create_title_label, buttons_row,
+                     create_button=None, delete_button=None) -> None:
         """Attaches the sidebar's cookie widgets (see ui/sidebar/view.py).
 
         Only the mode menu is always visible; browser_menu (shown to the right
         of the mode menu), file_button, file_label, create_title_label and
         buttons_row (shown below it) start unpacked and are shown/hidden by
-        update_widgets()."""
+        update_widgets().
+
+        create_button and delete_button are the two buttons inside buttons_row:
+        "Create from Firefox" mode shows both, "From file" mode only Delete.
+        If they are not passed, both stay visible in both modes."""
         self.mode_var = mode_var
         self.mode_menu = mode_menu
         self.browser_menu = browser_menu
@@ -68,6 +75,8 @@ class CookiePanel:
         self.file_label = file_label
         self.create_title_label = create_title_label
         self.buttons_row = buttons_row
+        self.create_button = create_button
+        self.delete_button = delete_button
 
     # -- Language ------------------------------------------------------------
     def current_mode_key(self) -> str:
@@ -96,7 +105,12 @@ class CookiePanel:
 
     # -- Widgets and handlers --------------------------------------------------
     def update_widgets(self) -> None:
-        """Shows the browser menu or the file widgets depending on the mode."""
+        """Shows the widgets that belong to the selected mode:
+
+            browser         browser menu (in the mode menu's row)
+            file            "cookies.txt" button, file name, Delete
+            firefox_export  heading, Create + Delete, file name
+        """
         mode = resolve_cookie_mode_key(
             self.mode_var.get(), self.app_state.current_language
         )
@@ -117,11 +131,33 @@ class CookiePanel:
             # ui/sidebar/view.py), the same as the mode menu above.
             self.file_button.pack(anchor="w", pady=(8, 0), padx=10)
             self.file_label.pack(anchor="w", pady=(2, 0), padx=10, fill="x")
-            self.file_label.configure(
-                text=format_save_location_display(get_cookie_file_label())
-            )
-            self.create_title_label.pack(anchor="w", pady=(10, 0), padx=10, fill="x")
+            self._refresh_file_label()
+            self._layout_buttons(with_create=False)
+            self.buttons_row.pack(anchor="w", pady=(8, 0), padx=10, fill="x")
+        elif mode == "firefox_export":
+            self.create_title_label.pack(anchor="w", pady=(8, 0), padx=10, fill="x")
+            self._layout_buttons(with_create=True)
             self.buttons_row.pack(anchor="w", pady=(4, 0), padx=10, fill="x")
+            self.file_label.pack(anchor="w", pady=(4, 0), padx=10, fill="x")
+            self._refresh_file_label()
+
+    def _refresh_file_label(self) -> None:
+        self.file_label.configure(
+            text=format_save_location_display(get_cookie_file_label())
+        )
+
+    def _layout_buttons(self, with_create: bool) -> None:
+        """Create + Delete side by side, or only Delete (left half, same width
+        as before) when there is nothing to create. Does nothing if the two
+        buttons were not passed to bind_widgets()."""
+        if self.create_button is None or self.delete_button is None:
+            return
+        if with_create:
+            self.create_button.grid(row=0, column=0, sticky="ew", padx=(0, 3))
+            self.delete_button.grid(row=0, column=1, sticky="ew", padx=(3, 0))
+        else:
+            self.create_button.grid_remove()
+            self.delete_button.grid(row=0, column=0, sticky="ew", padx=(0, 3))
 
     def change_mode(self, selected: str) -> None:
         mode = resolve_cookie_mode_key(selected, self.app_state.current_language)

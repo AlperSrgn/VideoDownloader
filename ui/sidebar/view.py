@@ -249,7 +249,8 @@ def _build_cookie_section(sidebar_content, registry, callbacks) -> SimpleNamespa
         dynamic_resizing=False,
     )
 
-    # Create + Delete sit side by side in one row (shown only in "file" mode).
+    # Create + Delete sit side by side in one row. "Create from Firefox" mode
+    # shows both; "From file" mode only Delete (CookiePanel._layout_buttons()).
     cookie_buttons_row = ctk.CTkFrame(cookie_extra_frame, fg_color="transparent")
     cookie_buttons_row.grid_columnconfigure((0, 1), weight=1, uniform="cookie_btn")
 
@@ -280,7 +281,8 @@ def _build_cookie_section(sidebar_content, registry, callbacks) -> SimpleNamespa
     )
     registry.add(cookie_create_title_label, text="cookie_create_title")
 
-    #The text is a file name, the same in every language, so there is no lang key: only the icon is registered.
+    # Same width as the mode menu above it. The text is a file name, the same in
+    # every language, so there is no lang key: only the icon is registered.
     cookie_file_button = sidebar_button(
         cookie_extra_frame,
         text="cookies.txt",

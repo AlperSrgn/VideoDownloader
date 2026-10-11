@@ -2,7 +2,11 @@
 Same idea as core/quality_options.py: settings store the key, the
 dropdown shows the translated text."""
 
-COOKIE_MODES = ("none", "browser", "file")
+COOKIE_MODES = ("none", "browser", "file", "firefox_export")
+
+# The modes that send the app's own cookies.txt to yt-dlp: "file" (a cookies.txt
+# the user picked) and "firefox_export" (one the app created from Firefox).
+FILE_MODES = ("file", "firefox_export")
 
 # key (as passed to yt-dlp) -> display name
 COOKIE_BROWSERS = {

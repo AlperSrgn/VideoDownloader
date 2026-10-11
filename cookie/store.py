@@ -22,7 +22,7 @@ import time
 
 from cookie.firefox import ExportResult, export_firefox_cookies
 from cookie.netscape import summarize_cookie_file
-from cookie.options import COOKIE_BROWSERS
+from cookie.options import COOKIE_BROWSERS, FILE_MODES
 from settings import get_appdata_path, load_setting, save_setting
 
 logger = logging.getLogger(__name__)
@@ -118,12 +118,12 @@ def cookie_args() -> list:
             args = ["--cookies-from-browser", browser]
         else:
             logger.warning("cookie_mode=browser but browser %r is not supported; no cookies sent", browser)
-    elif mode == "file":
+    elif mode in FILE_MODES:
         path = cookie_file_path()
         if os.path.isfile(path):
             args = ["--cookies", path]
         else:
-            logger.warning("cookie_mode=file but %s does not exist; no cookies sent", path)
+            logger.warning("cookie_mode=%s but %s does not exist; no cookies sent", mode, path)
     return args
 
 
@@ -133,7 +133,7 @@ def describe_cookies() -> str:
     mode = get_cookie_mode()
     if mode == "browser":
         return f"mode=browser, browser={get_cookie_browser()}"
-    if mode != "file":
+    if mode not in FILE_MODES:
         return f"mode={mode} (no cookies sent)"
 
     path = cookie_file_path()
@@ -141,10 +141,10 @@ def describe_cookies() -> str:
         age_min = int((time.time() - os.path.getmtime(path)) / 60)
         summary = summarize_cookie_file(path)
     except OSError as e:
-        return f"mode=file, cannot read {path}: {e}"
+        return f"mode={mode}, cannot read {path}: {e}"
 
     return (
-        f"mode=file, {summary.total} cookies ({summary.expired} expired), "
+        f"mode={mode}, {summary.total} cookies ({summary.expired} expired), "
         f"login cookies present: {sorted(summary.login_names) or 'NONE'}, "
         f"file modified {age_min} min ago"
     )
