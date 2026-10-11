@@ -57,9 +57,10 @@ class CookiePanel:
                      file_label, create_title_label, buttons_row) -> None:
         """Attaches the sidebar's cookie widgets (see ui/sidebar/view.py).
 
-        Only the mode menu is always visible; browser_menu, file_button,
-        file_label, create_title_label and buttons_row start unpacked and are
-        shown/hidden by update_widgets()."""
+        Only the mode menu is always visible; browser_menu (shown to the right
+        of the mode menu), file_button, file_label, create_title_label and
+        buttons_row (shown below it) start unpacked and are shown/hidden by
+        update_widgets()."""
         self.mode_var = mode_var
         self.mode_menu = mode_menu
         self.browser_menu = browser_menu
@@ -107,9 +108,14 @@ class CookiePanel:
         self.buttons_row.pack_forget()
 
         if mode == "browser":
-            self.browser_menu.pack(anchor="w", pady=(8, 0), padx=10, fill="x")
+            # Same row as the mode menu (see ui/sidebar/view.py), right next to it.
+            # No fill/expand on purpose: the width is COOKIE_BROWSER_MENU_WIDTH
+            # (ui/sidebar/widgets.py), not whatever space the mode menu leaves free.
+            self.browser_menu.pack(side="left", padx=(6, 0))
         elif mode == "file":
-            self.file_button.pack(anchor="w", pady=(8, 0), padx=10, fill="x")
+            # No fill on purpose: the width is COOKIE_MODE_MENU_WIDTH (set in
+            # ui/sidebar/view.py), the same as the mode menu above.
+            self.file_button.pack(anchor="w", pady=(8, 0), padx=10)
             self.file_label.pack(anchor="w", pady=(2, 0), padx=10, fill="x")
             self.file_label.configure(
                 text=format_save_location_display(get_cookie_file_label())
@@ -131,7 +137,7 @@ class CookiePanel:
 
     def choose_file(self) -> None:
         path = filedialog.askopenfilename(
-            title=self.app_state.current_language["cookie_file_button"],
+            title="cookies.txt",
             filetypes=[("cookies.txt", "*.txt"), ("*", "*.*")],
         )
         if not path:

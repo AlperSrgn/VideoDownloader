@@ -16,6 +16,9 @@ sidebar's labels, whose settings differ from one another.
 
 The colors below are the sidebar's own palette; like the hardcoded colors in
 the builders they do not change between light and dark mode.
+
+The two cookie menu widths at the end of the constants are tunable layout sizes,
+not colors; they live here with the other sidebar values.
 """
 
 import customtkinter as ctk
@@ -34,6 +37,12 @@ SIDEBAR_MENU_TEXT = "#ebebeb"
 # Destructive buttons (delete cookies, uninstall).
 DANGER = "#cc3b3b"
 DANGER_HOVER = "#ff4c4c"
+
+# Cookie section (ui/sidebar/view.py): The mode menu is on the left and the
+# browser menu (browser mode only) is on the right, on the same row.
+# Both must fit within the sidebar width minus 20 px padding, with a 6 px gap.
+COOKIE_MODE_MENU_WIDTH = 160
+COOKIE_BROWSER_MENU_WIDTH = 90
 
 
 def sidebar_button(parent, **kwargs) -> ctk.CTkButton:

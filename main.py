@@ -82,7 +82,7 @@ logging.getLogger("PIL").setLevel(logging.WARNING)
 # ---------------------------------------------------------------------------
 # App-wide constants
 # ---------------------------------------------------------------------------
-SIDEBAR_WIDTH = 300
+SIDEBAR_WIDTH = 270
 
 # Default download folder, saved to config.json.
 DEFAULT_SAVE_LOCATION = os.path.join(os.path.expanduser("~"), "Downloads")

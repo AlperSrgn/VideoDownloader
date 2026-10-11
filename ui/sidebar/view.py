@@ -26,6 +26,7 @@ from cookie import COOKIE_BROWSERS, get_cookie_browser
 from settings import load_setting, save_setting
 from ui.theme import THEMES
 from ui.sidebar.widgets import (
+    COOKIE_BROWSER_MENU_WIDTH, COOKIE_MODE_MENU_WIDTH,
     DANGER, DANGER_HOVER, SIDEBAR_BG, SIDEBAR_HOVER,
     sidebar_button, sidebar_checkbox, sidebar_option_menu,
 )
@@ -37,6 +38,9 @@ def build_sidebar(root, registry, callbacks, sidebar_width: int, sidebar_x: int)
     # Sidebar
     sidebar_frame = ctk.CTkFrame(root, width=sidebar_width, fg_color=SIDEBAR_BG, corner_radius=0)
     sidebar_frame.place(x=sidebar_x, y=0, relheight=1)
+    # Fixed width: it comes from `width` above, never from whatever size the
+    # children's texts request, so a language change can't resize the sidebar.
+    sidebar_frame.pack_propagate(False)
 
     sidebar_content = ctk.CTkFrame(sidebar_frame, fg_color=SIDEBAR_BG)
     sidebar_content.pack(padx=0, pady=0, anchor="nw", fill="both", expand=True)
@@ -142,11 +146,16 @@ def build_sidebar(root, registry, callbacks, sidebar_width: int, sidebar_x: int)
     cookie = _build_cookie_section(sidebar_content, registry, callbacks)
 
 
-    # Preview notification button
+    # Preview notification button: in the bottom row, centered between the
+    # light/dark toggle (x=10, 45 wide) on the left and the language menu (70 wide,
+    # 85px from the right edge) on the right.
+    toggle_right_edge = 10 + 45
+    language_left_edge = sidebar_width - 85 - 70
+    preview_x = round((toggle_right_edge + language_left_edge - 45) / 2)
     preview_notification_button = sidebar_button(
         sidebar_content, command=callbacks.preview_notification, width=45, height=45,
     )
-    preview_notification_button.place(x=10, y=-70, relx=0, rely=1, anchor="sw")
+    preview_notification_button.place(x=preview_x, y=-10, relx=0, rely=1, anchor="sw")
     registry.add(preview_notification_button, text="preview_notification_button", icon=("notification.png", "#fbfbfb"))
 
 
@@ -189,9 +198,10 @@ def _build_cookie_section(sidebar_content, registry, callbacks) -> SimpleNamespa
     widgets into sidebar_content; returns them for ui/sidebar/cookie_panel.py's
     CookiePanel.bind_widgets()."""
     # Cookie support (age-restricted / members-only videos).
-    # Only the mode menu is always visible; the browser menu and the file
-    # button live in cookie_extra_frame and are shown/hidden by
-    # CookiePanel.update_widgets() (ui/sidebar/cookie_panel.py). They start unpacked (hidden).
+    # Only the mode menu is always visible. The browser menu (next to it, in
+    # cookie_menu_row) and the file widgets (below, in cookie_extra_frame) are
+    # shown/hidden by CookiePanel.update_widgets() (ui/sidebar/cookie_panel.py).
+    # They start unpacked (hidden).
     cookie_section_label = ctk.CTkLabel(
         sidebar_content,
         text="",
@@ -202,15 +212,24 @@ def _build_cookie_section(sidebar_content, registry, callbacks) -> SimpleNamespa
     cookie_section_label.pack(anchor="w", pady=(6, 0), padx=10, fill="x")
     registry.add(cookie_section_label, text="cookie_section_label")
 
+    # One row for both menus: mode menu on the left, browser menu right next to it
+    # (only in "browser" mode). Both have the fixed widths from ui/sidebar/widgets.py;
+    # dynamic_resizing=False keeps them as given, so a long text can't grow a menu
+    # and push the other one out of the sidebar.
+    cookie_menu_row = ctk.CTkFrame(sidebar_content, fg_color="transparent")
+    cookie_menu_row.pack(anchor="w", pady=(4, 0), padx=10, fill="x")
+
     # Texts/values are set by CookiePanel.refresh_language() (translated per language).
     cookie_mode_var = ctk.StringVar()
     cookie_mode_menu = sidebar_option_menu(
-        sidebar_content,
+        cookie_menu_row,
         variable=cookie_mode_var,
         values=[""],
         command=callbacks.change_cookie_mode,
+        width=COOKIE_MODE_MENU_WIDTH,
+        dynamic_resizing=False,
     )
-    cookie_mode_menu.pack(anchor="w", pady=(4, 0), padx=10, fill="x")
+    cookie_mode_menu.pack(side="left")
 
     # Holds the mode-dependent widgets. width/height=0 so the empty frame
     # takes no space while both children are hidden.
@@ -222,10 +241,12 @@ def _build_cookie_section(sidebar_content, registry, callbacks) -> SimpleNamespa
         value=COOKIE_BROWSERS.get(saved_cookie_browser, COOKIE_BROWSERS["firefox"])
     )
     cookie_browser_menu = sidebar_option_menu(
-        cookie_extra_frame,
+        cookie_menu_row,
         variable=cookie_browser_var,
         values=list(COOKIE_BROWSERS.values()),
         command=callbacks.change_cookie_browser,
+        width=COOKIE_BROWSER_MENU_WIDTH,
+        dynamic_resizing=False,
     )
 
     # Create + Delete sit side by side in one row (shown only in "file" mode).
@@ -259,8 +280,14 @@ def _build_cookie_section(sidebar_content, registry, callbacks) -> SimpleNamespa
     )
     registry.add(cookie_create_title_label, text="cookie_create_title")
 
-    cookie_file_button = sidebar_button(cookie_extra_frame, command=callbacks.choose_cookie_file)
-    registry.add(cookie_file_button, text="cookie_file_button", icon=("folder.png", "#fbfbfb"))
+    #The text is a file name, the same in every language, so there is no lang key: only the icon is registered.
+    cookie_file_button = sidebar_button(
+        cookie_extra_frame,
+        text="cookies.txt",
+        command=callbacks.choose_cookie_file,
+        width=COOKIE_MODE_MENU_WIDTH,
+    )
+    registry.add(cookie_file_button, icon=("folder.png", "#fbfbfb"))
 
     # Name of the selected cookies.txt (set by CookiePanel.update_widgets()).
     cookie_file_label = ctk.CTkLabel(
@@ -273,6 +300,7 @@ def _build_cookie_section(sidebar_content, registry, callbacks) -> SimpleNamespa
     return SimpleNamespace(
         cookie_section_label=cookie_section_label,
         cookie_mode_var=cookie_mode_var,
+        cookie_menu_row=cookie_menu_row,
         cookie_mode_menu=cookie_mode_menu,
         cookie_extra_frame=cookie_extra_frame,
         saved_cookie_browser=saved_cookie_browser,
