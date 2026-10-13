@@ -26,6 +26,7 @@ A simple and fast **Windows desktop application** for downloading videos and aud
 - 🔔 **System notifications** with notification preview
 - 🎯 **Automatically selects the best available format** according to the selected quality
 - 🔄 **Automatically keeps `yt-dlp` up to date**
+- 🍪 **Cookie support** — download videos that require signing in, using your own signed-in session
 
 Built with [yt-dlp](https://github.com/yt-dlp/yt-dlp) and [FFmpeg](https://github.com/imageio/imageio-ffmpeg).
 
@@ -94,6 +95,15 @@ Install all runtime dependencies from `requirements.txt`:
 pip install -r requirements.txt
 ```
 
+### Run the Application
+
+After installing the dependencies and activating your virtual environment, run the application with:
+
+```bash
+python main.py
+```
+
+
 ### yt-dlp
 
 Video Downloader uses the official standalone `yt-dlp.exe` binary instead of the `yt-dlp` Python package.
@@ -104,7 +114,7 @@ On first launch, the application downloads `yt-dlp.exe` to:
 %LOCALAPPDATA%\VideoDownloader
 ```
 
-The application checks for `yt-dlp` updates every 12 hours. The last check is saved in `config.json`, so restarting won’t trigger another check. Failed checks are retried on the next launch, so no separate `pip install` step is required.
+The application checks for `yt-dlp` updates every 12 hours. The last check is saved in `config.json`, so restarting won’t trigger another check. Failed checks are retried on the next launch.
 
 ---
 
@@ -132,29 +142,80 @@ The build script handles the PyInstaller build process and automatically resolve
 
 ---
 
-# Project Structure
+# Cookie Support (Videos That Require Sign-In)
 
-| File | Description |
-| ---- | ----------- |
-| `main.py` | Application entry point — enforces a single running instance at startup, builds the window via `ui/app_window.py`, constructs `core/app_state.py` and `core/download_controller.py`, and wires the remaining top-level behavior (theme/language switching, sidebar, save location, yt-dlp status/version display, Download-button gating, window close handling, updater, uninstall); applies language, icon and theme changes by looping over the widget registry |
-| `core/app_state.py` | Groups application-wide status flags (cancel/pause requests, closing state, current language, sidebar position, save location) that would otherwise be separate global variables |
-| `core/download_controller.py` | Owns the full download lifecycle on top of the queue — validating and adding URLs, starting the next queued item, wiring `yt-dlp` progress into the progress bar, preventing sleep while downloading, and reacting to a download pausing, being cancelled (shown as a brief toast), finishing, or failing |
-| `core/download_queue.py` | Pure download-queue state (items waiting to download, plus the one currently in flight) — no GUI or threading dependencies, so it can be tested on its own |
-| `core/quality_options.py` | Centralizes available quality and format options, including resolutions, container formats, and dropdown labels |
-| `downloading/downloader.py` | Download logic — runs `yt-dlp.exe` as a subprocess and parses its progress, handles FFmpeg merging and mp3 conversion, pause (stop and relaunch `yt-dlp` / suspend FFmpeg), cancellation and stall detection, and orchestrates video/audio downloads |
-| `downloading/error_classifier.py` | Converts raw `yt-dlp` / FFmpeg errors and process results into clear, localized, user-facing messages |
-| `downloading/ytdlp_manager.py` | Manages the standalone `yt-dlp.exe` binary — first-run download, rate-limited update checks, info and preview extraction via `--dump-json`, and selecting the best available video/audio format from the extracted info |
-| `system/process_manager.py` | Windows process/window management — Job Object lifecycle for child processes, suspend/resume of the FFmpeg step, process-tree termination, background pipe reading, sleep prevention while a download runs, and single-instance mutex + window-focus handling |
-| `system/updater.py` | Checks GitHub for new releases and handles downloading, verifying, and launching the installer |
-| `ui/app_window.py` | Builds every widget of the main window and the settings sidebar, and registers each one that needs a translated label, icon or theme colors in the registry |
-| `ui/notifications.py` | User notifications — a thin wrapper around Windows system notifications (via `plyer`, respecting the user's notification setting), plus `ToastNotifier`, which animates the in-app toast (e.g. the "download cancelled" notice) |
-| `ui/queue_view.py` | Renders the download queue (on top of `core/download_queue.py`) into widgets, and fetches per-item preview info (title, duration, thumbnail) |
-| `ui/registry.py` | `UiRegistry` — the single place where a widget declares its language key, button icon and theme key |
-| `ui/theme.py` | Light/dark theme definitions and the `ThemeManager` that applies them to the widget set |
-| `utils.py` | General helpers — filename sanitization and uniqueness, file timestamp update, temp file cleanup, video URL validation/cleaning, duration/path display formatting, FFmpeg path handling, and icon handling (copying `.ico` files to AppData, loading/tinting button PNGs) |
-| `settings.py` | Configuration — reads and writes application settings to `AppData\Local\VideoDownloader\config.json` |
-| `languages.py` | Localization strings and language support for the application |
-| `build.py` | Builds the Windows executable with PyInstaller |
+Some videos (e.g., age-restricted, members-only) may require you to be signed in to access them. Video Downloader can use your existing browser session to download these videos. so you don't need to enter your account password in the app.
+
+
+**Note:** You only need cookie support for videos that require you to sign in. Public videos can still be downloaded normally without configuring cookies or installing Deno.
+
+## Before You Start
+
+Make sure you have:
+
+- A browser with an active session on the website containing the video, with permission to access that content.
+- [Deno](#deno-requirement) installed on your computer.
+
+## Choose a Cookie Method
+
+Open the settings sidebar and select a cookie mode from the dropdown.
+
+| Mode | When to use it |
+| --- | --- |
+| **None** (default) | For public videos that don't require you to sign in. |
+| **Browser** | To use cookies directly from a supported browser. Choose your browser from the second dropdown. **(Recommended first option for Firefox users.)** |
+| **File** | To use a `cookies.txt` file you've exported yourself using a browser extension. |
+| **Firefox export** | To automatically extract the relevant cookies from your Firefox profile. Use this if the Browser method doesn't work. |
+
+**🚨 Important:** Your `cookies.txt` may give others access to your account. Keep it private and never share or publicly upload it.
+
+## How to Set Up Each Method
+
+### Browser
+
+1. Select **Browser** as the cookie mode.
+2. Choose your browser from the dropdown (Firefox, Edge, Chrome, Brave, Opera).
+3. Download the video as usual.
+
+**Having trouble?** Close your browser and try again if the app cannot read its cookie database. Recent versions of Chrome, Edge, and Brave use additional cookie encryption protections that may prevent direct access. If the problem persists, [download Firefox](https://www.mozilla.org/firefox/) and try again.
+
+
+### File
+
+1. Export your cookies to a **Netscape-format cookies.txt** file using a browser extension that supports cookie export.
+2. Select **File** as the cookie mode.
+3. Choose your exported `cookies.txt` file.
+4. Download the video as usual.
+
+The app creates and uses its own copy of the selected file. Your original file is not modified or deleted.
+
+### Firefox Export
+
+1. Open Firefox and sign in to the website you want to download from.
+2. Select **Firefox export** as the cookie mode and run the export.
+3. Download the video as usual.
+
+The app checks your Firefox profiles for an active session on the website. It exports the relevant cookies to its own `cookies.txt` file.
+
+If your session expires or you sign in with a different account, export the cookies again to refresh them.
+
+
+## Deno Requirement
+
+Deno is an additional component that helps `yt-dlp` handle JavaScript challenges when downloading certain sign-in-protected videos. Video Downloader uses Deno to enable these downloads. For more information, visit the [official Deno website](https://deno.com/) or check out the [GitHub page](https://github.com/denoland/deno).
+
+**Note:** Deno is only required for videos that need sign-in. You don't need to install it to download ordinary public videos. 
+To download sign-in-protected videos, you need both a working cookie configuration and Deno installed.
+
+### Install Deno
+
+Open PowerShell or Windows Terminal and run the following command:
+
+```powershell
+winget install DenoLand.Deno
+```
+
+The app automatically looks for Deno in your system's `PATH` and common installation locations, so you don't need to configure its path manually.
 
 
 ---
@@ -173,4 +234,4 @@ The build script handles the PyInstaller build process and automatically resolve
 
 - The application requires internet access to download the standalone yt-dlp binary when it is not already available.
 - `yt-dlp` is updated through its **nightly** channel to receive fixes for website-side changes more quickly.
-- The application does not currently support login, so restricted content may not be downloadable.
+- The application does not ask for or store your login credentials. Content that requires signing in can be downloaded by using your browser's cookies — see [Cookie Support](#cookie-support-videos-that-require-sign-in).
