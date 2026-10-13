@@ -59,6 +59,7 @@ from ytdlp import (
     find_suitable_audio_format,
     find_suitable_format,
 )
+from ytdlp.formats import resolution_of
 from ytdlp.info import Extraction
 from downloading.ffmpeg_commands import build_ffmpeg_merge_cmd, build_ffmpeg_mp3_cmd
 from downloading.process_runner import (
@@ -322,7 +323,9 @@ def _download_muxed(job: _DownloadJob, video_format: dict, requested_height: int
     file is just moved into place. The user is only told about a quality
     reduction if the stream is below the requested height."""
     cb = job.cb
-    height = video_format.get("height")
+    # Short side (e.g. 720 for a 720x1280 portrait video), matching the
+    # quality labels the user picks from -- not the raw `height`.
+    height = resolution_of(video_format)
     logger.warning(
         "Muxed fallback: client=%s format=%s (%sp, protocol=%s, vcodec=%s, acodec=%s)",
         job.client or "default", video_format.get("format_id"), height,

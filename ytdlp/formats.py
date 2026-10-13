@@ -18,6 +18,18 @@ logger = logging.getLogger(__name__)
 SelectionKind = Literal["separate", "muxed", "audio_only"]
 
 
+def resolution_of(f: dict) -> int:
+    """Quality label of a format in pixels: the SHORTER side.
+
+    Platforms label quality by the short side ("720p" is 1280x720 landscape and
+    720x1280 portrait), so portrait videos (Shorts, Reels, TikTok) must not be
+    judged by `height`, which is their long side. Falls back to whichever side
+    is known; 0 if neither is (e.g. audio-only formats).
+    """
+    sides = [v for v in (f.get("height"), f.get("width")) if v]
+    return min(sides) if sides else 0
+
+
 @dataclass(frozen=True)
 class Selection:
     """What to download, as decided by a selector.
@@ -64,8 +76,9 @@ class Selection:
 
     @property
     def height(self) -> int:
-        """Video resolution in pixels; 0 for audio-only selections."""
-        return (self.video or {}).get("height") or 0
+        """Video quality in pixels (short side, see resolution_of); 0 for
+        audio-only selections. Name kept for existing callers."""
+        return resolution_of(self.video) if self.video else 0
 
     @property
     def primary(self) -> dict:
@@ -125,7 +138,7 @@ def find_suitable_format(formats: list, video_height: int) -> Optional[Selection
     """
     video_formats = [
         f for f in formats
-        if f.get("url") and f.get("vcodec") != "none" and f.get("height") is not None
+        if f.get("url") and f.get("vcodec") != "none" and resolution_of(f) > 0
     ]
     audio_formats = [
         f for f in formats
@@ -135,12 +148,12 @@ def find_suitable_format(formats: list, video_height: int) -> Optional[Selection
     if not video_formats or not audio_formats:
         return None
 
-    heights = {f["height"] for f in video_formats}
+    heights = {resolution_of(f) for f in video_formats}
     at_or_below = [h for h in heights if h <= video_height]
     height = max(at_or_below) if at_or_below else max(heights)
 
     chosen_video = max(
-        (f for f in video_formats if f["height"] == height),
+        (f for f in video_formats if resolution_of(f) == height),
         key=lambda x: x.get("tbr") or 0,
     )
     chosen_audio = _select_original_audio(audio_formats)
@@ -194,12 +207,12 @@ def find_progressive_format(formats: list, video_height: int) -> Optional[Select
     below video_height (or the lowest-above if nothing fits). At equal height
     plain https wins over HLS, then the higher bitrate. Returns None if there
     is no muxed format at all."""
-    candidates = [f for f in _muxed_formats(formats) if f.get("height")]
+    candidates = [f for f in _muxed_formats(formats) if resolution_of(f) > 0]
     if not candidates:
         return None
-    pool = [f for f in candidates if f["height"] <= video_height] or candidates
+    pool = [f for f in candidates if resolution_of(f) <= video_height] or candidates
     best = max(pool, key=lambda f: (
-        f["height"], f.get("protocol") in _HTTP_PROTOCOLS, f.get("tbr") or 0,
+        resolution_of(f), f.get("protocol") in _HTTP_PROTOCOLS, f.get("tbr") or 0,
     ))
     return Selection.muxed(best)
 
@@ -212,4 +225,4 @@ def find_progressive_audio_format(formats: list) -> Optional[Selection]:
     if not candidates:
         return None
     pool = [f for f in candidates if f.get("protocol") in _HTTP_PROTOCOLS] or candidates
-    return Selection.audio_only(min(pool, key=lambda f: f.get("height") or 10 ** 9))
+    return Selection.audio_only(min(pool, key=lambda f: resolution_of(f) or 10 ** 9))

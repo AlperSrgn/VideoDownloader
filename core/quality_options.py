@@ -21,7 +21,10 @@ languages.py).
 
 QUALITY_OPTIONS = [
     # key:    internal, language-independent id stored with each queue item
-    # height: video pixel height passed to yt-dlp's format selection
+    # height: target quality in pixels passed to format selection. It is
+    #         compared with the SHORT side of a format (ytdlp/formats.py
+    #         resolution_of), so 720 means 1280x720 landscape and 720x1280
+    #         portrait alike.
     #         (None for audio-only — it has no resolution)
     # format: container format shown next to the label in the dropdown
     # label / lang_field: see module docstring above
