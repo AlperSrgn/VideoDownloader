@@ -39,9 +39,9 @@ class DownloadStalled(Exception):
 
 
 class DenoNotFoundError(Exception):
-    """An age-restricted / members-only video needs cookies + Deno, but Deno
-    could not be found on this machine. Deno is only required for those
-    videos; normal videos never need it."""
+    """An age-restricted / members-only YouTube video needs cookies + Deno, but
+    Deno could not be found on this machine. Deno is only required for those
+    videos; normal videos and other sites never need it."""
     pass
 
 
@@ -122,6 +122,22 @@ _MEMBERS_ONLY_PATTERNS = (
     "available to this channel's members",
 )
 
+# Generic "you need to be logged in" messages. yt-dlp's extractors for most
+# sites (Instagram, X, Facebook, ...) raise one of these when a post needs an
+# account; the standard text also tells the user to pass cookies
+# ("Use --cookies-from-browser or --cookies for the authentication").
+# YouTube's bot check carries that same hint, so it is excluded below: it has
+# its own rule (error_access_blocked) and is not escalated to the cookie pass.
+_LOGIN_REQUIRED_PATTERNS = (
+    "--cookies-from-browser", "login required", "log in to",
+    "requires authentication", "only available for registered users",
+)
+
+
+def _is_login_required(text: str) -> bool:
+    return "not a bot" not in text and any(p in text for p in _LOGIN_REQUIRED_PATTERNS)
+
+
 # HTTP status codes are only trusted when they appear in an HTTP-error
 # context. A bare "404"/"429" substring would also match video IDs, URL
 # fragments, byte counts or titles that yt-dlp prints (e.g. "watch?v=ab404xQ").
@@ -193,6 +209,10 @@ _RULES = (
                                            or "too many requests" in t
                                            or _http_status(t) == 429),
 
+    # --- generic "login required" (any site); after the blocked rule on
+    #     purpose so YouTube's bot check is never classified as this ---
+    ("error_login_required",     _is_login_required),
+
     # --- video itself ---
     ("error_video_private",      _contains_any("private video", "this video is private")),
     ("error_video_not_found",    lambda t: "video unavailable" in t
@@ -225,15 +245,19 @@ def _match_error_key(text: str):
     return None
 
 
-# Errors that justify the "restricted" retry: cookies + Deno are only brought
-# in when yt-dlp reports one of these (videos that need a signed-in account).
-# Add keys here if more cases should escalate.
-_COOKIE_ESCALATION_KEYS = ("error_age_restricted", "error_members_only", "error_video_private")
+# Errors that justify the "restricted" retry: cookies (+ Deno, for YouTube only)
+# are only brought in when yt-dlp reports one of these (videos that need a
+# signed-in account). Add keys here if more cases should escalate.
+_COOKIE_ESCALATION_KEYS = (
+    "error_age_restricted", "error_members_only", "error_video_private",
+    "error_login_required",
+)
 
 
 def is_access_restricted_error(errors) -> bool:
-    """True if yt-dlp's error text(s) say the video is age-restricted or
-    members-only, i.e. a retry with cookies (+ Deno) may succeed."""
+    """True if yt-dlp's error text(s) say the video is age-restricted,
+    members-only, private or needs a login, i.e. a retry with cookies
+    (+ Deno on YouTube) may succeed."""
     if isinstance(errors, str):
         errors = [errors]
     combined = "\n".join(e for e in (errors or []) if e).lower()

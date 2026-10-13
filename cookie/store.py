@@ -89,8 +89,9 @@ def import_cookie_file(src_path: str) -> None:
 
 
 def export_cookies_from_firefox() -> ExportResult:
-    """Exports the YouTube/Google cookies of the user's Firefox into the app's
-    own cookies.txt. Raises CookieExportError if that is not possible."""
+    """Exports all cookies of the user's Firefox into the app's own cookies.txt
+    (so it works for any site, not only YouTube/Google). Raises
+    CookieExportError if that is not possible."""
     result = export_firefox_cookies(cookie_file_path())
     save_setting(_FILE_LABEL_KEY, os.path.basename(result.path))
     return result
@@ -145,6 +146,6 @@ def describe_cookies() -> str:
 
     return (
         f"mode={mode}, {summary.total} cookies ({summary.expired} expired), "
-        f"login cookies present: {sorted(summary.login_names) or 'NONE'}, "
+        f"Google login cookies present: {sorted(summary.login_names) or 'NONE'}, "
         f"file modified {age_min} min ago"
     )

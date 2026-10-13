@@ -1,4 +1,4 @@
-"""Debug helper: `python -m cookie [cookies.txt]` exports the Firefox cookies
+"""Debug helper: `python -m cookie [cookies.txt]` exports all Firefox cookies
 without starting the app."""
 
 import logging

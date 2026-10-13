@@ -2,13 +2,16 @@
 Signed-in access for age-restricted / members-only videos.
 
 Normal videos are handled without cookies and without Deno. Only a video that
-yt-dlp reports as age-restricted or members-only (and only if the user has
-cookies configured) is retried with the user's cookies plus Deno -- Deno is
-the JavaScript runtime yt-dlp needs for those videos.
+yt-dlp reports as age-restricted, members-only, private or login-required (and
+only if the user has cookies configured) is retried with the user's cookies.
+On YouTube that retry also gets Deno, the JavaScript runtime yt-dlp needs for
+those videos; on every other site cookies alone are sent and Deno is neither
+looked for nor required.
 
 This module owns that whole story:
   - access_args():              the extra yt-dlp arguments (cookies + Deno)
   - find_deno():                where Deno is installed
+  - is_youtube_url():           True for YouTube links (the only ones needing Deno)
   - run_with_access_fallback(): the single place that decides WHEN a video gets
                                 them; the preview and the download both use it.
                                 It is also the single place that writes the full
@@ -22,6 +25,7 @@ import re
 import shutil
 import threading
 from typing import NamedTuple
+from urllib.parse import urlparse
 
 from cookie import cookie_args
 from core.error_classifier import DenoNotFoundError, is_access_restricted_error
@@ -44,6 +48,17 @@ def find_deno():
     return deno
 
 
+_YOUTUBE_HOSTS = ("youtube.com", "youtu.be", "youtube-nocookie.com")
+
+
+def is_youtube_url(url: str) -> bool:
+    """True if `url` points at YouTube (also accepts a link without a scheme,
+    e.g. "youtube.com/watch?v=...")."""
+    url = (url or "").strip()
+    host = (urlparse(url if "//" in url else "//" + url).hostname or "").lower()
+    return any(host == h or host.endswith("." + h) for h in _YOUTUBE_HOSTS)
+
+
 def js_runtime_args() -> list:
     """Passes Deno explicitly so yt-dlp does not depend on the PATH of this
     process. Only used for the "restricted" pass (see access_args)."""
@@ -54,15 +69,18 @@ def js_runtime_args() -> list:
     return ["--js-runtimes", f"deno:{deno}"]
 
 
-def access_args(restricted: bool) -> list:
+def access_args(restricted: bool, url=None) -> list:
     """Extra yt-dlp arguments for videos that need a signed-in session.
 
     restricted=False (normal videos): [] -> no cookies, no Deno.
-    restricted=True (age-restricted / members-only): cookies + Deno.
+    restricted=True (needs a login): the user's cookies, plus Deno when the
+    video is on YouTube. url=None means "unknown": Deno is included, as before.
     """
     if not restricted:
         return []
-    cookies, runtime = cookie_args(), js_runtime_args()
+    needs_deno = url is None or is_youtube_url(url)
+    cookies = cookie_args()
+    runtime = js_runtime_args() if needs_deno else []
     logger.debug("restricted pass: cookies=%s js_runtime=%s", cookies, runtime)
     return [*cookies, *runtime]
 
@@ -92,10 +110,12 @@ def _forget_restricted(url: str) -> None:
 
 def _is_known_restricted(url: str) -> bool:
     """True if this video was already seen as restricted AND the restricted
-    pass is usable right now (cookies configured, Deno installed)."""
+    pass is usable right now (cookies configured; Deno installed if the video
+    is on YouTube)."""
     with _restricted_lock:
         known = _video_key(url) in _restricted_videos
-    return known and bool(cookie_args()) and find_deno() is not None
+    deno_ok = not is_youtube_url(url) or find_deno() is not None
+    return known and bool(cookie_args()) and deno_ok
 
 
 class AccessResult(NamedTuple):
@@ -118,7 +138,7 @@ def run_with_access_fallback(url: str, attempt, log_failure: bool = True) -> Acc
     when the video turns out to need them.
 
     `attempt(restricted: bool, errors: list)` does ONE extraction pass.
-    restricted=True means "use access_args(True)". On failure it appends the
+    restricted=True means "use access_args(True, url)". On failure it appends the
     YtDlpError(s) to `errors` and returns None; on success it returns
     anything that is not None.
 
@@ -128,12 +148,14 @@ def run_with_access_fallback(url: str, attempt, log_failure: bool = True) -> Acc
          restricted pass instead of failing the normal one first. If that no
          longer works (cookies expired?), forget the video and continue.
       2. The normal pass: no cookies, no Deno.
-      3. Only if pass 2 failed BECAUSE the video is age-restricted or
-         members-only, and cookies are configured: the restricted pass.
-         On success the video is remembered for step 1 next time.
+      3. Only if pass 2 failed BECAUSE the video is age-restricted,
+         members-only, private or needs a login, and cookies are configured:
+         the restricted pass. On success the video is remembered for step 1
+         next time.
 
-    Raises DenoNotFoundError if step 3 is needed but Deno is not installed;
-    callers decide whether to tell the user or just give up.
+    Raises DenoNotFoundError if step 3 is needed for a YouTube video but Deno
+    is not installed (other sites do not need Deno); callers decide whether to
+    tell the user or just give up.
 
     `errors` in the result belong to the last pass that ran, which is the
     one worth showing the user.
@@ -160,12 +182,13 @@ def run_with_access_fallback(url: str, attempt, log_failure: bool = True) -> Acc
             _log_final_failure(errors)
         return AccessResult(value, False, errors)
 
-    if not find_deno():
+    if is_youtube_url(url) and not find_deno():
         if log_failure:
             _log_final_failure(errors)
         raise DenoNotFoundError("Deno is required for age-restricted / members-only videos")
 
-    logger.info("Restricted video detected; retrying with cookies + Deno")
+    logger.info("Restricted video detected; retrying with cookies%s",
+                " + Deno" if is_youtube_url(url) else "")
     errors = []
     value = attempt(True, errors)
     if value is not None:

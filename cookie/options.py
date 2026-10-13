@@ -15,8 +15,6 @@ COOKIE_BROWSERS = {
     "chrome": "Chrome",
     "brave": "Brave",
     "opera": "Opera",
-    "vivaldi": "Vivaldi",
-    "chromium": "Chromium",
 }
 
 

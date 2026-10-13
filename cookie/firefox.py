@@ -6,8 +6,11 @@ them directly with sqlite3. Chrome/Edge/Brave are NOT handled here on purpose:
 their cookies are encrypted (app-bound encryption on recent Windows builds).
 For those, use a browser extension that exports cookies.txt instead.
 
-Only cookies for the requested domains (YouTube/Google by default) are written,
-so the file contains as little of the user's browsing data as possible.
+By default every cookie of the profile is written, so the same file works for
+any site yt-dlp supports (YouTube, Instagram, X, ...). Pass `domains` to
+restrict the export to specific sites and keep the file smaller. The file
+holds the user's logged-in sessions: it is stored in the app's data folder
+with owner-only permissions where the OS supports it and should never be shared.
 
 This module only knows how to *find and read* Firefox's data. The cookies.txt
 format itself lives in cookie/netscape.py, and the app-level "export into the
@@ -30,7 +33,9 @@ from cookie.netscape import Cookie, has_login_cookie, write_cookie_file
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_DOMAINS = ("youtube.com", "google.com")
+# None = export every cookie. A tuple such as ("youtube.com", "google.com")
+# limits the export to those domains (and their subdomains).
+DEFAULT_DOMAINS = None
 
 
 class CookieExportError(Exception):
@@ -95,12 +100,14 @@ def find_firefox_profiles() -> list:
 # ---------------------------------------------------------------------------
 
 def _domain_ok(host: str, domains) -> bool:
+    if not domains:  # None / empty: no filtering, keep everything
+        return True
     h = host.lstrip(".").lower()
     return any(h == d or h.endswith("." + d) for d in domains)
 
 
 def _read_cookies(profile: str, domains) -> list:
-    """Reads matching cookies from a *copy* of cookies.sqlite (Firefox keeps the
+    """Reads matching cookies (all of them if `domains` is None) from a *copy* of cookies.sqlite (Firefox keeps the
     original open/locked, and recent data may still sit in the -wal file)."""
     src = os.path.join(profile, "cookies.sqlite")
     with tempfile.TemporaryDirectory() as tmp:
@@ -135,7 +142,8 @@ def export_firefox_cookies(out_path: str, profile: str = None,
     """Writes a Netscape cookies.txt to out_path.
 
     If `profile` is None, every profile is checked and the one that looks
-    signed in (or, failing that, has the most matching cookies) is used.
+    signed in to Google/YouTube (or, failing that, has the most cookies) is
+    used. `domains=None` exports all cookies.
     Raises CookieExportError if Firefox/profile/cookies can't be found.
     """
     profiles = [profile] if profile else find_firefox_profiles()
@@ -155,7 +163,7 @@ def export_firefox_cookies(out_path: str, profile: str = None,
             best = candidate
 
     if best is None or not best[3]:
-        raise CookieExportError("No YouTube/Google cookies found in Firefox.")
+        raise CookieExportError("No cookies found in Firefox.")
 
     logged_in, count, chosen, cookies = best
     write_cookie_file(out_path, cookies)

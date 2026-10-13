@@ -31,8 +31,8 @@ def build_info_cmd(exe_path: str, url: str, client: Optional[str],
     No --no-warnings and -v on purpose: warnings (e.g. "cookies are no longer
     valid") and debug lines are only ever written to the log on failure.
 
-    restricted=True (age-restricted / members-only video) adds cookies + Deno;
-    normal videos get neither (see access_args).
+    restricted=True (video that needs a login) adds the user's cookies, plus
+    Deno on YouTube; normal videos get neither (see access_args).
     """
     # Pass `extra` only for the preview, so the full extraction calls
     # youtube_extractor_args exactly as before.
@@ -41,7 +41,7 @@ def build_info_cmd(exe_path: str, url: str, client: Optional[str],
         exe_path,
         "--dump-json",
         "-v",
-        *access_args(restricted),
+        *access_args(restricted, url),
         *youtube_extractor_args(client, **extractor_kwargs),
         url,
     ]
@@ -65,13 +65,13 @@ def build_download_cmd(exe_path: str, format_id: str, client: Optional[str],
     use_ffmpeg=True passes --ffmpeg-location: HLS (m3u8) segments arrive as
     raw MPEG-TS, which yt-dlp only turns into a real MP4 if it can find ffmpeg.
 
-    restricted=True (age-restricted / members-only video) adds cookies + Deno;
-    normal videos get neither (see access_args).
+    restricted=True (video that needs a login) adds the user's cookies, plus
+    Deno on YouTube; normal videos get neither (see access_args).
     """
     return [
         exe_path,
         "-f", format_id,
-        *access_args(restricted),
+        *access_args(restricted, url),
         *youtube_extractor_args(client),
         *(["--ffmpeg-location", get_ffmpeg_path()] if use_ffmpeg else []),
         "--newline", "--no-warnings",
