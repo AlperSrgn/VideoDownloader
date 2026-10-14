@@ -144,17 +144,16 @@ The build script handles the PyInstaller build process and automatically resolve
 
 # Cookie Support (Videos That Require Sign-In)
 
-Some videos (e.g., age-restricted, members-only) may require you to be signed in to access them. Video Downloader can use your existing browser session to download these videos. so you don't need to enter your account password in the app.
+Some videos (e.g., age-restricted, members-only, private, or otherwise login-protected) require you to be signed in to access them. Video Downloader can use your existing browser session to download these videos, so you don't need to enter your account password in the app.
 
-
-**Note:** You only need cookie support for videos that require you to sign in. Public videos can still be downloaded normally without configuring cookies or installing Deno.
+**Note:** You only need cookie support for videos that require you to sign in. Public videos are downloaded normally, without cookies and without installing Deno. Even when a cookie mode is selected, your cookies are only sent to `yt-dlp` after it reports that a video requires sign-in; every other video is downloaded without them.
 
 ## Before You Start
 
 Make sure you have:
 
 - A browser with an active session on the website containing the video, with permission to access that content.
-- [Deno](#deno-requirement) installed on your computer.
+- [Deno](#deno-requirement) installed on your computer — **only for YouTube videos** that require sign-in. Other websites don't need it.
 
 ## Choose a Cookie Method
 
@@ -165,7 +164,7 @@ Open the settings sidebar and select a cookie mode from the dropdown.
 | **None** (default) | For public videos that don't require you to sign in. |
 | **Browser** | To use cookies directly from a supported browser. Choose your browser from the second dropdown. **(Recommended first option for Firefox users.)** |
 | **File** | To use a `cookies.txt` file you've exported yourself using a browser extension. |
-| **Firefox export** | To automatically extract the relevant cookies from your Firefox profile. Use this if the Browser method doesn't work. |
+| **Firefox export** | To automatically export your Firefox cookies to the app's own `cookies.txt` file. Use this if the Browser method doesn't work. |
 
 **🚨 Important:** Your `cookies.txt` may give others access to your account. Keep it private and never share or publicly upload it.
 
@@ -202,21 +201,85 @@ If your session expires or you sign in with a different account, export the cook
 
 ## Deno Requirement
 
-Deno is an additional component that helps `yt-dlp` handle JavaScript challenges when downloading certain sign-in-protected videos. Video Downloader uses Deno to enable these downloads. For more information, visit the [official Deno website](https://deno.com/) or check out the [GitHub page](https://github.com/denoland/deno).
+Deno is an optional component that helps `yt-dlp` solve YouTube's JavaScript challenges when downloading videos that require sign-in. Video Downloader can use Deno to support these downloads.
 
-**Note:** Deno is only required for videos that need sign-in. You don't need to install it to download ordinary public videos. 
-To download sign-in-protected videos, you need both a working cookie configuration and Deno installed.
+**Note:** You only need Deno for **YouTube videos that require sign-in**, such as age-restricted or members-only videos. Ordinary public YouTube videos can be downloaded without Deno. Videos that require sign-in on other supported websites do not require Deno, but they may need a working cookie configuration.
+
+To download sign-in-protected YouTube videos, you need **both Deno and a working cookie configuration**.
+
+For more information, visit the [official Deno website](https://deno.com/) or the [Deno GitHub repository](https://github.com/denoland/deno).
 
 ### Install Deno
 
-Open PowerShell or Windows Terminal and run the following command:
+Open PowerShell or Windows Terminal and run:
 
 ```powershell
 winget install DenoLand.Deno
 ```
 
-The app automatically looks for Deno in your system's `PATH` and common installation locations, so you don't need to configure its path manually.
+Video Downloader automatically looks for Deno in your system's `PATH` and common installation locations, so you don't need to configure its path manually.
 
+### Verify the Installation
+
+After installing Deno, close and reopen PowerShell or Windows Terminal to refresh the environment. Then run:
+
+```powershell
+deno --version
+```
+
+You should see output similar to this (version numbers may differ):
+
+```
+deno 2.x.x (stable, release, x86_64-pc-windows-msvc)
+v8 13.x.x.x
+typescript 6.x.x
+```
+
+To find the location of the Deno executable, run:
+
+```powershell
+where.exe deno
+```
+
+If `deno` is not recognized, restart your terminal or sign out and back in, then try again. If Video Downloader was open during installation, restart the app as well.
+
+### Update Deno
+
+To update Deno to the latest version available through WinGet, run:
+
+```powershell
+winget upgrade DenoLand.Deno
+```
+
+### Uninstall Deno
+
+To uninstall Deno, open PowerShell or Windows Terminal and run:
+
+```powershell
+winget uninstall DenoLand.Deno
+```
+
+Uninstalling Deno does not automatically remove its cached modules. To find the cache location, run:
+
+```powershell
+deno info
+```
+
+Look for the `DENO_DIR` entry. By default, the cache is stored in `%LOCALAPPDATA%\deno`. If you want to remove it as well, delete the cache folder after uninstalling Deno.
+
+**PowerShell:**
+
+```powershell
+Remove-Item -Recurse -Force "$env:LOCALAPPDATA\deno"
+```
+
+**Command Prompt (cmd):**
+
+```cmd
+rmdir /s /q "%LOCALAPPDATA%\deno"
+```
+
+After uninstalling Deno, Video Downloader will display the "Deno is required" message again when you try to download a sign-in-protected YouTube video. Other downloads will continue to work normally.
 
 ---
 
