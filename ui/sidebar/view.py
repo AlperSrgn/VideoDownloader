@@ -260,7 +260,7 @@ def _build_cookie_section(sidebar_content, registry, callbacks) -> SimpleNamespa
         cookie_buttons_row, command=callbacks.create_cookie_file, width=100,
     )
     cookie_create_button.grid(row=0, column=0, sticky="ew", padx=(0, 3))
-    registry.add(cookie_create_button, text="cookie_create_button")
+    registry.add(cookie_create_button, text="cookie_create_button", icon=("export.png", "#fbfbfb"))
 
     cookie_delete_button = sidebar_button(
         cookie_buttons_row,
@@ -271,17 +271,6 @@ def _build_cookie_section(sidebar_content, registry, callbacks) -> SimpleNamespa
     )
     cookie_delete_button.grid(row=0, column=1, sticky="ew", padx=(3, 0))
     registry.add(cookie_delete_button, text="cookie_delete_button")
-
-    # Small heading above the Create/Delete row; says the Create button is
-    # Firefox-specific. Shown/hidden by CookiePanel.update_widgets().
-    cookie_create_title_label = ctk.CTkLabel(
-        cookie_extra_frame,
-        text="",
-        font=("Helvetica", 12, "bold"),
-        text_color="black",
-        anchor="w",
-    )
-    registry.add(cookie_create_title_label, text="cookie_create_title")
 
     # Same width as the mode menu above it; Delete sits right next to it, so it
     # lives in the same row (cookie_buttons_row). The text is a file name, the
@@ -325,7 +314,6 @@ def _build_cookie_section(sidebar_content, registry, callbacks) -> SimpleNamespa
         cookie_buttons_row=cookie_buttons_row,
         cookie_create_button=cookie_create_button,
         cookie_delete_button=cookie_delete_button,
-        cookie_create_title_label=cookie_create_title_label,
         cookie_file_button=cookie_file_button,
         cookie_file_delete_button=cookie_file_delete_button,
         cookie_file_label=cookie_file_label,
