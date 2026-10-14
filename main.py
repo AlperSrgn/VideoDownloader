@@ -225,6 +225,7 @@ class App:
             buttons_row=ui.cookie_buttons_row,
             create_button=ui.cookie_create_button,
             delete_button=ui.cookie_delete_button,
+            file_delete_button=ui.cookie_file_delete_button,
         )
         self.lifecycle.bind_widgets(root=ui.root)
         self.sidebar.bind_widgets(

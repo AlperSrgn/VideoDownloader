@@ -288,11 +288,22 @@ def _build_cookie_section(sidebar_content, registry, callbacks) -> SimpleNamespa
     # same in every language, so there is no lang key: only the icon is registered.
     cookie_file_button = sidebar_button(
         cookie_buttons_row,
-        text="cookies.txt",
         command=callbacks.choose_cookie_file,
         width=COOKIE_MODE_MENU_WIDTH,
     )
-    registry.add(cookie_file_button, icon=("folder.png", "#fbfbfb"))
+    registry.add(cookie_file_button, text="cookie_choose_file_button", icon=("folder.png", "#fbfbfb"))
+
+    # "From file" mode: Delete sits in the mode menu's row, right next to it
+    # (same place and width as the browser menu). Packed/hidden by
+    # CookiePanel.update_widgets().
+    cookie_file_delete_button = sidebar_button(
+        cookie_menu_row,
+        command=callbacks.delete_cookie_file,
+        fg_color=DANGER,
+        hover_color=DANGER_HOVER,
+        width=COOKIE_BROWSER_MENU_WIDTH,
+    )
+    registry.add(cookie_file_delete_button, text="cookie_delete_button")
 
     # Name of the selected cookies.txt (set by CookiePanel.update_widgets()).
     cookie_file_label = ctk.CTkLabel(
@@ -316,5 +327,6 @@ def _build_cookie_section(sidebar_content, registry, callbacks) -> SimpleNamespa
         cookie_delete_button=cookie_delete_button,
         cookie_create_title_label=cookie_create_title_label,
         cookie_file_button=cookie_file_button,
+        cookie_file_delete_button=cookie_file_delete_button,
         cookie_file_label=cookie_file_label,
     )

@@ -54,10 +54,12 @@ class CookiePanel:
         self.buttons_row = None
         self.create_button = None
         self.delete_button = None
+        self.file_delete_button = None
 
     def bind_widgets(self, *, mode_var, mode_menu, browser_menu, file_button,
                      file_label, create_title_label, buttons_row,
-                     create_button=None, delete_button=None) -> None:
+                     create_button=None, delete_button=None,
+                     file_delete_button=None) -> None:
         """Attaches the sidebar's cookie widgets (see ui/sidebar/view.py).
 
         Only the mode menu is always visible; browser_menu (shown to the right
@@ -77,6 +79,10 @@ class CookiePanel:
         self.buttons_row = buttons_row
         self.create_button = create_button
         self.delete_button = delete_button
+        # "From file" mode: Delete sits in the mode menu's row (like the browser
+        # menu). If it isn't passed, the old layout (Delete next to the file
+        # button) is used.
+        self.file_delete_button = file_delete_button
 
     # -- Language ------------------------------------------------------------
     def current_mode_key(self) -> str:
@@ -119,6 +125,8 @@ class CookiePanel:
         self.file_label.pack_forget()
         self.create_title_label.pack_forget()
         self.buttons_row.pack_forget()
+        if self.file_delete_button is not None:
+            self.file_delete_button.pack_forget()
         # file_button, create_button and delete_button are gridded inside
         # buttons_row by _layout_buttons().
 
@@ -128,6 +136,9 @@ class CookiePanel:
             # (ui/sidebar/widgets.py), not whatever space the mode menu leaves free.
             self.browser_menu.pack(side="left", padx=(6, 0))
         elif mode == "file":
+            if self.file_delete_button is not None:
+                # Same row as the mode menu, right next to it.
+                self.file_delete_button.pack(side="left", padx=(6, 0))
             self._layout_buttons(mode)
             self.buttons_row.pack(anchor="w", pady=(8, 0), padx=10, fill="x")
             self.file_label.pack(anchor="w", pady=(2, 0), padx=10, fill="x")
@@ -149,9 +160,9 @@ class CookiePanel:
     def _layout_buttons(self, mode) -> None:
         """Lays out the button row (buttons_row, a grid with two columns):
 
-            file            [ cookies.txt ][ Delete ]   the first column is as
-                            wide as the file button (same width as the mode
-                            menu above), Delete takes the rest
+            file            [ Choose cookies.txt ]      full width; Delete is in
+                            the mode menu's row (file_delete_button). Without
+                            file_delete_button: [ cookies.txt ][ Delete ]
             firefox_export  [ Create ][ Delete ]        two equal halves
 
         The Create and Delete buttons are optional in bind_widgets(); a
@@ -161,7 +172,12 @@ class CookiePanel:
             if button is not None:
                 button.grid_remove()
 
-        if mode == "file":
+        if mode == "file" and self.file_delete_button is not None:
+            # The file button fills the whole row; Delete is in the menu row.
+            row.grid_columnconfigure(0, weight=1, minsize=0, uniform="")
+            row.grid_columnconfigure(1, weight=0, minsize=0, uniform="")
+            self.file_button.grid(row=0, column=0, sticky="ew")
+        elif mode == "file":
             file_column_width = self.file_button.cget("width") + 3  # + gap
             row.grid_columnconfigure(0, weight=0, minsize=file_column_width, uniform="")
             row.grid_columnconfigure(1, weight=1, minsize=0, uniform="")
