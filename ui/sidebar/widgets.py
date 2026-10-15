@@ -45,6 +45,39 @@ COOKIE_MODE_MENU_WIDTH = 160
 COOKIE_BROWSER_MENU_WIDTH = 90
 
 
+class SidebarOptionMenu(ctk.CTkOptionMenu):
+    """CTkOptionMenu that opens its dropdown on mouse *release* instead of
+    press, so one click (press + release) is a single action. Opening on
+    press leaves the release pending, and when the menu appears under the
+    cursor (e.g. opening upwards) that release selects an entry."""
+
+    _CLICK_TAGS = ("inner_parts_left", "border_parts_left",
+                   "inner_parts_right", "border_parts_right")
+
+    def _create_bindings(self, sequence=None):
+        super()._create_bindings(sequence)  # keeps the hover bindings
+        if sequence is None or sequence == "<Button-1>":
+            self._pressed = False
+            # Binding the same sequence again replaces the original
+            # "open on press" binding.
+            for tag in self._CLICK_TAGS:
+                self._canvas.tag_bind(tag, "<Button-1>", self._on_press)
+                self._canvas.tag_bind(tag, "<ButtonRelease-1>", self._on_release)
+            self._text_label.unbind("<Button-1>")
+            self._text_label.bind("<Button-1>", self._on_press)
+            self._text_label.bind("<ButtonRelease-1>", self._on_release)
+
+    def _on_press(self, event=None):
+        self._pressed = True
+
+    def _on_release(self, event=None):
+        # Only open if the press also happened on this widget. Otherwise the
+        # click that closes an open menu could reopen it on release.
+        if self._pressed:
+            self._pressed = False
+            self._clicked()
+
+
 def sidebar_button(parent, **kwargs) -> ctk.CTkButton:
     options = dict(
         font=("Helvetica", 13),
@@ -57,7 +90,7 @@ def sidebar_button(parent, **kwargs) -> ctk.CTkButton:
     return ctk.CTkButton(parent, **options)
 
 
-def sidebar_option_menu(parent, **kwargs) -> ctk.CTkOptionMenu:
+def sidebar_option_menu(parent, **kwargs) -> SidebarOptionMenu:
     options = dict(
         font=("Helvetica", 13),
         fg_color=SIDEBAR_BUTTON,
@@ -66,7 +99,7 @@ def sidebar_option_menu(parent, **kwargs) -> ctk.CTkOptionMenu:
         height=30,
     )
     options.update(kwargs)
-    return ctk.CTkOptionMenu(parent, **options)
+    return SidebarOptionMenu(parent, **options)
 
 
 def sidebar_checkbox(parent, **kwargs) -> ctk.CTkCheckBox:
