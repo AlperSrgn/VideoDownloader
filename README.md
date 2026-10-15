@@ -207,7 +207,9 @@ Deno is an optional component that helps `yt-dlp` solve YouTube's JavaScript cha
 
 To download sign-in-protected YouTube videos, you need **both Deno and a working cookie configuration**.
 
-For more information, visit the [official Deno website](https://deno.com/) or the [Deno GitHub repository](https://github.com/denoland/deno).
+This requirement comes from `yt-dlp` itself: since version `2025.11.12`, it needs an external JavaScript runtime for full YouTube support. Without one, available formats are limited and are expected to get worse over time. Deno is the runtime recommended by the `yt-dlp` team. For details, see the [official yt-dlp announcement](https://github.com/yt-dlp/yt-dlp/issues/15012).
+
+For more information about Deno, visit the [official Deno website](https://deno.com/) or the [Deno GitHub repository](https://github.com/denoland/deno).
 
 ### Install Deno
 
