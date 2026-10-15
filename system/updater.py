@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 # App version & "Check for Updates"
 # ---------------------------------------------------------------------------
 # Update on every release — must match Inno Setup AppVersion for accurate GitHub tag comparison.
-APP_VERSION = "3.9.0"
+APP_VERSION = "3.10.0"
 
 GITHUB_REPO = "AlperSrgn/VideoDownloader"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
