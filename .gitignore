@@ -14,4 +14,5 @@ cookies.txt
 # PyInstaller build outputs
 build/
 dist/
+output/
 *.spec
