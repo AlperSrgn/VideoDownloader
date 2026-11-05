@@ -27,9 +27,8 @@ from ytdlp import fetch_preview_info, get_ytdlp_path
 
 logger = logging.getLogger(__name__)
 
-# Widgets are expensive: a few hundred queue rows (each a handful of CTk
-# widgets) freeze the GUI on every redraw. Only this many rows are drawn;
-# the rest stay in the queue and are summarised in a "+N more" line.
+# Too many widgets cause the GUI to freeze. Only a limited number of rows
+# are drawn; the remaining rows stay queued and appear as "+N more".
 MAX_VISIBLE_ROWS = 40
 
 # Lazy thumbnails for playlist rows (see QueueView.ensure_thumbnails): only the
@@ -279,6 +278,30 @@ class QueueView:
                 text=f"… +{hidden} {current_language.get('queue_more_label', 'more')}",
                 font=("Helvetica", 12, "italic"), text_color=text_color,
             ).pack(pady=4)
+
+        self._clamp_scroll(list_frame)
+
+    @staticmethod
+    def _clamp_scroll(list_frame) -> None:
+        """Keeps the list's scroll position inside the (new) content.
+
+        render() destroys and rebuilds the rows. If the list was scrolled down
+        and then got much shorter (Clear Queue, removing rows, the queue
+        running down), the canvas can stay scrolled past the end of the new
+        content, so the remaining rows -- e.g. the item that is downloading --
+        sit above the visible area and the list looks empty. Refresh the
+        scroll region first, then pull the view back if it points past the end
+        (when everything fits, that means back to the top)."""
+        try:
+            canvas = list_frame._parent_canvas  # CTkScrollableFrame's internal canvas
+            list_frame.update_idletasks()       # lay out the new rows first
+            canvas.configure(scrollregion=canvas.bbox("all"))
+            first, last = canvas.yview()
+            max_first = max(0.0, 1.0 - (last - first))
+            if first > max_first:
+                canvas.yview_moveto(max_first)
+        except Exception:
+            logger.debug("Could not clamp the queue scroll position", exc_info=True)
 
     def _render_row(self, list_frame, idx, item, is_active, text_color, make_icon, quality_label, on_remove):
         row = ctk.CTkFrame(list_frame, fg_color="transparent")
