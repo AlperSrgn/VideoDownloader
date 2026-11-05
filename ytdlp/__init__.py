@@ -6,7 +6,8 @@ Where to look (one concern per module):
   binary.py   Getting yt-dlp.exe: first-run download (SHA-256 verified), the
               nightly self-update, version lookup. Entry point: ensure_ytdlp().
   commands.py Building every yt-dlp command line: build_info_cmd() for the
-              --dump-json info commands (full or preview) and
+              --dump-json info commands (full or preview),
+              build_playlist_cmd() for listing a playlist and
               build_download_cmd() for one download phase. Pure functions;
               nothing else assembles a yt-dlp argument list.
   runner.py   Launching yt-dlp.exe for the --dump-json info commands: no
@@ -15,8 +16,9 @@ Where to look (one concern per module):
   access.py   Age-restricted / members-only videos: the cookies + Deno
               arguments, and run_with_access_fallback(), the one place that
               decides when a video is retried with them.
-  info.py     Reading a video's metadata: the quick URL-paste preview and the
-              full extraction a download needs. Holds CLIENT_LIST, the player
+  info.py     Reading a video's metadata: the quick URL-paste preview, the
+              full extraction a download needs, and fetch_playlist() (the
+              video list of a playlist). Holds CLIENT_LIST, the player
               clients that are tried.
   formats.py  Picking the video/audio format for the requested quality from
               that metadata. Pure functions, easy to unit test.
@@ -39,7 +41,7 @@ from ytdlp.binary import (
     get_ytdlp_path,
     get_ytdlp_version,
 )
-from ytdlp.commands import build_download_cmd, build_info_cmd
+from ytdlp.commands import build_download_cmd, build_info_cmd, build_playlist_cmd
 from ytdlp.formats import (
     find_progressive_audio_format,
     find_progressive_format,
@@ -48,6 +50,7 @@ from ytdlp.formats import (
 )
 from ytdlp.info import (
     extract_info,
+    fetch_playlist,
     fetch_preview_info,
     find_info_with_access_fallback,
     find_info_with_compatible_format,
@@ -60,9 +63,11 @@ __all__ = [
     "access_args",
     "build_download_cmd",
     "build_info_cmd",
+    "build_playlist_cmd",
     "download_ytdlp_exe",
     "ensure_ytdlp",
     "extract_info",
+    "fetch_playlist",
     "fetch_preview_info",
     "find_deno",
     "find_info_with_access_fallback",

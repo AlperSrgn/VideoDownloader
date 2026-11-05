@@ -26,6 +26,11 @@ from ytdlp import fetch_preview_info, get_ytdlp_path
 
 logger = logging.getLogger(__name__)
 
+# Widgets are expensive: a few hundred queue rows (each a handful of CTk
+# widgets) freeze the GUI on every redraw. Only this many rows are drawn;
+# the rest stay in the queue and are summarised in a "+N more" line.
+MAX_VISIBLE_ROWS = 40
+
 
 class QueueView:
     def __init__(self):
@@ -169,8 +174,16 @@ class QueueView:
             rows.append((None, self.current_item, True))
         rows.extend((idx, item, False) for idx, item in enumerate(self.items, start=1))
 
-        for idx, item, is_active in rows:
+        for idx, item, is_active in rows[:MAX_VISIBLE_ROWS]:
             self._render_row(list_frame, idx, item, is_active, text_color, make_icon, quality_label, on_remove)
+
+        hidden = len(rows) - MAX_VISIBLE_ROWS
+        if hidden > 0:
+            ctk.CTkLabel(
+                list_frame,
+                text=f"… +{hidden} {current_language.get('queue_more_label', 'more')}",
+                font=("Helvetica", 12, "italic"), text_color=text_color,
+            ).pack(pady=4)
 
     def _render_row(self, list_frame, idx, item, is_active, text_color, make_icon, quality_label, on_remove):
         row = ctk.CTkFrame(list_frame, fg_color="transparent")

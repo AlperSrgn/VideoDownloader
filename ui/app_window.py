@@ -93,8 +93,8 @@ def build_app_window(callbacks, app_version: str, app_icon: str,
 
 
 def _build_main_panel(root, registry, callbacks) -> SimpleNamespace:
-    """Main frame: quality menu, URL entry, playlist checkbox (not shown yet)
-    and the queue header/clear button/list."""
+    """Main frame: quality menu, URL entry, playlist checkbox (shown only for
+    watch?v=...&list=... links) and the queue header/clear button/list."""
     # Main frame
     frame = ctk.CTkFrame(root, fg_color=_LIGHT["frame"]["fg_color"])
     frame.pack(pady=30, padx=30)
@@ -140,15 +140,13 @@ def _build_main_panel(root, registry, callbacks) -> SimpleNamespace:
     registry.add(url_entry, theme="url_entry")
     url_entry.bind("<Button-3>", lambda e: callbacks.show_entry_context_menu(e, url_entry))
 
-    # Playlist checkbox — playlist support is pending, so it is created and
-    # registered (text/theme) but never gridded for now. The commented-out
-    # variable=/grid() lines below are what to enable with it; see
-    # App.url_changed() in main.py.
+    # Playlist checkbox — hidden by default; App.url_changed() (main.py) shows
+    # it when the URL is a video link that also carries a playlist id.
     frame.grid_rowconfigure(1, minsize=20)
     playlist_checkbox_var = ctk.BooleanVar()
     playlist_checkbox = ctk.CTkCheckBox(
         frame,
-        #variable=playlist_checkbox_var,
+        variable=playlist_checkbox_var,
         font=ctk.CTkFont(size=15),
         checkbox_height=20,
         checkbox_width=20,
@@ -161,8 +159,8 @@ def _build_main_panel(root, registry, callbacks) -> SimpleNamespace:
         border_color=_LIGHT["playlist_checkbox"]["border_color"],
         checkmark_color=_LIGHT["playlist_checkbox"]["checkmark_color"],
     )
-    #playlist_checkbox.grid(row=1, column=3, sticky="w", padx=10, pady=5)
-    #playlist_checkbox.grid_remove()
+    playlist_checkbox.grid(row=1, column=3, sticky="w", padx=10, pady=5)
+    playlist_checkbox.grid_remove()
     registry.add(playlist_checkbox, text="playlist_checkbox", theme="playlist_checkbox")
 
     # Queue header + clear button (row 2, hidden until something is queued)

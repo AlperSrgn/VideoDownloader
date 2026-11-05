@@ -47,6 +47,8 @@ from utils import (
     cleanup_temp_files,
     copy_icons,
     get_icon_path,
+    get_youtube_playlist_id,
+    is_playlist_page_url,
     load_button_icon,
 )
 
@@ -210,6 +212,7 @@ class App:
             clear_queue_button=ui.clear_queue_button,
             url_entry=ui.url_entry,
             option_var=ui.option_var,
+            playlist_checkbox_var=ui.playlist_checkbox_var,
             uninstall_button=ui.uninstall_button,
             check_updates_button=ui.check_updates_button,
             toast_label=ui.toast_label,
@@ -358,13 +361,15 @@ class App:
 
     # -- URL change handler ------------------------------------------------
     def url_changed(self, *_) -> None:
-        # Playlist support is pending: once enabled, a "list=" URL should
-        # show playlist_checkbox (see the commented-out grid() call in
-        # build_app_window()). Until then the checkbox stays hidden.
-        if "list=" in self.ui.url_var.get():
-            pass  # playlist_checkbox.grid()  — playlist support pending
+        # Runs on every keystroke / paste: string checks only, no network.
+        url = self.ui.url_var.get().strip()
+        # The checkbox only makes sense for "this video + a playlist" links.
+        # A bare youtube.com/playlist link always downloads the playlist.
+        if get_youtube_playlist_id(url) and not is_playlist_page_url(url):
+            self.ui.playlist_checkbox.grid()
         else:
             self.ui.playlist_checkbox.grid_remove()
+            self.ui.playlist_checkbox_var.set(False)
 
     # -- Misc UI callbacks ---------------------------------------------------
     def show_entry_context_menu(self, event, entry: ctk.CTkEntry) -> None:

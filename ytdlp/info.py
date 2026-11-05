@@ -1,11 +1,13 @@
 """
 Reading a video's metadata with `yt-dlp --dump-json`.
 
-Two flavours:
+Three flavours:
   - fetch_preview_info():             the quick one for the URL-paste preview
                                       (title / duration / thumbnail only)
   - find_info_with_access_fallback(): the full extraction a download needs,
                                       including the 'formats' list
+  - fetch_playlist():                 the list of videos of a playlist
+                                      (--flat-playlist, one request)
 
 Both go through the player clients in CLIENT_LIST (RESTRICTED_CLIENT_LIST for
 videos that need a login), and both retry with cookies and Deno when the video
@@ -21,7 +23,7 @@ from typing import Callable, Optional
 
 from core.error_classifier import DenoNotFoundError
 from ytdlp.access import run_with_access_fallback
-from ytdlp.commands import build_info_cmd
+from ytdlp.commands import PLAYLIST_MAX_ENTRIES, build_info_cmd, build_playlist_cmd
 from ytdlp.formats import FormatSelector, Selection
 from ytdlp.runner import YtDlpError, run_info_command
 
@@ -146,6 +148,52 @@ def fetch_preview_info(exe_path: str, url: str) -> dict | None:
         # Needs a login but Deno isn't installed: hide the preview. The
         # download itself tells the user what is missing.
         return None
+
+
+_UNAVAILABLE_TITLES = {"[Private video]", "[Deleted video]"}
+
+
+def fetch_playlist(exe_path: str, url: str) -> dict:
+    """Lists the videos of a playlist without opening each of them.
+
+    Returns {"title": str, "entries": [{"id", "url", "title", "duration"}],
+    "truncated": bool}. Private / deleted entries are skipped.
+
+    Raises YtDlpError if the playlist cannot be read, and DenoNotFoundError if
+    it needs a login on YouTube but Deno is not installed. Private playlists
+    use the same cookies (+ Deno) fallback as single videos.
+    """
+    def attempt(restricted: bool, errors: list):
+        try:
+            cmd = build_playlist_cmd(exe_path, url, restricted)
+            data = json.loads(run_info_command(cmd, timeout=90, label="playlist"))
+        except YtDlpError as e:
+            errors.append(e)
+            return None
+        except json.JSONDecodeError as e:
+            errors.append(YtDlpError(f"Could not parse yt-dlp output: {e}"))
+            return None
+
+        raw = [e for e in (data.get("entries") or []) if e and e.get("id")]
+        entries = [
+            {
+                "id": e["id"],
+                "url": f"https://www.youtube.com/watch?v={e['id']}",
+                "title": e.get("title") or e["id"],
+                "duration": e.get("duration"),
+            }
+            for e in raw if e.get("title") not in _UNAVAILABLE_TITLES
+        ]
+        return {
+            "title": data.get("title") or "playlist",
+            "entries": entries,
+            "truncated": len(raw) >= PLAYLIST_MAX_ENTRIES,
+        }
+
+    outcome = run_with_access_fallback(url, attempt)
+    if outcome.value is None:
+        raise YtDlpError(str(outcome.errors[-1]) if outcome.errors else "playlist fetch failed")
+    return outcome.value
 
 
 def _log_format_summary(client, formats: list) -> None:

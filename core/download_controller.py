@@ -15,17 +15,31 @@ They are attached afterwards via bind_widgets() — the same build-then-wire
 two-step main.py uses for UpdateChecker.
 """
 
+import logging
 import os
+import threading
 import webbrowser
 from tkinter import filedialog, messagebox
 
 from downloading.downloader import download_video, download_audio
+from core.error_classifier import DenoNotFoundError
 from core.quality_options import quality_label, resolve_quality_key
-from settings import save_setting
+from settings import get_appdata_path, save_setting
 from system.process_manager import set_keep_awake
 from ui.notifications import ToastNotifier
 from ui.queue_view import QueueView
-from utils import clean_playlist_url, format_save_location_display, validate_video_url
+from utils import (
+    clean_playlist_url,
+    format_duration,
+    format_save_location_display,
+    get_youtube_playlist_id,
+    is_playlist_page_url,
+    playlist_url,
+    validate_video_url,
+)
+from ytdlp import ensure_ytdlp, fetch_playlist
+
+logger = logging.getLogger(__name__)
 
 
 class DownloadController:
@@ -49,6 +63,10 @@ class DownloadController:
 
         self.queue_view = QueueView()
 
+        # True while a playlist listing is being fetched in the background
+        # (blocks a second add so two listings never run at once).
+        self._playlist_loading = False
+
         # Assigned by bind_widgets() once the real widgets exist (see the
         # module docstring). The user can't trigger any method that uses
         # them before that, so None until then is safe.
@@ -64,6 +82,7 @@ class DownloadController:
         self.clear_queue_button = None
         self.url_entry = None
         self.option_var = None
+        self.playlist_checkbox_var = None
         self.uninstall_button = None
         self.check_updates_button = None
         self.save_location_value_label = None
@@ -300,6 +319,8 @@ class DownloadController:
     # -- adding / starting downloads ------------------------------------------
 
     def add_to_queue(self) -> None:
+        if self._playlist_loading:
+            return
         raw_url = self.url_entry.get().strip()
         error_key = validate_video_url(raw_url)
         if error_key:
@@ -317,6 +338,13 @@ class DownloadController:
             )
             return
 
+        # Playlist: a bare /playlist link always, a watch?v=...&list=... link
+        # only when the "download whole playlist" checkbox is ticked.
+        list_id = get_youtube_playlist_id(raw_url)
+        if list_id and (is_playlist_page_url(raw_url) or self.playlist_checkbox_var.get()):
+            self._load_playlist(raw_url, list_id, quality_key)
+            return
+
         url = clean_playlist_url(raw_url)
         queued_item = self.queue_view.enqueue(url, quality_key)
         self.url_entry.delete(0, "end")
@@ -324,6 +352,82 @@ class DownloadController:
         self.fetch_queue_item_preview(queued_item)
 
         if self.queue_view.current_item is None:
+            self.process_next_in_queue()
+
+    # -- playlist ---------------------------------------------------------------
+
+    def _set_playlist_loading(self, loading: bool) -> None:
+        self._playlist_loading = loading
+        state = "disabled" if loading else "normal"
+        self.download_button.configure(state=state)
+        self.queue_add_button.configure(state=state)
+        if loading and self.queue_view.current_item is None:
+            self.show_progress(self.lang.get("playlist_loading_message", "Loading playlist…"))
+
+    def _load_playlist(self, raw_url: str, list_id: str, quality_key: str) -> None:
+        """Fetches the playlist's video list on a background thread (never on
+        the UI thread) and hands the result back via root.after()."""
+        self._set_playlist_loading(True)
+
+        def work():
+            result, error = None, None
+            try:
+                exe_path = ensure_ytdlp(get_appdata_path())
+                result = fetch_playlist(exe_path, playlist_url(list_id))
+            except Exception as e:
+                logger.exception("Playlist fetch failed: %s", raw_url)
+                error = e
+            self.root.after(0, lambda: self._on_playlist_loaded(raw_url, quality_key, result, error))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_playlist_loaded(self, raw_url: str, quality_key: str, result, error) -> None:
+        self._set_playlist_loading(False)
+        if self.app_state.closing:
+            return
+        lang = self.lang
+        idle = self.queue_view.current_item is None
+
+        if result is None or not result["entries"]:
+            if idle:
+                self.hide_progress()
+            if isinstance(error, DenoNotFoundError):
+                msg = lang.get(
+                    "error_deno_required",
+                    "This playlist requires Deno. Please install Deno "
+                    "(e.g. run: winget install DenoLand.Deno) and try again.",
+                )
+            elif result is not None:
+                msg = lang.get("playlist_empty_message", "No downloadable videos found in this playlist.")
+            else:
+                msg = lang.get("playlist_load_error", "The playlist could not be loaded. Check the link and your connection.")
+            messagebox.showerror(lang["error_title"], msg)
+            return
+
+        for entry in result["entries"]:
+            item = self.queue_view.enqueue(entry["url"], quality_key)
+            # No per-video preview request / thumbnail: the flat listing
+            # already gives title and duration.
+            item["preview"] = {
+                "title": entry["title"],
+                "duration": format_duration(entry["duration"]),
+                "thumb_image": None,
+            }
+
+        # Clear the entry only if the user did not type something else meanwhile.
+        if self.url_entry.get().strip() == raw_url:
+            self.url_entry.delete(0, "end")
+        self.render_queue_list()  # once, after the loop (never per item)
+
+        if result["truncated"]:
+            messagebox.showinfo(
+                lang.get("warning_title", "Info"),
+                lang.get(
+                    "playlist_truncated_message",
+                    "The playlist is very long; only the first {n} videos were added.",
+                ).replace("{n}", str(len(result["entries"]))),
+            )
+        if idle:
             self.process_next_in_queue()
 
     def process_next_in_queue(self) -> None:

@@ -3,6 +3,8 @@ Every yt-dlp command line the app builds, in one place:
 
   - build_info_cmd():      `--dump-json` for a video's metadata, either the full
                            extraction a download needs or the faster preview one
+  - build_playlist_cmd():  `--flat-playlist --dump-single-json`: the list of
+                           videos in a playlist, without opening each video
   - build_download_cmd():  one download phase (a video track, an audio track,
                            or an audio-only download)
 
@@ -16,6 +18,10 @@ from typing import Optional
 from utils import get_ffmpeg_path
 from ytdlp.access import access_args
 from ytdlp.runner import youtube_extractor_args
+
+# Upper limit of videos taken from one playlist (keeps the queue and the
+# listing request bounded).
+PLAYLIST_MAX_ENTRIES = 500
 
 
 def build_info_cmd(exe_path: str, url: str, client: Optional[str],
@@ -43,6 +49,28 @@ def build_info_cmd(exe_path: str, url: str, client: Optional[str],
         "-v",
         *access_args(restricted, url),
         *youtube_extractor_args(client, **extractor_kwargs),
+        url,
+    ]
+
+
+def build_playlist_cmd(exe_path: str, url: str, restricted: bool = False) -> list:
+    """Builds the command that lists a playlist's videos.
+
+    --flat-playlist does NOT open every video (no per-video webpage / format
+    extraction), so even a few hundred videos come back in a few seconds as a
+    single JSON object (--dump-single-json) with id/title/duration per entry.
+
+    restricted=True (private / login-needed playlist) adds the user's cookies,
+    plus Deno on YouTube (see access_args).
+    """
+    return [
+        exe_path,
+        "--flat-playlist",
+        "--dump-single-json",
+        "--yes-playlist",
+        "--playlist-end", str(PLAYLIST_MAX_ENTRIES),
+        "-v",
+        *access_args(restricted, url),
         url,
     ]
 

@@ -240,14 +240,16 @@ def format_save_location_display(path: str) -> str:
 # ---------------------------------------------------------------------------
 
 # Known YouTube page types that list many videos rather than one: search
-# results, channel pages, bare playlist pages, hashtag pages. This app only
-# supports single-video download — handing one of these to yt-dlp makes it
-# try to extract EVERY entry (full webpage + format lookup per video),
+# results, channel pages, hashtag pages. Handing one of these to yt-dlp makes
+# it try to extract EVERY entry (full webpage + format lookup per video),
 # which can take many minutes with zero incremental feedback and looks
 # exactly like the app has frozen. Checked upfront (in both the preview
 # fetch and add_to_queue) so yt-dlp is never even touched with them.
+# Real playlists (youtube.com/playlist?list=...) are NOT in this list: they
+# are handled separately (see get_youtube_playlist_id and the playlist flow
+# in DownloadController), using a fast --flat-playlist listing.
 _YOUTUBE_LISTING_URL_PATTERN = re.compile(
-    r"youtube\.com/(?:results\?|channel/|c/|@|playlist\?|hashtag/)", re.IGNORECASE
+    r"youtube\.com/(?:results\?|channel/|c/|@|hashtag/)", re.IGNORECASE
 )
 
 # Basic domain-shape check (labels separated by dots, no spaces/invalid
@@ -285,6 +287,10 @@ def validate_video_url(raw_url: str) -> str | None:
     if _YOUTUBE_LISTING_URL_PATTERN.search(raw_url):
         return "not_a_video_url_warning"
 
+    # A bare /playlist page whose list id is not usable (e.g. an RD... mix).
+    if is_playlist_page_url(raw_url) and not get_youtube_playlist_id(raw_url):
+        return "not_a_video_url_warning"
+
     return None
 
 
@@ -303,6 +309,41 @@ def clean_playlist_url(url: str) -> str:
     except Exception as e:
         logger.warning("URL cleaning failed, returning original. Error: %s", e)
         return url
+
+
+def get_youtube_playlist_id(url: str) -> str | None:
+    """A real YouTube playlist id from the URL's `list=` parameter, or None.
+
+    RD... (mix / radio) lists are treated as "no playlist": they are generated
+    on the fly and can be practically endless."""
+    try:
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower()
+        if not (host == "youtu.be" or host == "youtube.com" or host.endswith(".youtube.com")):
+            return None
+        ids = parse_qs(parsed.query).get("list")
+    except ValueError:
+        return None
+    if not ids:
+        return None
+    list_id = ids[0]
+    if not re.fullmatch(r"[\w-]{2,64}", list_id) or list_id.startswith("RD"):
+        return None
+    return list_id
+
+
+def is_playlist_page_url(url: str) -> bool:
+    """True for youtube.com/playlist?list=... (a page with no single video)."""
+    try:
+        return urlparse(url).path.rstrip("/") == "/playlist"
+    except ValueError:
+        return False
+
+
+def playlist_url(list_id: str) -> str:
+    """Normalised playlist URL, so a watch?v=...&list=... link is always
+    fetched as the playlist itself."""
+    return f"https://www.youtube.com/playlist?list={list_id}"
 
 
 def find_glob_file(pattern: str) -> str:
