@@ -148,6 +148,13 @@ class DownloadController:
     def _show_downloading_ui(self) -> None:
         """Switch the buttons and progress area to the "download in
         progress" layout."""
+        # The bottom panel is laid out with pack(), whose order is the order of
+        # the pack() calls: Cancel has to be packed BEFORE the progress bar and
+        # label to sit above them. A playlist shows the progress area while it
+        # loads (see _set_playlist_loading), i.e. before this runs, and
+        # re-packing an already packed widget does not move it. So drop the
+        # progress area first; show_progress() below adds it back underneath.
+        self.hide_progress()
         self.set_widgets_state("disabled")
         self.download_button.pack_forget()
         # Reset to the non-paused look (text, color and icon), in case the
