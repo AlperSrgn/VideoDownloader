@@ -297,6 +297,14 @@ class DownloadController:
             current_language=self.lang,
             on_remove=self.remove_from_queue,
         )
+        # Playlist rows: fetch the thumbnails of the rows that were just drawn
+        # (rows that already have one, or are being fetched, are skipped).
+        self.queue_view.ensure_thumbnails(after=self.root.after, on_done=self._on_thumbnail_ready)
+
+    def _on_thumbnail_ready(self, item_id: int, image) -> None:
+        """A playlist row's thumbnail arrived (UI thread, via root.after)."""
+        if not self.app_state.closing:
+            self.queue_view.apply_thumbnail(item_id, image)
 
     def fetch_queue_item_preview(self, item: dict) -> None:
         """Fetches preview info in the background and attaches it to the
@@ -412,6 +420,8 @@ class DownloadController:
                 "title": entry["title"],
                 "duration": format_duration(entry["duration"]),
                 "thumb_image": None,
+                # Plain HTTP image, no yt-dlp process (see QueueView.ensure_thumbnails).
+                "thumb_url": f"https://i.ytimg.com/vi/{entry['id']}/mqdefault.jpg",
             }
 
         # Clear the entry only if the user did not type something else meanwhile.

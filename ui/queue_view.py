@@ -13,6 +13,7 @@ DownloadController's job (core/download_controller.py).
 import io
 import logging
 import os
+import queue
 import threading
 import urllib.request
 
@@ -31,10 +32,24 @@ logger = logging.getLogger(__name__)
 # the rest stay in the queue and are summarised in a "+N more" line.
 MAX_VISIBLE_ROWS = 40
 
+# Lazy thumbnails for playlist rows (see QueueView.ensure_thumbnails): only the
+# drawn rows get one, fetched by a few daemon threads with a plain HTTP request.
+THUMB_WORKERS = 4
+THUMB_TIMEOUT = 10                  # seconds
+THUMB_MAX_BYTES = 2 * 1024 * 1024   # a 320x180 JPEG is ~15 KB; this is a safety cap
+
 
 class QueueView:
     def __init__(self):
         self.queue = DownloadQueue()
+
+        # Lazy thumbnail loading (playlist rows): work queue + worker threads
+        # (started on first use) and the placeholder label of each drawn row,
+        # so a finished thumbnail can be put into its row without redrawing
+        # the whole list.
+        self._thumb_queue = queue.Queue()
+        self._thumb_workers_started = False
+        self._thumb_labels = {}  # item id -> CTkLabel of the currently drawn row
 
     # -- pass-throughs to DownloadQueue --------------------------------------
 
@@ -134,6 +149,85 @@ class QueueView:
         }
         return True
 
+    # -- lazy thumbnails (playlist rows) -------------------------------------
+    # A playlist item has no per-video preview request (that was too heavy for
+    # hundreds of videos), but its preview carries "thumb_url". The thumbnails
+    # of the rows that are actually drawn are fetched here. preview["thumb_state"]
+    # is None -> "loading" -> "done" / "failed", so a row is requested only once.
+
+    def ensure_thumbnails(self, after, on_done) -> None:
+        """Starts fetching the thumbnails of the visible rows that have a
+        thumb_url but no image yet. Call it after render(), on the UI thread.
+        Each result arrives as on_done(item_id, PIL image | None) on the UI
+        thread via after(0, func) (pass root.after)."""
+        visible = []
+        if self.current_item:
+            visible.append(self.current_item)
+        visible.extend(self.items)  # same order and limit as render()
+        for item in visible[:MAX_VISIBLE_ROWS]:
+            preview = item.get("preview")
+            if (not preview or not preview.get("thumb_url")
+                    or preview.get("thumb_image") or preview.get("thumb_state")):
+                continue
+            preview["thumb_state"] = "loading"
+            self._start_thumb_workers()
+            self._thumb_queue.put((item["id"], preview["thumb_url"], after, on_done))
+
+    def _start_thumb_workers(self) -> None:
+        if self._thumb_workers_started:
+            return
+        self._thumb_workers_started = True
+        for _ in range(THUMB_WORKERS):
+            threading.Thread(target=self._thumb_worker, daemon=True).start()
+
+    def _thumb_worker(self) -> None:
+        while True:
+            item_id, url, after, on_done = self._thumb_queue.get()
+            image = None
+            try:
+                with urllib.request.urlopen(url, timeout=THUMB_TIMEOUT) as resp:
+                    data = resp.read(THUMB_MAX_BYTES)
+                image = Image.open(io.BytesIO(data))
+                image.load()  # decode here, off the UI thread
+            except Exception as e:
+                logger.debug("Queue thumbnail failed (%s): %s", url, e)
+                image = None
+            try:
+                after(0, lambda i=item_id, img=image: on_done(i, img))
+            except Exception:
+                pass  # window already destroyed (app closing)
+
+    def apply_thumbnail(self, item_id: int, image) -> bool:
+        """UI thread. Stores a fetched thumbnail on its item and puts it into
+        the item's row if that row is currently drawn. Returns False if the
+        item is gone (removed / cleared meanwhile)."""
+        target = self.find(item_id)
+        if target is None or not target.get("preview"):
+            return False
+        preview = target["preview"]
+
+        thumb_image = None
+        if image is not None:
+            try:
+                thumb_image = ctk.CTkImage(light_image=image, dark_image=image, size=(60, 34))
+            except Exception as e:
+                logger.debug("Queue thumbnail decode failed: %s", e)
+
+        label = self._thumb_labels.get(item_id)
+        label_alive = label is not None and label.winfo_exists()
+        if thumb_image is not None:
+            preview["thumb_image"] = thumb_image
+            preview["thumb_state"] = "done"
+            if label_alive:
+                label.configure(image=thumb_image)
+                label.image = thumb_image  # keep a reference so it isn't GC'd
+        else:
+            preview["thumb_state"] = "failed"
+            if label_alive:
+                label.destroy()  # no empty box for a row without a thumbnail
+            self._thumb_labels.pop(item_id, None)
+        return True
+
     # -- rendering ----------------------------------------------------------
 
     def render(self, widgets, text_color, make_icon, quality_label, current_language, on_remove) -> None:
@@ -153,6 +247,7 @@ class QueueView:
 
         for child in list_frame.winfo_children():
             child.destroy()
+        self._thumb_labels = {}  # the labels of the old rows were just destroyed
 
         total = self.total
         if not total:
@@ -191,12 +286,22 @@ class QueueView:
 
         preview = item.get("preview")
 
-        # Thumbnail — only shown once fetched; the row just starts without
-        # one and gets it added in when apply_preview()'s caller re-renders.
-        if preview and preview.get("thumb_image"):
-            thumb_label = ctk.CTkLabel(row, text="", image=preview["thumb_image"], width=60, height=34)
-            thumb_label.image = preview["thumb_image"]  # keep a reference so it isn't GC'd
+        # Thumbnail. Single videos: only shown once fetched, the row starts
+        # without one and gets it added when apply_preview()'s caller
+        # re-renders. Playlist rows (preview has "thumb_url"): an empty
+        # placeholder of the same size is drawn right away and filled in by
+        # apply_thumbnail() when the image arrives, so rows do not jump.
+        thumb_image = preview.get("thumb_image") if preview else None
+        wants_placeholder = bool(
+            preview and preview.get("thumb_url") and preview.get("thumb_state") != "failed"
+        )
+        if thumb_image is not None or wants_placeholder:
+            thumb_label = ctk.CTkLabel(row, text="", image=thumb_image, width=60, height=34)
+            if thumb_image is not None:
+                thumb_label.image = thumb_image  # keep a reference so it isn't GC'd
             thumb_label.pack(side="left", padx=(5, 8))
+            if preview.get("thumb_url"):
+                self._thumb_labels[item["id"]] = thumb_label
 
         text_frame = ctk.CTkFrame(row, fg_color="transparent")
         text_frame.pack(side="left", fill="x", expand=True)
