@@ -27,3 +27,6 @@ Name: "{userdesktop}\Video Downloader"; Filename: "{app}\main.exe"; Tasks: deskt
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 [Run]
 Filename: "{app}\main.exe"; Description: "{cm:LaunchProgram,Video Downloader}"; Flags: nowait postinstall skipifsilent
+[UninstallDelete]
+; Settings, icons, yt-dlp.exe and cookies.txt (see get_appdata_path() in settings.py)
+Type: filesandordirs; Name: "{localappdata}\VideoDownloader"
