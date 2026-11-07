@@ -22,6 +22,7 @@ A simple and fast **Windows desktop application** for downloading videos and aud
 - 🎵 Download video audio as **MP3**
 - 📁 **Choose your download location** — select any folder from the sidebar; the app remembers it between sessions
 - 📥 **Download queue** — add multiple URLs with different quality/format settings and download them sequentially
+- 📋 **Playlist support** — add a whole playlist to the queue at once, or just the single video from a playlist link
 - 🌙 **Dark mode**
 - 🔔 **System notifications** with notification preview
 - 🎯 **Automatically selects the best available format** according to the selected quality
