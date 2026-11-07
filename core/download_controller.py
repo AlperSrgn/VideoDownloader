@@ -372,12 +372,26 @@ class DownloadController:
     # -- playlist ---------------------------------------------------------------
 
     def _set_playlist_loading(self, loading: bool) -> None:
+        """While a playlist is being fetched: if nothing is downloading, the
+        Download button is hidden and only the loading message is shown (no
+        progress bar, there is nothing to measure); if a download is running,
+        its progress area is left alone and only "Add to Queue" is disabled.
+        Called with False it undoes this; on success the caller switches to the
+        downloading layout right after (see _on_playlist_loaded)."""
         self._playlist_loading = loading
-        state = "disabled" if loading else "normal"
-        self.download_button.configure(state=state)
-        self.queue_add_button.configure(state=state)
-        if loading and self.queue_view.current_item is None:
-            self.show_progress(self.lang.get("playlist_loading_message", "Loading playlist…"))
+        idle = self.queue_view.current_item is None
+        self.queue_add_button.configure(state="disabled" if loading else "normal")
+        if loading:
+            if idle:
+                self.download_button.pack_forget()
+                self.progress_label.configure(
+                    text=self.lang.get("playlist_loading_message", "Loading playlist…")
+                )
+                self.progress_label.pack()
+        elif idle:
+            self.hide_progress()
+            self.download_button.pack(side="left", padx=5)
+            self.download_button.configure(state="normal")
 
     def _load_playlist(self, raw_url: str, list_id: str, quality_key: str) -> None:
         """Fetches the playlist's video list on a background thread (never on
@@ -404,8 +418,6 @@ class DownloadController:
         idle = self.queue_view.current_item is None
 
         if result is None or not result["entries"]:
-            if idle:
-                self.hide_progress()
             if isinstance(error, DenoNotFoundError):
                 msg = lang.get(
                     "error_deno_required",
